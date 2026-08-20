@@ -1,0 +1,14 @@
+# Words clippy's `doc_markdown` lint must not read as unbackticked code
+# items. These are product and organisation names that appear throughout the
+# documentation as prose; backticking them would be wrong.
+doc-valid-idents = [
+  "ChemoCare",
+  "BusWatch",
+  "SoapUI",
+  "OpenTelemetry",
+  "PostgreSQL",
+  "XPath",
+  "XPaths",
+  "NCName",
+  "..",
+]

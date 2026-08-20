@@ -1,0 +1,21 @@
+[package]
+name = "ihb-health"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "The Integration Hub's TCP health-check listener."
+
+[dependencies]
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "time", "macros"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-util", "time"] }
+
+[lints]
+workspace = true

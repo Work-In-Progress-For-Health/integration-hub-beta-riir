@@ -1,0 +1,37 @@
+[package]
+name = "ihb-bus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "Azure Service Bus clients for the Integration Hub: senders, receivers, sessions, retry, and the message-store protocol."
+
+[features]
+default = []
+# A fake bus, so a service's integration tests need no broker.
+# See spec/03-message-bus.md §7.1.
+testing = []
+# Tests that need the local Service Bus emulator running.
+# See spec/03-message-bus.md §7.3.
+emulator = []
+
+[dependencies]
+azservicebus.workspace = true
+fe2o3-amqp-types = "0.14"
+ihb-config.workspace = true
+ihb-runtime.workspace = true
+ihb-telemetry.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util", "time"] }
+
+[lints]
+workspace = true

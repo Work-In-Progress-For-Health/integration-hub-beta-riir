@@ -1,0 +1,63 @@
+# Fuzz targets. Deliberately NOT a workspace member: `cargo-fuzz` builds with
+# its own flags and a nightly toolchain, and pulling that into the workspace
+# would make `cargo build` at the root need nightly too.
+#
+# See spec/17-testing-and-quality.md §10.
+
+[package]
+name = "ihb-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+ihb-config = { path = "../crates/ihb-config" }
+ihb-fields = { path = "../crates/ihb-fields" }
+ihb-telemetry = { path = "../crates/ihb-telemetry" }
+ihb-validation = { path = "../crates/ihb-validation" }
+hl7-2 = { path = "../../../../git/hl7-rust/hl7-rust/hl7-2" }
+
+[workspace]
+# Own workspace, so the root's members and lints do not apply.
+
+[profile.release]
+debug = true
+
+[[bin]]
+name = "redact"
+path = "fuzz_targets/redact.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "xml_normalise"
+path = "fuzz_targets/xml_normalise.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "validate_flow"
+path = "fuzz_targets/validate_flow.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config"
+path = "fuzz_targets/config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fields"
+path = "fuzz_targets/fields.rs"
+test = false
+doc = false
+bench = false

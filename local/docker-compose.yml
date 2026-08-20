@@ -1,0 +1,69 @@
+# Local development stack, run with Podman.
+#
+#   podman compose -f local/docker-compose.yml --profile <name> up -d
+#
+# See spec/18-deployment.md §5. The filename stays `docker-compose.yml`
+# because that is what every compose tool looks for; `podman compose` is a
+# thin wrapper that runs the installed compose provider against the Podman
+# socket.
+#
+# Profiles arrive as their services do; see tasks.md P9.2. Today this is the
+# infrastructure the tests need: the Service Bus emulator and its backing
+# store, plus SQL Server for the message store and replay job.
+
+name: integration-hub-rust
+
+services:
+  sb-emulator:
+    container_name: "ihb-rs-sb-emulator"
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    volumes:
+      - "./ServiceBusEmulatorConfig.json:/ServiceBus_Emulator/ConfigFiles/Config.json:z"
+    ports:
+      - "5672:5672"
+    restart: on-failure
+    environment:
+      SQL_SERVER: sqledge
+      ACCEPT_EULA: "Y"
+    env_file:
+      - ./.secrets
+    depends_on:
+      - sqledge
+    networks:
+      integration-hub:
+        aliases:
+          - "sb-emulator"
+
+  sqledge:
+    container_name: "ihb-rs-sqledge"
+    image: "mcr.microsoft.com/azure-sql-edge:latest"
+    restart: on-failure
+    environment:
+      ACCEPT_EULA: "Y"
+    env_file:
+      - ./.secrets
+    networks:
+      integration-hub:
+        aliases:
+          - "sqledge"
+
+  sqlserver:
+    container_name: "ihb-rs-sqlserver"
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    profiles: ["sql"]
+    restart: on-failure
+    ports:
+      - "1433:1433"
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Express
+    env_file:
+      - ./.secrets
+    networks:
+      integration-hub:
+        aliases:
+          - "sqlserver"
+
+networks:
+  integration-hub:
+    driver: bridge

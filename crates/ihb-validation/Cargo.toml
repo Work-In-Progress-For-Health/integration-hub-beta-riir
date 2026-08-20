@@ -1,0 +1,29 @@
+[package]
+name = "ihb-validation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "HL7 v2 validation and ER7 <-> v2.xml conversion for the Integration Hub's flows."
+
+[dependencies]
+hl7-2.workspace = true
+hl7-2-from-er7-into-xml.workspace = true
+hl7-2-from-xml-into-er7.workspace = true
+thiserror.workspace = true
+uppsala.workspace = true
+xsd-schema.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "validation"
+harness = false

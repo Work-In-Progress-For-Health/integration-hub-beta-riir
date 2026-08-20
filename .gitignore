@@ -1,0 +1,7 @@
+/target
+**/*.rs.bk
+.DS_Store
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/coverage

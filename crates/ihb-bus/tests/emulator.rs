@@ -1,0 +1,378 @@
+//! Against a real broker.
+//!
+//! Implements `spec/03-message-bus.md` §7.3.
+//!
+//! The fake bus of §7.1 covers what services do with messages. It cannot
+//! cover what Service Bus does with them — sessions, lock renewal, delivery
+//! counts, subscriptions — and those are where the estate's assumptions
+//! live. These tests need a broker.
+//!
+//! # Running them
+//!
+//! ```sh
+//! podman compose -f local/docker-compose.yml up -d
+//! cargo test -p ihb-bus --features emulator --test emulator
+//! ```
+//!
+//! Behind the `emulator` feature so a normal `cargo test` does not fail on a
+//! machine with no broker. They **do** run in CI, where one is available
+//! (`spec/17-testing-and-quality.md` §9.2) — a test that only ever runs
+//! locally is a test that stops running.
+
+#![cfg(feature = "emulator")]
+// An integration test is its own crate, so the crate-level allow in
+// `src/lib.rs` does not reach it. Asserting is what this file is for.
+// See spec/17-testing-and-quality.md §2.3.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+use std::time::Duration;
+
+use ihb_bus::message::{Outcome, Outgoing};
+use ihb_bus::metadata::Tracking;
+use ihb_bus::{Endpoint, LiveBus, LiveReceiver};
+
+/// The emulator's own connection string, as it prints on startup.
+const EMULATOR: &str = "Endpoint=sb://127.0.0.1;\
+     SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;\
+     UseDevelopmentEmulator=true;";
+
+/// A session-enabled queue from `local/ServiceBusEmulatorConfig.json`.
+const SESSION_QUEUE: &str = "local-inthub-phw-transformer-ingress";
+
+/// A queue with no session (`spec/01-architecture.md` §4.1). Only this and
+/// `local-inthub-mpi-mock-receiver` are.
+const PLAIN_QUEUE: &str = "local-inthub-messagestore";
+
+/// The MPI outbound topic.
+const TOPIC: &str = "mpihl7input";
+
+/// The subscription on [`TOPIC`].
+const SUBSCRIPTION: &str = "mpihl7input-test-subscription";
+
+/// The PHW flow's session.
+const SESSION: &str = "phw-to-mpi";
+
+/// Connect to the emulator.
+async fn bus() -> LiveBus {
+    let endpoint = Endpoint::from_config(Some(EMULATOR), None).expect("the endpoint parses");
+    assert!(
+        endpoint.is_plaintext(),
+        "the emulator must be reached over plaintext, and only the emulator"
+    );
+
+    LiveBus::connect(&endpoint)
+        .await
+        .expect("the emulator is running; see this file's documentation")
+}
+
+/// Accept a session, waiting out a lock held by a previous receiver.
+///
+/// `spec/03-message-bus.md` §8.1.3: a session lock is not released the
+/// instant `dispose` returns, so a test that reuses a session has to wait —
+/// which is exactly what a service does on reconnect, and why that error is
+/// classified retryable.
+async fn accept_session(bus: &LiveBus, queue: &str, session: &str) -> LiveReceiver {
+    for attempt in 0..40 {
+        match bus.session_receiver(queue, session).await {
+            Ok(receiver) => return receiver,
+            Err(error) if attempt < 39 => {
+                assert!(
+                    error.is_retryable(),
+                    "a held session must be classified retryable: {error}"
+                );
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            Err(error) => panic!("the session never became available: {error}"),
+        }
+    }
+    unreachable!()
+}
+
+/// Settle everything, so a run leaves the queue as it found it.
+async fn drain(receiver: &LiveReceiver) {
+    loop {
+        let received = receiver.receive(50).await.unwrap();
+        if received.is_empty() {
+            break;
+        }
+        for message in &received {
+            receiver.settle(message, Outcome::Accepted).await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_message_survives_a_session_round_trip_with_its_metadata() {
+    // spec/03-message-bus.md §4 — the correlation id crossing a hop
+    // unchanged is what the whole audit trail rests on.
+    let bus = bus().await;
+
+    let tracking = Tracking {
+        correlation_id: "emulator-round-trip".into(),
+        received_at: "2026-08-20T09:15:00+00:00".into(),
+        source_system: "252".into(),
+        workflow_id: "phw-to-mpi".into(),
+    };
+
+    let sender = bus.sender(SESSION_QUEUE).await.unwrap();
+    sender
+        .send(
+            Outgoing::new("MSH|^~\\&|252|252|100|100|20260729||ADT^A28|RT1|P|2.5")
+                .with_message_id("RT1")
+                .with_session(SESSION)
+                .with_properties(tracking.to_properties()),
+        )
+        .await
+        .unwrap();
+
+    let receiver = accept_session(&bus, SESSION_QUEUE, SESSION).await;
+    let received = receiver.receive(10).await.unwrap();
+
+    let message = received
+        .iter()
+        .find(|m| m.message_id.as_deref() == Some("RT1"))
+        .expect("the message came back");
+
+    assert_eq!(message.properties["CorrelationId"], "emulator-round-trip");
+    assert_eq!(message.properties["WorkflowID"], "phw-to-mpi");
+    assert_eq!(message.session_id.as_deref(), Some(SESSION));
+
+    for message in &received {
+        receiver.settle(message, Outcome::Accepted).await.unwrap();
+    }
+    receiver.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn abandoning_redelivers_with_a_raised_delivery_count() {
+    // spec/10-senders.md §2.2 depends on this: the store event is emitted on
+    // the first attempt only, so a retried message is not stored twice.
+    let bus = bus().await;
+
+    let sender = bus.sender(PLAIN_QUEUE).await.unwrap();
+    sender
+        .send(Outgoing::new("abandon-me").with_message_id("AB1"))
+        .await
+        .unwrap();
+
+    let receiver = bus.queue_receiver(PLAIN_QUEUE).await.unwrap();
+
+    let first = receiver.receive(10).await.unwrap();
+    let target = first
+        .iter()
+        .find(|m| m.message_id.as_deref() == Some("AB1"))
+        .expect("received once");
+    assert!(
+        target.is_first_delivery(),
+        "delivery_count {:?}",
+        target.delivery_count
+    );
+
+    for message in &first {
+        let outcome = if message.message_id.as_deref() == Some("AB1") {
+            Outcome::Deferred
+        } else {
+            Outcome::Accepted
+        };
+        receiver.settle(message, outcome).await.unwrap();
+    }
+
+    let second = receiver.receive(10).await.unwrap();
+    let again = second
+        .iter()
+        .find(|m| m.message_id.as_deref() == Some("AB1"))
+        .expect("redelivered after abandon");
+
+    assert!(
+        !again.is_first_delivery(),
+        "a redelivered message must not look like a first attempt: {:?}",
+        again.delivery_count
+    );
+
+    for message in &second {
+        receiver.settle(message, Outcome::Accepted).await.unwrap();
+    }
+    receiver.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_topic_reaches_its_subscription() {
+    // spec/01-architecture.md §2.1 — the MPI outbound flow.
+    let bus = bus().await;
+
+    let sender = bus.sender(TOPIC).await.unwrap();
+    sender
+        .send(
+            Outgoing::new("to-the-topic")
+                .with_message_id("TOP1")
+                .with_session("mpi-outbound"),
+        )
+        .await
+        .unwrap();
+
+    let receiver = bus
+        .subscription_receiver(TOPIC, SUBSCRIPTION, "mpi-outbound")
+        .await
+        .expect("the subscription accepts a session");
+
+    assert_eq!(
+        receiver.entity(),
+        format!("{TOPIC}/{SUBSCRIPTION}"),
+        "spec/03-message-bus.md §2.2 — a subscription names itself this way"
+    );
+
+    let received = receiver.receive(10).await.unwrap();
+    assert!(
+        received
+            .iter()
+            .any(|m| m.message_id.as_deref() == Some("TOP1"))
+    );
+
+    for message in &received {
+        receiver.settle(message, Outcome::Accepted).await.unwrap();
+    }
+    receiver.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_session_lock_is_renewed_while_a_batch_is_held() {
+    // spec/03-message-bus.md §5.1.3 and §8.1.2 — the renewal `azservicebus`
+    // does not provide. This holds the session past a renewal interval and
+    // then settles, which is the thing that would fail if renewal were not
+    // happening.
+    let bus = bus().await;
+
+    let sender = bus.sender(SESSION_QUEUE).await.unwrap();
+    sender
+        .send(
+            Outgoing::new("held-a-while")
+                .with_message_id("HOLD1")
+                .with_session(SESSION),
+        )
+        .await
+        .unwrap();
+
+    let receiver = accept_session(&bus, SESSION_QUEUE, SESSION).await;
+    let received = receiver.receive(10).await.unwrap();
+    assert!(!received.is_empty());
+
+    let renewer = receiver
+        .renew_session_lock()
+        .expect("a session receiver has a lock to renew");
+
+    // Longer than one renewal interval, so at least one fires while the
+    // "handler" is running. The handler holds no lock, which is what lets
+    // renewal happen at all.
+    tokio::time::sleep(Duration::from_secs(25)).await;
+
+    // spec/03-message-bus.md §5.1.4 — stop the renewer BEFORE settling and
+    // closing, so no renewal is in flight against a receiver being torn
+    // down. `close` refuses if the renewer is still holding the receiver,
+    // which makes the ordering enforced rather than remembered.
+    let ended = renewer.stop().await;
+    assert!(
+        ihb_bus::live::renewal_was_clean(ended),
+        "renewal ended badly: {ended:?}"
+    );
+
+    for message in &received {
+        receiver
+            .settle(message, Outcome::Accepted)
+            .await
+            .expect("the session lock was still held, so settling works");
+    }
+    receiver.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn closing_while_the_renewer_still_holds_the_receiver_is_refused() {
+    // spec/03-message-bus.md §5.1.4, enforced rather than documented: the
+    // ordering the Python spent a nine-line comment explaining is a type
+    // error here.
+    let bus = bus().await;
+    let receiver = accept_session(&bus, SESSION_QUEUE, SESSION).await;
+
+    let renewer = receiver.renew_session_lock().unwrap();
+
+    let error = receiver
+        .close()
+        .await
+        .expect_err("closing must be refused while the renewer holds the receiver");
+    assert!(error.to_string().contains("stop the lock renewer first"));
+
+    renewer.stop().await;
+}
+
+#[tokio::test]
+async fn a_batch_send_delivers_every_message() {
+    // spec/03-message-bus.md §3.3 — batching with auto-split.
+    let bus = bus().await;
+
+    let receiver = bus.queue_receiver(PLAIN_QUEUE).await.unwrap();
+    drain(&receiver).await;
+
+    let sender = bus.sender(PLAIN_QUEUE).await.unwrap();
+    let messages: Vec<Outgoing> = (0..25)
+        .map(|i| Outgoing::new(format!("batch-{i}")).with_message_id(format!("B{i}")))
+        .collect();
+
+    assert_eq!(sender.send_batch(messages).await.unwrap(), 25);
+
+    let mut seen = 0;
+    for _ in 0..5 {
+        let received = receiver.receive(25).await.unwrap();
+        if received.is_empty() {
+            break;
+        }
+        seen += received.len();
+        for message in &received {
+            receiver.settle(message, Outcome::Accepted).await.unwrap();
+        }
+        if seen >= 25 {
+            break;
+        }
+    }
+
+    assert_eq!(seen, 25, "every batched message came back");
+    receiver.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn an_empty_queue_returns_nothing_rather_than_failing() {
+    // spec/03-message-bus.md §5.1.2 — an empty result is not an error, and a
+    // receive loop depends on that being quiet.
+    //
+    // Against a non-session queue: only `local-inthub-messagestore` and
+    // `local-inthub-mpi-mock-receiver` are, per
+    // `local/ServiceBusEmulatorConfig.json`.
+    let bus = bus().await;
+    let receiver = bus
+        .queue_receiver("local-inthub-mpi-mock-receiver")
+        .await
+        .unwrap();
+
+    drain(&receiver).await;
+
+    assert!(receiver.receive(10).await.unwrap().is_empty());
+    receiver.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_non_session_receiver_on_a_session_queue_is_refused() {
+    // Every pipeline queue requires a session
+    // (`spec/01-architecture.md` §2.3.1), so reaching one without a session
+    // id is a configuration error. The broker refuses it outright, and this
+    // pins that it surfaces as a clear failure rather than an empty receive
+    // that would look like an idle queue.
+    let bus = bus().await;
+
+    let error = bus
+        .queue_receiver(SESSION_QUEUE)
+        .await
+        .expect_err("a session-required queue refuses a sessionless receiver");
+
+    assert!(
+        error.to_string().contains("requires sessions"),
+        "the reason should name the cause: {error}"
+    );
+}

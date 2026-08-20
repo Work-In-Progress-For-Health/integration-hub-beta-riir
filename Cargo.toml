@@ -1,0 +1,162 @@
+# Integration Hub Beta — Rust workspace.
+#
+# One workspace, one lockfile, one target directory. Every dependency is
+# declared once here and referenced by members as `dep.workspace = true`, so
+# a version bump is one edit and two crates can never disagree about a
+# version. See spec/17-testing-and-quality.md §8.
+
+[workspace]
+resolver = "3"
+# Members are added as their phase begins; see tasks.md.
+members = [
+  "xtask",
+  "crates/ihb-config",
+  "crates/ihb-health",
+  "crates/ihb-telemetry",
+  "crates/ihb-runtime",
+  "crates/ihb-fields",
+  "crates/ihb-validation",
+  "crates/ihb-bus",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# The MSRV is current stable minus three. See
+# spec/rust-msrv-n-minus-3.md; it is recorded here and nowhere else,
+# and every member inherits it with `rust-version.workspace = true`.
+rust-version = "1.95"
+license = "MIT"
+repository = "https://github.com/DHCW-Digital-Health-and-Care-Wales/Integration-Hub-Beta"
+authors = ["DHCW Integration Hub team"]
+publish = false
+
+# ---------------------------------------------------------------------------
+# The HL7 crates. These are the reason this rewrite is tractable: MLLP
+# framing, SOAP envelopes, the v2 dictionary, and ER7 <-> v2.xml conversion
+# are all solved problems here rather than things to reimplement.
+#
+# They are path dependencies so a fix upstream is picked up immediately, with
+# a version alongside so publishing later is a one-line change per crate.
+# See plan.md §6.
+# ---------------------------------------------------------------------------
+
+[workspace.dependencies.er7]
+version = "0.1"
+path = "../../../git/er7-rust/er7-rust/er7"
+
+[workspace.dependencies.er7-redact]
+version = "0.1"
+path = "../../../git/er7-rust/er7-rust/er7-redact"
+
+[workspace.dependencies.hl7-2]
+version = "0.2"
+path = "../../../git/hl7-rust/hl7-rust/hl7-2"
+
+[workspace.dependencies.hl7-2-mllp]
+version = "0.1"
+path = "../../../git/hl7-rust/hl7-rust/hl7-2-mllp"
+
+[workspace.dependencies.hl7-2-soap]
+version = "0.1"
+path = "../../../git/hl7-rust/hl7-rust/hl7-2-soap"
+
+[workspace.dependencies.hl7-2-from-er7-into-xml]
+version = "0.5"
+path = "../../../git/hl7-rust/hl7-rust/hl7-2-from-er7-into-xml"
+
+[workspace.dependencies.hl7-2-from-xml-into-er7]
+version = "0.5"
+path = "../../../git/hl7-rust/hl7-rust/hl7-2-from-xml-into-er7"
+
+[workspace.dependencies.hl7-2-from-xsd-into-json-dictionary]
+version = "0.1"
+path = "../../../git/hl7-rust/hl7-rust/hl7-2-from-xsd-into-json-dictionary"
+
+# ---------------------------------------------------------------------------
+# Our own crates.
+# ---------------------------------------------------------------------------
+
+[workspace.dependencies]
+ihb-config = { version = "0.1", path = "crates/ihb-config" }
+ihb-health = { version = "0.1", path = "crates/ihb-health" }
+ihb-telemetry = { version = "0.1", path = "crates/ihb-telemetry" }
+ihb-runtime = { version = "0.1", path = "crates/ihb-runtime" }
+ihb-fields = { version = "0.1", path = "crates/ihb-fields" }
+ihb-validation = { version = "0.1", path = "crates/ihb-validation" }
+ihb-bus = { version = "0.1", path = "crates/ihb-bus" }
+
+# --- runtime ---------------------------------------------------------------
+tokio = { version = "1", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
+futures-util = { version = "0.3", default-features = false }
+
+# --- errors ----------------------------------------------------------------
+thiserror = "2"
+anyhow = "1"
+
+# --- observability ---------------------------------------------------------
+tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "env-filter", "smallvec", "ansi"] }
+opentelemetry = { version = "0.27", default-features = false, features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.27", default-features = false, features = ["trace", "metrics", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.27", default-features = false, features = ["trace", "metrics", "grpc-tonic"] }
+
+# --- Azure -----------------------------------------------------------------
+# `rustls` because spec/17 §8.2 forbids openssl; `unsecured` because the
+# local Service Bus emulator speaks plaintext AMQP and the crate ignores
+# `UseDevelopmentEmulator`. See spec/03-message-bus.md §8.1.1.
+azservicebus = { version = "0.25", default-features = false, features = ["rustls", "unsecured"] }
+
+# --- XSD validation --------------------------------------------------------
+# Two independent XML Schema validators, run side by side and compared. See
+# spec/06-validation.md §9 for why there are two rather than one.
+uppsala = "0.9"
+xsd-schema = "0.1"
+
+# --- data ------------------------------------------------------------------
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+time = { version = "0.3", default-features = false, features = ["std", "formatting", "parsing", "macros"] }
+uuid = { version = "1", default-features = false, features = ["v4", "std"] }
+
+# --- test support ----------------------------------------------------------
+tokio-test = "0.4"
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[workspace.lints.rust]
+# Everything is documented, public or not: the Python's own comments carry
+# hard-won operational detail, and that detail has to survive the port.
+missing_docs = "warn"
+# There is no FFI in this workspace and there is not going to be.
+unsafe_code = "forbid"
+unreachable_pub = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+missing_docs_in_private_items = "warn"
+# Warnings rather than denials so tests can use them freely. In non-test
+# code every `#[allow]` carries a comment saying why, and CI's `-D warnings`
+# means an unjustified one fails the build. See spec/17 §2.3.
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "deny"
+dbg_macro = "deny"
+# This workspace is not published; a missing `repository` key on a member is
+# not worth a build failure.
+cargo_common_metadata = "allow"
+# Path dependencies to the HL7 crates carry a version alongside, which this
+# lint reads as a publish hazard. It is not: see the note above.
+multiple_crate_versions = "allow"
+
+[profile.release]
+# A panic in a clinical message path should stop the container, not unwind
+# into a half-processed state that acknowledges what it did not deliver.
+panic = "abort"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
