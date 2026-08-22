@@ -76,6 +76,6 @@ pub use error::ValidationError;
 pub use flow::Flow;
 pub use structure::{Resolved, TriggerMapping, default_trigger_mapping};
 pub use validate::{
-    SUPPORTED_VERSIONS, ValidationResult, validate_and_convert, validate_and_convert_parsed,
-    validate_flow, validate_standard, validate_standard_parsed,
+    SUPPORTED_VERSIONS, ValidationResult, parse, parse_for_flow, validate_and_convert,
+    validate_and_convert_parsed, validate_flow, validate_standard, validate_standard_parsed,
 };

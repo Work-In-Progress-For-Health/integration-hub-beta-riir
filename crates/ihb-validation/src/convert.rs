@@ -131,8 +131,20 @@ pub fn er7_to_xml(er7: &str) -> Result<String, ValidationError> {
 /// # Ok(())
 /// # }
 /// ```
+///
+/// # Namespace prefixes
+///
+/// Prefixed documents (`<ns0:MSH>`) convert as readily as ones using a
+/// default namespace. That is worth stating because it was not always true:
+/// `hl7-2-from-xml-into-er7` 0.5 matched element names verbatim and failed
+/// a prefixed document with `MissingMsh`, which this module worked around
+/// by rewriting every tag. 0.6 matches on local name and the workaround is
+/// gone. `spec/06-validation.md` §5.8.1 has the history; the test below is
+/// what keeps it fixed, since the real LIMS payload is `ns0:`-prefixed and
+/// a regression upstream would take the whole SOAP flow down.
+///
 pub fn xml_to_er7(xml: &str) -> Result<String, ValidationError> {
-    let normalised = drop_empty_elements_repeatedly(&strip_namespace_prefixes(xml));
+    let normalised = drop_empty_elements_repeatedly(xml);
     hl7_2_from_xml_into_er7::convert(&normalised).map_err(ValidationError::xml)
 }
 
@@ -232,98 +244,6 @@ fn element_name(tag: &str) -> Option<&str> {
     inner.split_whitespace().next().filter(|n| !n.is_empty())
 }
 
-/// Rewrite `<ns0:PID.3>` as `<PID.3>`, and drop the `xmlns:` declarations
-/// that went with it.
-///
-/// **A workaround, not a design.** `hl7-2-from-xml-into-er7` reads an
-/// element's name verbatim, so it finds no `MSH` in a document whose
-/// elements are namespace-*prefixed* and fails with `MissingMsh`. A default
-/// namespace (`xmlns="urn:hl7-org:v2xml"`) works; `ns0:`, `hl7:` and any
-/// other prefix do not.
-///
-/// That matters here because the real LIMS payload is prefixed — see
-/// `local/sample_messages/lims-to-mpi.sample.xml`, which uses `ns0:` — so
-/// the SOAP ingress path would reject every message without this. The proper
-/// fix is upstream, in the XML reader those crates share, matching on local
-/// name the way `hl7-2-soap` already does. This is what keeps the flow
-/// working until then, and it is deliberately narrow: only element names in
-/// tags are touched, and text content is never rewritten.
-///
-/// See `spec/06-validation.md` §5.8.
-fn strip_namespace_prefixes(xml: &str) -> String {
-    let mut out = String::with_capacity(xml.len());
-    let mut rest = xml;
-
-    while let Some(open) = rest.find('<') {
-        out.push_str(&rest[..open]);
-        rest = &rest[open..];
-
-        let Some(close) = rest.find('>') else {
-            // An unterminated tag is the reader's problem to report.
-            out.push_str(rest);
-            return out;
-        };
-
-        out.push_str(&rewrite_tag(&rest[..=close]));
-        rest = &rest[close + 1..];
-    }
-
-    out.push_str(rest);
-    out
-}
-
-/// Strip the prefix from one tag's element name and drop its `xmlns:`
-/// declarations.
-///
-/// Processing instructions, comments and doctypes pass through untouched:
-/// they carry no element name to rewrite.
-fn rewrite_tag(tag: &str) -> String {
-    let inner = tag.trim_start_matches('<').trim_end_matches('>');
-    if inner.starts_with('?') || inner.starts_with('!') {
-        return tag.to_string();
-    }
-
-    let (closing, inner) = inner
-        .strip_prefix('/')
-        .map_or((false, inner), |rest| (true, rest));
-
-    let self_closing = inner.ends_with('/');
-    let inner = inner.trim_end_matches('/');
-
-    let mut parts = inner.split_whitespace();
-    let Some(name) = parts.next() else {
-        return tag.to_string();
-    };
-
-    let mut rewritten = String::from("<");
-    if closing {
-        rewritten.push('/');
-    }
-    rewritten.push_str(local_name(name));
-
-    for attribute in parts {
-        // An `xmlns:` declaration names a prefix nothing uses any more. A
-        // default `xmlns=` is harmless and is kept, so the document still
-        // says what it is.
-        if attribute.starts_with("xmlns:") {
-            continue;
-        }
-        rewritten.push(' ');
-        rewritten.push_str(attribute);
-    }
-
-    if self_closing {
-        rewritten.push('/');
-    }
-    rewritten.push('>');
-    rewritten
-}
-
-/// The part of a qualified name after the colon.
-fn local_name(name: &str) -> &str {
-    name.rsplit(':').next().unwrap_or(name)
-}
-
 /// Write a structure identifier into `MSH-9.3` when the message lacks one.
 ///
 /// The conversion names its root element from `MSH-9`, so a message that did
@@ -354,6 +274,33 @@ fn with_structure(er7: &str, override_structure: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// `spec/06-validation.md` §5.8.1 — was a defect, is now a guarantee.
+    ///
+    /// The real LIMS payload is `ns0:`-prefixed. `hl7-2-from-xml-into-er7`
+    /// 0.5 could not read it and this module rewrote every tag to cope; 0.6
+    /// reads it directly. This test is what stands between an upstream
+    /// regression and a silently dead SOAP flow, so it asserts on the
+    /// prefixed form specifically rather than on conversion in general.
+    #[test]
+    fn a_namespace_prefixed_document_needs_no_help() {
+        let xml = concat!(
+            r#"<?xml version="1.0"?>"#,
+            r#"<ns0:ADT_A05 xmlns:ns0="urn:hl7-org:v2xml">"#,
+            r#"<ns0:MSH><ns0:MSH.1>|</ns0:MSH.1><ns0:MSH.2>^~\&amp;</ns0:MSH.2>"#,
+            r#"<ns0:MSH.9><ns0:MSG.1>ADT</ns0:MSG.1><ns0:MSG.2>A31</ns0:MSG.2></ns0:MSH.9>"#,
+            r#"<ns0:MSH.10>M1</ns0:MSH.10>"#,
+            r#"<ns0:MSH.12><ns0:VID.1>2.5</ns0:VID.1></ns0:MSH.12></ns0:MSH>"#,
+            r#"<ns0:PID><ns0:PID.5><ns0:XPN.1><ns0:FN.1>SURNAME</ns0:FN.1>"#,
+            r#"</ns0:XPN.1></ns0:PID.5></ns0:PID></ns0:ADT_A05>"#,
+        );
+
+        let er7 = xml_to_er7(xml).expect("a prefixed document converts");
+
+        assert!(er7.starts_with("MSH|^~\\&"), "{er7}");
+        assert!(er7.contains("ADT^A31"), "{er7}");
+        assert!(er7.contains("SURNAME"), "{er7}");
+    }
     use super::*;
 
     /// A ChemoCare message: `ADT^A28` with no `MSH-9.3`, which is the case
