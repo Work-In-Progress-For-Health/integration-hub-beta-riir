@@ -112,6 +112,32 @@ already carries `docs/PODMAN_COMPOSE_SETUP.md` and
 `docker compose` is recorded there as a defect that made
 `just start phw-to-mpi` fail outright. This workspace does not repeat it.
 
+### §5.3 SQL locally is Azure SQL Edge, not SQL Server
+
+§5.3.1 The `sqledge` service is the database for local development, and it
+publishes 1433. `ihb-sql`'s tests, and those of the two persistence
+services, connect to it.
+
+§5.3.2 **`mcr.microsoft.com/mssql/server` does not run on Apple Silicon.**
+Microsoft ships no arm64 image; under emulation the container segfaults
+during start-up (`launch_sqlservr.sh: Segmentation fault (core dumped)`) and
+restarts forever. `mcr.microsoft.com/azure-sql-edge` is arm64-native and is
+what the stack uses.
+
+§5.3.3 The `sqlserver` service behind the `sql` profile is kept for an
+amd64 host, where it is the closer match to Azure SQL. On arm64 it is not
+usable and `sqledge` is the only option.
+
+§5.3.4 Edge is a subset of SQL Server, and everything the persistence
+services use — `datetime2`, `NVARCHAR(MAX)`, identities, explicit
+transactions, `READPAST`, `SCOPE_IDENTITY` — behaves the same on both. The
+schema in `local/sql/schema.sql` applies unmodified to either.
+
+§5.3.5 The schema is applied by the **tests**, not by hand or by an entry
+point: the Edge image ships no `sqlcmd`, and a setup step a developer has to
+remember is a setup step that is sometimes skipped. Every statement guards
+itself, so a run does not need a clean container.
+
 §5.0.3 Compose files stay in Compose format and keep the filename
 `docker-compose.yml`, because that is what every tool looks for and renaming
 it buys nothing. `podman compose` is a thin wrapper that runs whichever
