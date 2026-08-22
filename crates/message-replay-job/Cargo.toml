@@ -1,0 +1,41 @@
+[package]
+name = "message-replay-job"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "Replays stored messages back onto the bus: a job that runs to completion, one replay batch per execution."
+
+[lib]
+name = "message_replay_job"
+path = "src/lib.rs"
+
+[[bin]]
+name = "message-replay-job"
+path = "src/main.rs"
+
+[features]
+default = []
+sqlserver = []
+
+[dependencies]
+futures-util.workspace = true
+ihb-bus.workspace = true
+ihb-config.workspace = true
+ihb-sql.workspace = true
+ihb-telemetry.workspace = true
+thiserror.workspace = true
+tiberius.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "sync", "time"] }
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["sync"] }
+tokio-test.workspace = true
+
+[lints]
+workspace = true
