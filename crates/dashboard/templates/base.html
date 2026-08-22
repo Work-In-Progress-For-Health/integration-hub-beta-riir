@@ -1,0 +1,31 @@
+{# The shared shell for every page of `spec/15-dashboard.md` §2.1. #}
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Integration Hub{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+<header class="top">
+<h1>Integration Hub</h1>
+<nav>
+  <a href="/">Overview</a>
+  <a href="/flows">Flows</a>
+  <a href="/service-bus">Service Bus</a>
+  <a href="/exceptions">Exceptions</a>
+  <a href="/alarms">Alarms</a>
+</nav>
+<span class="spacer"></span>
+{% block stamp %}{% endblock %}
+</header>
+
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

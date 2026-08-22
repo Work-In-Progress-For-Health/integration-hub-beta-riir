@@ -1,0 +1,143 @@
+/* The NHS Wales Integration Hub operations dashboard.
+ *
+ * The DHCW brand of `spec/14-buswatch.md` §7.2, which the dashboard shares:
+ * NHS Wales Blue #325083, DHCW Blue #12A3C9, DHCW Navy #1B294A, DHCW Yellow
+ * #F8CA4D, Rubik.
+ *
+ * This is a wall display as often as it is a browser tab, so the state
+ * colours are the load-bearing part: an operator reads them from across a
+ * room. `unknown` is deliberately a *different* colour from `healthy` and
+ * not a lighter shade of it -- spec/15-dashboard.md §3.3 is that "I cannot
+ * see" must not look like "nothing is wrong".
+ */
+
+:root {
+    --nhs-wales-blue: #325083;
+    --dhcw-blue: #12a3c9;
+    --dhcw-navy: #1b294a;
+    --dhcw-yellow: #f8ca4d;
+
+    --healthy: #007a5e;
+    --warning: #a8600a;
+    --critical: #cb1c19;
+    --unknown: #6b5ca5;
+
+    --bg: #f4f6fa;
+    --card: #ffffff;
+    --ink: #1b294a;
+    --muted: #5a6683;
+    --border: #dbe1ec;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    font-family: Rubik, "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.55;
+}
+
+header.top {
+    background: var(--nhs-wales-blue);
+    color: #fff;
+    padding: 0.85rem 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+}
+header.top h1 { font-size: 1.1rem; margin: 0; font-weight: 500; }
+header.top nav { display: flex; gap: 1rem; flex-wrap: wrap; }
+header.top nav a { color: #dce4f2; text-decoration: none; font-size: 0.9rem; }
+header.top nav a:hover, header.top nav a.here { color: var(--dhcw-yellow); }
+header.top .spacer { flex: 1; }
+header.top .stamp { font-size: 0.78rem; color: #b9c6de; font-family: var(--mono); }
+
+main { padding: 1.5rem; max-width: 1500px; margin: 0 auto; }
+
+/* §2.2.2 -- said once, at the top, rather than as a dash in every cell. */
+.unavailable {
+    background: var(--dhcw-yellow);
+    color: var(--dhcw-navy);
+    padding: 0.6rem 1rem;
+    border-radius: 6px;
+    margin-bottom: 1.25rem;
+    font-size: 0.88rem;
+}
+
+.kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.9rem;
+    margin-bottom: 1.5rem;
+}
+.kpi {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+}
+.kpi .value {
+    font-size: 2rem;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+}
+/* An unknown number is not a zero and must not look like one. */
+.kpi .value.unknown { color: var(--unknown); font-size: 1.35rem; }
+.kpi .label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+.panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 1.25rem;
+    overflow: hidden;
+}
+.panel > h2 {
+    font-size: 0.92rem;
+    margin: 0;
+    padding: 0.75rem 1rem;
+    background: #eef2f8;
+    border-bottom: 1px solid var(--border);
+}
+.panel > .body { padding: 0.9rem 1rem; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+th, td { text-align: left; padding: 0.5rem 1rem; border-top: 1px solid var(--border); vertical-align: top; }
+th { background: #f8fafd; font-weight: 600; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); }
+td.mono, .mono { font-family: var(--mono); }
+tbody tr:hover { background: #f8fafd; }
+
+.state {
+    display: inline-block;
+    font-size: 0.74rem;
+    font-weight: 600;
+    padding: 0.12rem 0.55rem;
+    border-radius: 999px;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.state.healthy { background: var(--healthy); }
+.state.warning { background: var(--warning); }
+.state.critical { background: var(--critical); }
+.state.unknown { background: var(--unknown); }
+
+.system-health { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
+.system-health .state { font-size: 0.95rem; padding: 0.3rem 1rem; }
+
+.empty { padding: 0.9rem 1rem; color: var(--muted); font-size: 0.87rem; }
+.absent { color: var(--unknown); font-style: italic; }
+
+pre {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}

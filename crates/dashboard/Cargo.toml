@@ -1,0 +1,46 @@
+[package]
+name = "dashboard"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "The NHS Wales Integration Hub operations dashboard: flow health, queue depths, exceptions, throughput, and three alarm rules with e-mail escalation."
+
+[lib]
+name = "dashboard"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dashboard"
+path = "src/main.rs"
+
+[dependencies]
+askama.workspace = true
+base64.workspace = true
+axum.workspace = true
+futures-util = { workspace = true, features = ["alloc"] }
+hmac.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+ihb-config.workspace = true
+ihb-health.workspace = true
+ihb-runtime.workspace = true
+ihb-telemetry.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+time.workspace = true
+time-tz.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+tokio-rustls.workspace = true
+tracing.workspace = true
+webpki-roots.workspace = true
+
+[dev-dependencies]
+tokio-test.workspace = true
+tower = { workspace = true, features = ["util"] }

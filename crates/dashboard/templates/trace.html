@@ -1,0 +1,16 @@
+{# `spec/15-dashboard.md` §2.1's distributed trace. #}
+{% extends "base.html" %}
+
+{% block title %}Integration Hub — trace {{ operation_id }}{% endblock %}
+
+{% block content %}
+
+{% if !configured %}{% include "_unavailable.html" %}{% endif %}
+{% include "_redaction.html" %}
+
+<section class="panel">
+  <h2>Trace <span class="kind mono">{{ operation_id }}</span></h2>
+  {% include "_messages.html" %}
+</section>
+
+{% endblock %}

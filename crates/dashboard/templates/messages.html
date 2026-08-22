@@ -1,0 +1,19 @@
+{# `spec/15-dashboard.md` §2.1's message search. #}
+{% extends "base.html" %}
+
+{% block title %}Integration Hub — messages{% endblock %}
+
+{% block content %}
+
+{% if !configured %}{% include "_unavailable.html" %}{% endif %}
+{% include "_redaction.html" %}
+
+<section class="panel">
+  <h2>
+    Messages today
+    {% match workflow_id %}{% when Some with (id) %}<span class="kind mono">{{ id }}</span>{% when None %}{% endmatch %}
+  </h2>
+  {% include "_messages.html" %}
+</section>
+
+{% endblock %}

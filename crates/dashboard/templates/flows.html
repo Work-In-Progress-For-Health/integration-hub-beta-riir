@@ -1,0 +1,38 @@
+{# The per-flow detail of `spec/15-dashboard.md` §2.1 and §3. #}
+{% extends "base.html" %}
+
+{% block title %}Integration Hub — flows{% endblock %}
+
+{% block stamp %}
+<span class="stamp">refreshed {{ status.refreshed_at }}</span>
+{% endblock %}
+
+{% block content %}
+
+{% if !status.azure_configured %}{% include "_unavailable.html" %}{% endif %}
+
+{% for flow in status.flows %}
+<section class="panel">
+  <h2>{{ flow.label }} <span class="state {{ flow.health.css_class() }}">{{ flow.health.label() }}</span></h2>
+  <div class="body">
+    <table>
+      <tbody>
+        <tr><th>Workflow ID</th><td class="mono">{{ flow.id }}</td></tr>
+        <tr><th>Source</th><td>{{ flow.source }} (port {{ flow.source_port }})</td></tr>
+        <tr><th>Transformer</th><td>{{ flow.transformer.unwrap_or("none — messages cross unchanged") }}</td></tr>
+        <tr><th>Destination</th><td>{{ flow.destination }}</td></tr>
+        <tr>
+          <th>Messages waiting</th>
+          <td>{% match flow.active %}{% when Some with (n) %}{{ n }}{% when None %}<span class="absent">unknown</span>{% endmatch %}</td>
+        </tr>
+        <tr>
+          <th>Dead-lettered</th>
+          <td>{% match flow.dlq %}{% when Some with (n) %}{{ n }}{% when None %}<span class="absent">unknown</span>{% endmatch %}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endfor %}
+
+{% endblock %}

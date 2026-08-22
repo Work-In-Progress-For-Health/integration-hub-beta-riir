@@ -1,0 +1,16 @@
+{# §1.3, said on the page. An operator has to know whether what they are
+   looking at is the message or a redacted view of it -- otherwise they
+   will read `***` as data. #}
+{% if redacted %}
+<p class="unavailable" style="background:#e6f0fa">
+  Message content is <strong>redacted</strong>
+  (<code>spec/04-observability.md</code> §2): identifiers and names are
+  replaced with <code>***</code>. The message header is kept so a message
+  can still be identified.
+</p>
+{% else %}
+<p class="unavailable">
+  Redaction is <strong>off</strong> for this deployment, so message content
+  is shown in full, including patient identifiers.
+</p>
+{% endif %}

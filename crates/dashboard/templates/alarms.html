@@ -1,0 +1,74 @@
+{# `spec/15-dashboard.md` §2.1's alarm page. #}
+{% extends "base.html" %}
+
+{% block title %}Integration Hub — alarms{% endblock %}
+
+{% block content %}
+
+{% if !failed.is_empty() %}
+{# §5.6 — a store outage is said out loud. Without this it is
+   indistinguishable from "no rules configured", and every alarm would
+   silently read as absent. #}
+<p class="unavailable">
+  The alarm store could not be read for
+  {% for name in failed %}<code>{{ name }}</code>{% if !loop.last %}, {% endif %}{% endfor %}.
+  Those rules are <strong>not being evaluated</strong> — this is not the
+  same as having none configured.
+</p>
+{% endif %}
+
+{% if persistence == "disabled" %}
+{# §5.6's first row. The page renders; nothing is stored. #}
+<p class="unavailable" style="background:#e6f0fa">
+  <code>COSMOS_ENDPOINT</code> is not set, so alarm configuration and state
+  are <strong>not persisted</strong>. Rules cannot be stored, and a cooldown
+  would not survive a restart.
+</p>
+{% endif %}
+
+<div class="kpis">
+  <div class="kpi">
+    <div class="value">{{ summary.critical }}</div>
+    <div class="label">Critical</div>
+  </div>
+  <div class="kpi">
+    <div class="value">{{ summary.suppressed }}</div>
+    <div class="label">Suppressed</div>
+  </div>
+  <div class="kpi">
+    <div class="value unknown">{{ summary.unknown }}</div>
+    <div class="label">Unknown</div>
+  </div>
+  <div class="kpi">
+    <div class="value">{{ summary.healthy }}</div>
+    <div class="label">Healthy</div>
+  </div>
+  <div class="kpi">
+    <div class="value">{{ summary.paused }}</div>
+    <div class="label">Paused</div>
+  </div>
+</div>
+
+{% for partition in partitions %}
+<section class="panel">
+  <h2>{{ partition.name }}</h2>
+  {% if partition.rules.is_empty() %}
+  <p class="empty">No rules configured.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Rule</th><th>Flow</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for rule in partition.rules %}
+      <tr>
+        <td>{{ rule.display_name }}</td>
+        <td class="mono">{{ rule.workflow_id }}</td>
+        <td><span class="state {{ rule.status.label()|lower }}">{{ rule.status.label() }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endfor %}
+
+{% endblock %}

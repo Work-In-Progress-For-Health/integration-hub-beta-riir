@@ -1,0 +1,34 @@
+{# `spec/15-dashboard.md` §2.1's exceptions page. #}
+{% extends "base.html" %}
+
+{% block title %}Integration Hub — exceptions{% endblock %}
+
+{% block content %}
+
+{% if !configured %}{% include "_unavailable.html" %}{% endif %}
+
+<section class="panel">
+  <h2>Exceptions — last {{ hours }} hours</h2>
+  {% if exceptions.is_empty() %}
+  <p class="empty">
+    {% if configured %}None.{% else %}Unknown — Azure is not configured.{% endif %}
+  </p>
+  {% else %}
+  <table>
+    <thead><tr><th>When</th><th>Service</th><th>Type</th><th>Message</th><th>Trace</th></tr></thead>
+    <tbody>
+      {% for exception in exceptions %}
+      <tr>
+        <td class="mono">{{ exception.timestamp }}</td>
+        <td>{{ exception.app_name }}</td>
+        <td class="mono">{{ exception.kind }}</td>
+        <td><pre>{{ exception.outer_message }}</pre></td>
+        <td class="mono">{{ exception.operation_id }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+
+{% endblock %}

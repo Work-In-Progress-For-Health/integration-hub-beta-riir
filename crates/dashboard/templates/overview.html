@@ -1,0 +1,101 @@
+{# The overview of `spec/15-dashboard.md` §2.1. #}
+{% extends "base.html" %}
+
+{% block title %}Integration Hub — overview{% endblock %}
+
+{% block stamp %}
+<span class="stamp">refreshed {{ status.refreshed_at }}</span>
+{% endblock %}
+
+{% block content %}
+
+{% if !status.azure_configured %}{% include "_unavailable.html" %}{% endif %}
+
+<div class="system-health">
+  <span class="state {{ status.system_health.css_class() }}">{{ status.system_health.label() }}</span>
+  <span class="stamp" style="color:var(--muted)">
+    {{ status.kpis.flows_critical }} critical,
+    {{ status.kpis.flows_warning }} warning,
+    {{ status.kpis.flows_unknown }} unknown,
+    {{ status.kpis.flows_healthy }} healthy
+  </span>
+</div>
+
+<div class="kpis">
+  <div class="kpi">
+    {# §2.2.3 -- an absent total is shown as absent, never as a zero. #}
+    {% match status.kpis.total_active_messages %}
+    {% when Some with (count) %}<div class="value">{{ count }}</div>
+    {% when None %}<div class="value unknown">Unknown</div>
+    {% endmatch %}
+    <div class="label">Messages waiting</div>
+  </div>
+  <div class="kpi">
+    {% match status.kpis.total_dlq_messages %}
+    {% when Some with (count) %}<div class="value">{{ count }}</div>
+    {% when None %}<div class="value unknown">Unknown</div>
+    {% endmatch %}
+    <div class="label">Dead-lettered</div>
+  </div>
+  <div class="kpi">
+    <div class="value">{{ status.kpis.exception_count_1h }}</div>
+    <div class="label">Exceptions (1h)</div>
+  </div>
+  {% if status.kpis.queues_unknown > 0 %}
+  <div class="kpi">
+    <div class="value unknown">{{ status.kpis.queues_unknown }}</div>
+    <div class="label">Queues unreadable</div>
+  </div>
+  {% endif %}
+</div>
+
+<section class="panel">
+  <h2>Flows</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Flow</th><th>Port</th><th>Transformer</th>
+        <th style="text-align:right">Waiting</th>
+        <th style="text-align:right">Dead-lettered</th>
+        <th>Health</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for flow in status.flows %}
+      <tr>
+        <td>{{ flow.label }}<br><span class="mono" style="font-size:0.76rem;color:var(--muted)">{{ flow.id }}</span></td>
+        <td class="num">{{ flow.source_port }}</td>
+        <td>{{ flow.transformer.unwrap_or("—") }}</td>
+        <td class="num">{% match flow.active %}{% when Some with (n) %}{{ n }}{% when None %}<span class="absent">unknown</span>{% endmatch %}</td>
+        <td class="num">{% match flow.dlq %}{% when Some with (n) %}{{ n }}{% when None %}<span class="absent">unknown</span>{% endmatch %}</td>
+        <td><span class="state {{ flow.health.css_class() }}">{{ flow.health.label() }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <h2>Recent exceptions</h2>
+  {% if status.recent_exceptions.is_empty() %}
+  <p class="empty">
+    {% if status.azure_configured %}None in the last hour.{% else %}Unknown — Azure is not configured.{% endif %}
+  </p>
+  {% else %}
+  <table>
+    <thead><tr><th>When</th><th>Service</th><th>Type</th><th>Message</th></tr></thead>
+    <tbody>
+      {% for exception in status.recent_exceptions %}
+      <tr>
+        <td class="mono">{{ exception.timestamp }}</td>
+        <td>{{ exception.app_name }}</td>
+        <td class="mono">{{ exception.kind }}</td>
+        <td><pre>{{ exception.outer_message }}</pre></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+
+{% endblock %}

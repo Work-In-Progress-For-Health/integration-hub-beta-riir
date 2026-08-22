@@ -1,0 +1,32 @@
+{# `spec/15-dashboard.md` §2.1's queue depths. #}
+{% extends "base.html" %}
+
+{% block title %}Integration Hub — Service Bus{% endblock %}
+
+{% block content %}
+
+{% if !configured %}{% include "_unavailable.html" %}{% endif %}
+
+<section class="panel">
+  <h2>Queues</h2>
+  {% if queues.is_empty() %}
+  <p class="empty">No queues configured.</p>
+  {% else %}
+  <table>
+    <thead>
+      <tr><th>Queue</th><th style="text-align:right">Waiting</th><th style="text-align:right">Dead-lettered</th></tr>
+    </thead>
+    <tbody>
+      {% for queue in queues %}
+      <tr>
+        <td class="mono">{{ queue.name }}</td>
+        <td class="num">{% match queue.active %}{% when Some with (n) %}{{ n }}{% when None %}<span class="absent">unknown</span>{% endmatch %}</td>
+        <td class="num">{% match queue.dead_letter %}{% when Some with (n) %}{{ n }}{% when None %}<span class="absent">unknown</span>{% endmatch %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+
+{% endblock %}

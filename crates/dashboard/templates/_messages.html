@@ -1,0 +1,35 @@
+{# One table of message events, shared by `/messages` and `/trace/{id}`.
+
+   Every payload here has already been through §1.3's redaction: the row
+   type carries no unredacted text at all, so this template cannot show
+   patient data by mistake. #}
+{% if messages.is_empty() %}
+<p class="empty">
+  {% if configured %}Nothing today.{% else %}Unknown — Azure is not configured.{% endif %}
+</p>
+{% else %}
+<table>
+  <thead>
+    <tr><th>When</th><th>Event</th><th>Flow</th><th>Service</th><th>Correlation</th><th>Message</th></tr>
+  </thead>
+  <tbody>
+    {% for message in messages %}
+    <tr>
+      <td class="mono">{{ message.timestamp }}</td>
+      <td class="mono">{{ message.event_type }}</td>
+      <td class="mono">{{ message.workflow_id }}</td>
+      <td>{{ message.microservice_id }}</td>
+      <td class="mono">
+        <a href="/trace/{{ message.operation_id|urlencode }}">{{ message.correlation_id }}</a>
+      </td>
+      <td>
+        {% match message.payload %}
+        {% when Some with (payload) %}<pre>{{ payload }}</pre>
+        {% when None %}<span class="absent">no payload</span>
+        {% endmatch %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
