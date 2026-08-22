@@ -271,8 +271,7 @@ mod tests {
         let shutdown = Shutdown::new();
         let watcher = shutdown.watcher();
 
-        let sleeping =
-            tokio::spawn(async move { watcher.sleep(crate::backoff::MAX_DELAY).await });
+        let sleeping = tokio::spawn(async move { watcher.sleep(crate::backoff::MAX_DELAY).await });
 
         tokio::task::yield_now().await;
         shutdown.stop();
