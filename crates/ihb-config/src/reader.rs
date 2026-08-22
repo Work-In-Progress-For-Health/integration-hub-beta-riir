@@ -449,6 +449,41 @@ impl Reader {
         }
     }
 
+    /// Record that one variable held a value this crate cannot check.
+    ///
+    /// [`optional_one_of`](Reader::optional_one_of) covers a fixed set of
+    /// allowed strings. This is for the cases it cannot: a value that has
+    /// to be resolved against something outside this crate — a schema group,
+    /// a socket address, a numeric ceiling — where only the caller knows
+    /// what "valid" means. The error joins the others, so a service that
+    /// rejects a value here still reports every *other* problem in the same
+    /// breath (§1.4).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ihb_config::Reader;
+    ///
+    /// let mut reader = Reader::from_pairs([("HL7_VALIDATION_FLOW", "cardiology")]);
+    ///
+    /// if let Some(value) = reader.optional_string("HL7_VALIDATION_FLOW") {
+    ///     if value != "phw" {
+    ///         reader.invalid("HL7_VALIDATION_FLOW", "a known schema group", value);
+    ///     }
+    /// }
+    ///
+    /// let errors = reader.finish().unwrap_err();
+    /// assert!(errors.to_string().contains("a known schema group"));
+    /// ```
+    pub fn invalid(
+        &mut self,
+        name: impl Into<String>,
+        expected: impl Into<String>,
+        got: impl Into<String>,
+    ) {
+        self.errors.push(ConfigError::invalid(name, expected, got));
+    }
+
     /// Record a problem this crate cannot detect on its own — a conflict
     /// between variables, or a rule specific to one service.
     ///
