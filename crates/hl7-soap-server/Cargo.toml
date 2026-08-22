@@ -1,0 +1,43 @@
+[package]
+name = "hl7-soap-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "The HL7 SOAP ingress: an HTTP endpoint taking v2.xml inside a SOAP envelope, forwarding it as ER7."
+
+[lib]
+name = "hl7_soap_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hl7-soap-server"
+path = "src/main.rs"
+
+[dependencies]
+hl7-2-soap.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+ihb-bus.workspace = true
+ihb-config.workspace = true
+ihb-fields.workspace = true
+ihb-health.workspace = true
+ihb-runtime.workspace = true
+ihb-telemetry.workspace = true
+ihb-validation.workspace = true
+rustls-pki-types.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal", "fs"] }
+tokio-rustls.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio-test.workspace = true
+
+[lints]
+workspace = true
