@@ -280,20 +280,32 @@ read a real LIMS payload. Both are **workarounds pending an upstream fix**,
 both are implemented in `ihb-validation::convert::xml_to_er7`, and both are
 narrow: they touch element names and empty elements, never text content.
 
-§5.8.1 **Namespace prefixes are stripped.** The converter reads an element's
-name verbatim, so a document whose elements are prefixed — `<ns0:MSH>` —
-yields `MissingMsh` and is rejected outright. Measured:
+§5.8.1 ~~**Namespace prefixes are stripped.**~~ **Fixed upstream in
+`hl7-2-from-xml-into-er7` 0.6. The workaround is removed.**
 
-| Input | Result |
-| --- | --- |
-| `xmlns="urn:hl7-org:v2xml"` (default namespace) | reads |
-| `<ns0:MSH>` | **`MissingMsh`** |
-| `<hl7:MSH>` | **`MissingMsh`** |
-| no namespace | reads |
+0.5 read an element's name verbatim, so a document whose elements were
+prefixed — `<ns0:MSH>` — yielded `MissingMsh` and was rejected outright.
+`local/sample_messages/lims-to-mpi.sample.xml` uses `ns0:`, so **every LIMS
+message would have been rejected**; this module rewrote every tag to cope.
+As measured against 0.5:
 
-`local/sample_messages/lims-to-mpi.sample.xml` uses `ns0:`, so without this
-**every LIMS message would be rejected**. The proper fix is upstream:
-matching on local name, as `hl7-2-soap` already does for the envelope.
+| Input | 0.5 | 0.6 |
+| --- | --- | --- |
+| `xmlns="urn:hl7-org:v2xml"` (default namespace) | reads | reads |
+| `<ns0:MSH>` | **`MissingMsh`** | reads |
+| `<hl7:MSH>` | **`MissingMsh`** | reads |
+| no namespace | reads | reads |
+
+0.6 matches on local name, which is what §5.8.1 asked for. `strip_namespace_prefixes`
+and its tag rewriter are deleted.
+
+§5.8.1a A prefixed document converting correctly is now a **requirement**,
+not an observation, and `convert::tests::a_namespace_prefixed_document_needs_no_help`
+tests it directly. The dependency is a path dependency on a repository under
+active development, so an upstream regression here is a live possibility
+rather than a theoretical one — and it would take the whole LIMS flow down
+silently. Deleting the workaround without leaving a test behind would have
+traded a known problem for an unmonitored one.
 
 §5.8.2 **Empty elements are dropped.** The converter renders an empty
 element as HL7's explicit null, `""` — the same as an element whose text
@@ -528,6 +540,57 @@ together, so a caller that needs both does not convert twice
 | `is_valid` | |
 | `error_message` | Present when invalid |
 
+### §8.4 The stored XML differs from the Python's, and how
+
+Measured by `hl7-server/tests/golden.rs`, which runs each flow's sample
+message through the whole server and compares the resulting `XmlPayload`
+against the XML the Python produced for the same message (§7's corpus).
+
+§8.4.0 **Serialisation differs and always will.** Neither form is more
+correct and none of it changes meaning:
+
+| | Python (`xmlschema`) | Rust (`hl7-2-from-er7-into-xml`) |
+| --- | --- | --- |
+| Declaration | none | `<?xml version="1.0" encoding="UTF-8"?>` |
+| Namespace | `ns0:` prefix on every element | default `xmlns=` |
+| Whitespace | none | indented, one element per line |
+
+A consumer that string-matches the stored column on `<ns0:PID.3>` would stop
+finding it. Nothing in this workspace does, but the dashboard and any ad-hoc
+SQL are outside it, so this is flagged rather than assumed harmless.
+
+§8.4.1 **`MSH-9.3` is populated where the Python left it empty.** Four of
+the six samples agree element for element. The chemocare sample's `MSH-9` is
+`ADT^A28`, with no structure component: the Rust writes the resolved
+structure (`ADT_A05`) into `MSH-9.3` before converting, because the
+converter names the root element from `MSH-9` and would otherwise emit
+`<ADT_A28>`, a root no schema knows. The Python named the root separately
+and left the component empty.
+
+The audit record therefore shows a component the source system did not
+send. The **forwarded** message is unaffected — this server sends the raw
+ER7 — but a reader of `XmlPayload` should know it is a rendering, not a
+transcript.
+
+§8.4.2 **HL7's explicit null is lost in the rendering.** The pims sample's
+`PID-5` is `test^test^""^^MISS`. In HL7 `""` is an *explicit null*, meaning
+"delete this value", which is materially different from an absent value.
+The Python carried the two characters into the XML; the Rust's converter
+renders an empty element.
+
+This is a loss of meaning, and it is worth the Hub team's attention: any
+future consumer that drives an update from `XmlPayload` rather than from
+`RawPayload` would turn a deletion into a no-change. The forwarded ER7
+keeps the `""`, and `golden.rs` asserts that byte-for-byte, so MPI is not
+affected today. The proper fix is upstream in
+`hl7-2-from-er7-into-xml`.
+
+§8.4.3 The golden test asserts the difference set is **exactly** §8.4.1 and
+§8.4.2 — no more, and no fewer. A new divergence fails it, and so does
+fixing one of these without removing it from the list. A list of known
+exceptions that is never rechecked is a list of defects nobody is looking
+at.
+
 ---
 
 ## §9 Real XSD validation, through two engines
@@ -653,3 +716,42 @@ take over:
 4. A decision, with the Hub team, on the three behaviours §3.2's route
    reproduces deliberately: §3.3.2a, §3.3.2c and §4.6.5. Real XSD validation
    would change all three, and each is a change in which messages reach MPI.
+5. ~~**§9.7 resolved.** Promotion would put untrusted XML in front of a
+   parser with two open denial-of-service advisories.~~ **Done**
+   (2026-08-22) — `xsd-schema` 0.1.4 brings `quick-xml` 0.41.0 and both
+   advisories are closed. The other four preconditions still stand.
+
+### §9.7 Finding — `xsd-schema` pinned a vulnerable `quick-xml`
+
+**Status: closed (2026-08-22).** `xsd-schema` 0.1.4 depends on `quick-xml`
+0.41.0, which carries the fixes.
+
+`xsd-schema` 0.1.3 depended on `quick-xml` 0.31.0, which carries
+RUSTSEC-2026-0194 (quadratic run time checking a start tag for duplicate
+attribute names) and RUSTSEC-2026-0195 (unbounded namespace-declaration
+allocation in `NsReader`). Both are denial of service on **untrusted XML**,
+and both needed `quick-xml >= 0.41`. At the time 0.1.3 was `xsd-schema`'s
+latest release, so there was no upgrade path from here.
+
+§9.7.1 **Nothing was exposed while it was open.** `quick-xml` enters the
+graph through `xsd-schema` alone; the SOAP ingress
+([`08-hl7-soap-server.md`](08-hl7-soap-server.md)) and the ER7/XML
+conversions of §5 use their own parsers. The only documents reaching it were
+those `er7_to_xml_for_flow` generates, and the generator emits a fixed
+element structure carrying one namespace declaration and no other
+attributes — so neither the duplicate-attribute nor the `xmlns`-flood shape
+could be reached through it, whatever the ER7 said.
+
+§9.7.2 **Resolution.** The workspace moved to `xsd-schema` 0.1.4, which
+depends on `quick-xml` 0.41.0. `cargo tree -i quick-xml --workspace` shows
+one version reached by one path, and `cargo deny check advisories` passes
+with **no ignore for either advisory** — both entries were removed from
+`deny.toml` rather than left in place, so a regression fails the gate
+instead of being silently covered by an ignore nobody re-reads.
+
+§9.7.3 **This clears one of §9.6's five preconditions, not §9.6 itself.**
+Item 5 is resolved; items 1 to 4 are untouched. In particular §9.4's
+`uppsala` type-resolution defect is still open, and item 4 — a decision on
+three behaviours whose change alters which messages reach MPI — is still
+the Hub team's to make. `xsd::validate` remains a **cross-check**, not the
+ingest path.
