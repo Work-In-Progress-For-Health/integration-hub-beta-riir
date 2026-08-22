@@ -1,0 +1,32 @@
+[package]
+name = "ihb-sql"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "Azure SQL access for the message store and the replay job: one lazily-opened connection, explicit transactions, and no credentials in any log line."
+
+[features]
+default = []
+# Tests that need a real SQL Server running.
+# See spec/12-message-store.md §6.5.
+sqlserver = []
+
+[dependencies]
+ihb-config.workspace = true
+thiserror.workspace = true
+tiberius.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "net", "sync", "time"] }
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
+tokio-test.workspace = true
+
+[lints]
+workspace = true
