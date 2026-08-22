@@ -1,0 +1,37 @@
+[package]
+name = "hl7-mock-receiver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "HL7 v2 mock receiver: an MLLP endpoint that acknowledges what it is sent and forwards it to a queue. The Integration Hub's stand-in for a downstream system under test."
+
+[lib]
+name = "hl7_mock_receiver"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hl7-mock-receiver"
+path = "src/main.rs"
+
+[dependencies]
+hl7-2.workspace = true
+hl7-2-mllp.workspace = true
+ihb-bus.workspace = true
+ihb-config.workspace = true
+ihb-fields.workspace = true
+ihb-health.workspace = true
+ihb-runtime.workspace = true
+ihb-telemetry.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tokio-test.workspace = true
+
+[lints]
+workspace = true
