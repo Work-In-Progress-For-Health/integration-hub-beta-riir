@@ -290,6 +290,14 @@ MLLP listener, then join the listener task.
 acknowledged must have been forwarded, and shutdown must not create the one
 failure §5.3 forbids.
 
+§8.2a **The Rust inverts the first three steps of §8.2**, and does so to
+satisfy §8.3. Closing the Service Bus sender while the MLLP listener is
+still accepting opens a window in which a message is received and cannot be
+forwarded; the only correct response to a message in that window is to
+refuse it, which is the outcome §5.3 forbids. So: stop accepting, drain,
+then close the sender and the health check. The relative order of those last
+two is unchanged. See [`plan.md` §9](../plan.md#9-deliberate-deviations-from-the-python).
+
 ---
 
 ## §9 Tests
