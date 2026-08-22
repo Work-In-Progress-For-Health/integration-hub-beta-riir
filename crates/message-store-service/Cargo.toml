@@ -1,0 +1,47 @@
+[package]
+name = "message-store-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "Drains the message-store queue into Azure SQL: the only writer of monitoring.Message."
+
+[lib]
+name = "message_store_service"
+path = "src/lib.rs"
+
+[[bin]]
+name = "message-store-service"
+path = "src/main.rs"
+
+[features]
+default = []
+# Tests that need a real SQL Server running.
+sqlserver = []
+
+[dependencies]
+ihb-bus.workspace = true
+ihb-config.workspace = true
+ihb-health.workspace = true
+ihb-runtime.workspace = true
+ihb-sql.workspace = true
+ihb-telemetry.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tiberius.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+tracing.workspace = true
+
+[dev-dependencies]
+ihb-bus.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tokio-test.workspace = true
+
+[lints]
+workspace = true
