@@ -1,0 +1,39 @@
+[package]
+name = "hl7-chemo-transformer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "The chemo → MPI transformer: one flow's field mapping, over the shared transformer runtime."
+
+[lib]
+name = "hl7_chemo_transformer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hl7-chemo-transformer"
+path = "src/main.rs"
+
+[dependencies]
+hl7-2.workspace = true
+ihb-bus.workspace = true
+ihb-config.workspace = true
+ihb-fields.workspace = true
+ihb-health.workspace = true
+ihb-runtime.workspace = true
+ihb-telemetry.workspace = true
+ihb-transformer.workspace = true
+ihb-validation.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync", "time", "signal"] }
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio-test.workspace = true
+
+[lints]
+workspace = true
