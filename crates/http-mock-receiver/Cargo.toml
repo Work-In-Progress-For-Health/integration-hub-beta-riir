@@ -1,0 +1,40 @@
+[package]
+name = "http-mock-receiver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "A SOAP endpoint that accepts anything vaguely SOAP-shaped and always answers: the Integration Hub's stand-in for a downstream HTTP system."
+
+[lib]
+name = "http_mock_receiver"
+path = "src/lib.rs"
+
+[[bin]]
+name = "http-mock-receiver"
+path = "src/main.rs"
+
+[dependencies]
+hl7-2-soap.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+ihb-bus.workspace = true
+ihb-config.workspace = true
+ihb-fields.workspace = true
+ihb-health.workspace = true
+ihb-runtime.workspace = true
+ihb-telemetry.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
+tracing.workspace = true
+
+[dev-dependencies]
+ihb-sender.workspace = true
+soap-sender = { version = "0.1", path = "../soap-sender" }
+tokio-test.workspace = true
+
+[lints]
+workspace = true
