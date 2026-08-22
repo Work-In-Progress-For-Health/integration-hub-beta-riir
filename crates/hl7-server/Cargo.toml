@@ -1,0 +1,43 @@
+[package]
+name = "hl7-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "The generic HL7 v2 MLLP ingress server: one deployment per flow, every per-flow difference in configuration."
+
+[lib]
+name = "hl7_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hl7-server"
+path = "src/main.rs"
+
+[dependencies]
+er7.workspace = true
+hl7-2.workspace = true
+hl7-2-mllp.workspace = true
+ihb-bus.workspace = true
+ihb-config.workspace = true
+ihb-fields.workspace = true
+ihb-health.workspace = true
+ihb-runtime.workspace = true
+ihb-telemetry.workspace = true
+ihb-validation.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+tokio-test.workspace = true
+
+[lints]
+workspace = true
