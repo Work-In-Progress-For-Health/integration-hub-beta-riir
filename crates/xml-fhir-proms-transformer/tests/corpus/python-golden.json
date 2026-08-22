@@ -1,0 +1,1649 @@
+{
+  "CANCELLED_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/appointment-cancellation",
+          "destination": [
+            {
+              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "CANCELLED",
+            "display": "Appointment Cancellation",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Rhys Hughes",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Appointment"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://wpas-source.invalid/system-id/149"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "address": [
+            {
+              "postalCode": "LL57 2AA"
+            }
+          ],
+          "birthDate": "1985-03-15",
+          "gender": "male",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434765951"
+            },
+            {
+              "system": "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
+              "value": "SB0077889"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Hughes",
+              "given": [
+                "Rhys"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "end": "2024-10-15T11:00:00Z",
+          "id": "00000000-0000-4000-8000-000000000003",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Appointment"
+            ]
+          },
+          "participant": [
+            {
+              "actor": {
+                "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+                "type": "Patient"
+              },
+              "status": "accepted"
+            },
+            {
+              "actor": {
+                "reference": "urn:uuid:00000000-0000-4000-8000-000000000004",
+                "type": "Practitioner"
+              },
+              "status": "accepted"
+            }
+          ],
+          "resourceType": "Appointment",
+          "start": "2024-10-15T11:00:00Z",
+          "status": "cancelled"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "identifier": [
+            {
+              "system": "https://fhir.hl7.org.uk/Id/gmc-number",
+              "value": "HANJO"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Practitioner"
+            ]
+          },
+          "name": [
+            {
+              "family": "Jones",
+              "given": [
+                "Hannah"
+              ]
+            }
+          ],
+          "resourceType": "Practitioner"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "7A1"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "BETSI CADWALADR UNIVERSITY LHB",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "address": {
+            "postalCode": "LL57 2PW"
+          },
+          "id": "00000000-0000-4000-8000-000000000006",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.wales/Id/wrts-location-identifier",
+              "value": "YSBYTY GWYNEDD, PENRHOSGARNEDD, BANGOR, GWYNEDD, LL57 2PW"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "name": "YSBYTY GWYNEDD",
+          "resourceType": "Location"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "EXPLICIT_EVENT_CODE_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/procedure",
+          "destination": [
+            {
+              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "SURGERY",
+            "display": "Procedure Performed",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Field Nested",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Procedure"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "source": {
+            "endpoint": "https://wpas-source.invalid/system-id/149"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434766001"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Nested",
+              "given": [
+                "Field"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Procedure"
+            ]
+          },
+          "resourceType": "Procedure",
+          "status": "completed",
+          "subject": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+            "type": "Patient"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000006",
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "resourceType": "Location"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "INPATIENT_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/encounter",
+          "destination": [
+            {
+              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "INPATIENT",
+            "display": "Inpatient Admission",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Eleri Price",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Encounter"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://wpas-source.invalid/system-id/149"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "address": [
+            {
+              "postalCode": "SA2 8QA"
+            }
+          ],
+          "birthDate": "1940-09-02",
+          "gender": "female",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434765943"
+            },
+            {
+              "system": "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
+              "value": "SB0055667"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Price",
+              "given": [
+                "Eleri"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "class": {
+            "code": "IMP",
+            "display": "inpatient encounter",
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+          },
+          "id": "00000000-0000-4000-8000-000000000003",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Encounter"
+            ]
+          },
+          "resourceType": "Encounter",
+          "status": "in-progress",
+          "subject": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+            "type": "Patient"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "identifier": [
+            {
+              "system": "https://fhir.hl7.org.uk/Id/gmc-number",
+              "value": "WILLR"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Practitioner"
+            ]
+          },
+          "name": [
+            {
+              "family": "Williams",
+              "given": [
+                "Rhys"
+              ]
+            }
+          ],
+          "resourceType": "Practitioner"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "7A2"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "HYWEL DDA UNIVERSITY LHB",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "address": {
+            "postalCode": "SA6 6NL"
+          },
+          "id": "00000000-0000-4000-8000-000000000006",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.wales/Id/wrts-location-identifier",
+              "value": "MORRISTON HOSPITAL, SWANSEA, SA6 6NL"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "name": "MORRISTON HOSPITAL",
+          "resourceType": "Location"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "LEGACY_MESSAGE_TYPE_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/referral",
+          "destination": [
+            {
+              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "REFERRAL",
+            "display": "Patient Referral",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Type Legacy",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "ServiceRequest"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000004",
+              "type": "PractitionerRole"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "source": {
+            "endpoint": "https://wpas-source.invalid/system-id/149"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434766028"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Legacy",
+              "given": [
+                "Type"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "intent": "plan",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-ServiceRequest"
+            ]
+          },
+          "requester": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000004",
+            "type": "PractitionerRole"
+          },
+          "resourceType": "ServiceRequest",
+          "status": "active",
+          "subject": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+            "type": "Patient"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "location": [
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000007",
+              "type": "Location"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-PractitionerRole"
+            ]
+          },
+          "resourceType": "PractitionerRole"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000007",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000007",
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "resourceType": "Location"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "MINIMAL_REFERRAL_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/referral",
+          "destination": [
+            {
+              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "REFERRAL",
+            "display": "Patient Referral",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Minimal Unknown",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "ServiceRequest"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000004",
+              "type": "PractitionerRole"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "source": {
+            "endpoint": "https://wpas-source.invalid/system-id/unknown"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434765994"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Unknown",
+              "given": [
+                "Minimal"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "intent": "plan",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-ServiceRequest"
+            ]
+          },
+          "requester": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000004",
+            "type": "PractitionerRole"
+          },
+          "resourceType": "ServiceRequest",
+          "status": "active",
+          "subject": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+            "type": "Patient"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "location": [
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000007",
+              "type": "Location"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-PractitionerRole"
+            ]
+          },
+          "resourceType": "PractitionerRole"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000007",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000007",
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "resourceType": "Location"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "NESTED_REFERRAL_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/referral",
+          "destination": [
+            {
+              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "REFERRAL",
+            "display": "Patient Referral",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Field Nested",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "ServiceRequest"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000004",
+              "type": "PractitionerRole"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "source": {
+            "endpoint": "https://wpas-source.invalid/system-id/149"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434766019"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Nested",
+              "given": [
+                "Field"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "intent": "plan",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-ServiceRequest"
+            ]
+          },
+          "requester": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000004",
+            "type": "PractitionerRole"
+          },
+          "resourceType": "ServiceRequest",
+          "status": "active",
+          "subject": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+            "type": "Patient"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "location": [
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000007",
+              "type": "Location"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-PractitionerRole"
+            ]
+          },
+          "resourceType": "PractitionerRole"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000007",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000007",
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "resourceType": "Location"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "PREOP_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/appointment",
+          "destination": [
+            {
+              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "PREOP",
+            "display": "Appointment Scheduled",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Gareth Jones",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Appointment"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://wpas-source.invalid/system-id/149"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "address": [
+            {
+              "postalCode": "SA2 8QA"
+            }
+          ],
+          "birthDate": "1960-01-20",
+          "gender": "male",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434765935"
+            },
+            {
+              "system": "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
+              "value": "SB0011223"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Jones",
+              "given": [
+                "Gareth"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "end": "2024-08-15T14:00:00Z",
+          "id": "00000000-0000-4000-8000-000000000003",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Appointment"
+            ]
+          },
+          "participant": [
+            {
+              "actor": {
+                "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+                "type": "Patient"
+              },
+              "status": "accepted"
+            },
+            {
+              "actor": {
+                "reference": "urn:uuid:00000000-0000-4000-8000-000000000004",
+                "type": "Practitioner"
+              },
+              "status": "accepted"
+            }
+          ],
+          "resourceType": "Appointment",
+          "serviceType": [
+            {
+              "coding": [
+                {
+                  "display": "Trauma and Orthopaedics"
+                }
+              ]
+            }
+          ],
+          "start": "2024-08-15T14:00:00Z",
+          "status": "booked"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "identifier": [
+            {
+              "system": "https://fhir.hl7.org.uk/Id/gmc-number",
+              "value": "DAVIP"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Practitioner"
+            ]
+          },
+          "name": [
+            {
+              "family": "Price",
+              "given": [
+                "David"
+              ]
+            }
+          ],
+          "resourceType": "Practitioner"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "7A2"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "HYWEL DDA UNIVERSITY LHB",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "address": {
+            "postalCode": "SA6 6NL"
+          },
+          "id": "00000000-0000-4000-8000-000000000006",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.wales/Id/wrts-location-identifier",
+              "value": "MORRISTON HOSPITAL, SWANSEA, SA6 6NL"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "name": "MORRISTON HOSPITAL",
+          "resourceType": "Location"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "PREREAD_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/preadmission",
+          "destination": [
+            {
+              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "PREREAD",
+            "display": "Pre-admission Notification",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Owain Davies",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Encounter"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://wpas-source.invalid/system-id/149"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "address": [
+            {
+              "postalCode": "CF10 1EP"
+            }
+          ],
+          "birthDate": "1978-07-22",
+          "gender": "male",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434765960"
+            },
+            {
+              "system": "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
+              "value": "CV0099001"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Davies",
+              "given": [
+                "Owain"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "class": {
+            "code": "PRENC",
+            "display": "pre-admission",
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+          },
+          "id": "00000000-0000-4000-8000-000000000003",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Encounter"
+            ]
+          },
+          "resourceType": "Encounter",
+          "status": "planned",
+          "subject": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+            "type": "Patient"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "identifier": [
+            {
+              "system": "https://fhir.hl7.org.uk/Id/gmc-number",
+              "value": "DAVIP"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Practitioner"
+            ]
+          },
+          "name": [
+            {
+              "family": "Price",
+              "given": [
+                "David"
+              ]
+            }
+          ],
+          "resourceType": "Practitioner"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "7A4"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "7A4",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "address": {
+            "postalCode": "CF14 4XW"
+          },
+          "id": "00000000-0000-4000-8000-000000000006",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.wales/Id/wrts-location-identifier",
+              "value": "UNIVERSITY HOSPITAL OF WALES, HEATH PARK, CARDIFF, CF14 4XW"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "name": "UNIVERSITY HOSPITAL OF WALES",
+          "resourceType": "Location"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "REFERRAL_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/referral",
+          "destination": [
+            {
+              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "REFERRAL",
+            "display": "Patient Referral",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Aneurin Bevan",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "ServiceRequest"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000004",
+              "type": "PractitionerRole"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000006",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://wpas-source.invalid/system-id/149"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "address": [
+            {
+              "city": "Tredegar",
+              "line": [
+                "Tredegar House, Park Street"
+              ],
+              "postalCode": "NP22 3AA"
+            }
+          ],
+          "birthDate": "1897-11-15",
+          "communication": [
+            {
+              "language": {
+                "coding": [
+                  {
+                    "display": "Welsh",
+                    "system": "https://fhir.hl7.org.uk/CodeSystem/UKCore-HumanLanguage"
+                  }
+                ]
+              },
+              "preferred": true
+            }
+          ],
+          "gender": "male",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434765919"
+            },
+            {
+              "system": "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
+              "value": "SB0099887"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Bevan",
+              "given": [
+                "Aneurin",
+                "Nye"
+              ],
+              "prefix": [
+                "Mr"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "code": {
+            "coding": [
+              {
+                "code": "ORTHO",
+                "display": "Referral"
+              }
+            ]
+          },
+          "id": "00000000-0000-4000-8000-000000000003",
+          "identifier": [
+            {
+              "system": "https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-servicerequest",
+              "value": "7A22867970"
+            }
+          ],
+          "intent": "plan",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-ServiceRequest"
+            ]
+          },
+          "occurrenceDateTime": "2024-06-12T00:00:00Z",
+          "requester": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000004",
+            "type": "PractitionerRole"
+          },
+          "resourceType": "ServiceRequest",
+          "status": "active",
+          "subject": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+            "type": "Patient"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "identifier": [
+            {
+              "system": "https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-practitionerrole",
+              "value": "31688553"
+            }
+          ],
+          "location": [
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000007",
+              "type": "Location"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-PractitionerRole"
+            ]
+          },
+          "organization": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000006",
+            "type": "Organization"
+          },
+          "practitioner": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Practitioner"
+          },
+          "resourceType": "PractitionerRole",
+          "specialty": [
+            {
+              "coding": [
+                {
+                  "code": "110",
+                  "display": "Trauma and Orthopaedics"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.hl7.org.uk/Id/gmc-number",
+              "value": "G7654321"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Practitioner"
+            ]
+          },
+          "name": [
+            {
+              "family": "L",
+              "given": [
+                "ARDERN-JONES"
+              ]
+            }
+          ],
+          "resourceType": "Practitioner"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000006",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "7A1"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "BETSI CADWALADR UNIVERSITY LHB",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000007",
+        "resource": {
+          "address": {
+            "postalCode": "LL57 2PW"
+          },
+          "id": "00000000-0000-4000-8000-000000000007",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.wales/Id/wrts-location-identifier",
+              "value": "YSBYTY GWYNEDD, PENRHOSGARNEDD, BANGOR, GWYNEDD, LL57 2PW"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "name": "YSBYTY GWYNEDD",
+          "resourceType": "Location"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "SURGERY_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/procedure",
+          "destination": [
+            {
+              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "SURGERY",
+            "display": "Procedure Performed",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Megan Williams",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Procedure"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://wpas-source.invalid/system-id/149"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "address": [
+            {
+              "postalCode": "CF10 1EP"
+            }
+          ],
+          "birthDate": "1975-06-30",
+          "gender": "female",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434765927"
+            },
+            {
+              "system": "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
+              "value": "CV0044221"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Williams",
+              "given": [
+                "Megan"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "code": {
+            "coding": [
+              {
+                "code": "ORTHO",
+                "display": "Procedure performed"
+              }
+            ]
+          },
+          "id": "00000000-0000-4000-8000-000000000003",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Procedure"
+            ]
+          },
+          "performedDateTime": "2024-07-20T09:30:00Z",
+          "resourceType": "Procedure",
+          "status": "completed",
+          "subject": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+            "type": "Patient"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "identifier": [
+            {
+              "system": "https://fhir.hl7.org.uk/Id/gmc-number",
+              "value": "JONMG"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Practitioner"
+            ]
+          },
+          "name": [
+            {
+              "family": "Morgan",
+              "given": [
+                "James"
+              ]
+            }
+          ],
+          "resourceType": "Practitioner"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "7A4"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "7A4",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "address": {
+            "postalCode": "CF14 4XW"
+          },
+          "id": "00000000-0000-4000-8000-000000000006",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.wales/Id/wrts-location-identifier",
+              "value": "UNIVERSITY HOSPITAL OF WALES, HEATH PARK, CARDIFF, CF14 4XW"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "name": "UNIVERSITY HOSPITAL OF WALES",
+          "resourceType": "Location"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "UNROUTABLE_MESSAGE": {
+    "__error__": "ValueError: Cannot route WPAS message: eventCode='UNKNOWN_TYPE', root='PromsEventRequest'. Expected one of: ['CANCELLED', 'INPATIENT', 'PREOP', 'PREREAD', 'REFERRAL', 'SURGERY']"
+  }
+}
