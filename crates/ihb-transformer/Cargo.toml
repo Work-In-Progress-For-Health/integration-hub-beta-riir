@@ -1,0 +1,31 @@
+[package]
+name = "ihb-transformer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "The transformer runtime: the Transformer trait, the receive loop, and the per-message ordering every flow's mapper runs inside."
+
+[dependencies]
+hl7-2.workspace = true
+ihb-bus.workspace = true
+ihb-config.workspace = true
+ihb-fields.workspace = true
+ihb-health.workspace = true
+ihb-runtime.workspace = true
+ihb-telemetry.workspace = true
+ihb-validation.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync", "time", "signal"] }
+tracing.workspace = true
+
+[dev-dependencies]
+ihb-fields.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
+tokio-test.workspace = true
+
+[lints]
+workspace = true
