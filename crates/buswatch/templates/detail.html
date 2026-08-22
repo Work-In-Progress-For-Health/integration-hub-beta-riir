@@ -1,0 +1,96 @@
+{# One message in full: `spec/14-buswatch.md` §5.3 and §5.4. #}
+{% extends "base.html" %}
+
+{% block title %}BusWatch — {{ detail.queue }} #{{ detail.sequence }}{% endblock %}
+
+{% block header_links %}
+<a href="/">← all queues</a>
+{% endblock %}
+
+{% block content %}
+
+<div class="toolbar">
+  <span class="mono">{{ detail.queue }}</span>
+  <span class="taken">sequence {{ detail.sequence }}</span>
+</div>
+
+<section class="panel">
+  <h2>Body<span class="kind">{{ body.kind() }}</span></h2>
+  <div class="body">
+    {% match body %}
+
+    {% when Body::Er7 with { segments } %}
+    {# §5.4 — segment by segment. #}
+    {% for segment in segments %}
+    <div class="segment">
+      <span class="name">{{ segment.name }}</span>
+      {% for field in segment.fields %}
+      <span class="field">
+        <span class="index">{{ segment.number_of(*loop.index0) }}</span>
+        <span class="value">{{ field }}</span>
+      </span>
+      {% if !loop.last %}<span class="index">|</span>{% endif %}
+      {% endfor %}
+    </div>
+    {% endfor %}
+
+    {% when Body::StoreEvent with { pretty, payload } %}
+    {# §5.4 — the store document of `03-message-bus.md` §6, indented. #}
+    <pre>{{ pretty }}</pre>
+    {% if let Some(segments) = payload %}
+    <h3>RawPayload</h3>
+    {% for segment in segments %}
+    <div class="segment">
+      <span class="name">{{ segment.name }}</span>
+      {% for field in segment.fields %}
+      <span class="field">
+        <span class="index">{{ segment.number_of(*loop.index0) }}</span>
+        <span class="value">{{ field }}</span>
+      </span>
+      {% if !loop.last %}<span class="index">|</span>{% endif %}
+      {% endfor %}
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% when Body::Raw with { text } %}
+    {# §5.4 — "an unrecognised body is shown raw". #}
+    <pre>{{ text }}</pre>
+
+    {% endmatch %}
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Application properties</h2>
+  <div class="body">
+    {% if detail.properties.is_empty() %}
+    <p class="empty">None.</p>
+    {% else %}
+    <dl class="properties">
+      {% for (name, value) in detail.properties %}
+      <dt>{{ name }}</dt>
+      <dd>{{ value }}</dd>
+      {% endfor %}
+    </dl>
+    {% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Broker properties</h2>
+  <div class="body">
+    {% if detail.broker_properties.is_empty() %}
+    <p class="empty">None.</p>
+    {% else %}
+    <dl class="properties">
+      {% for (name, value) in detail.broker_properties %}
+      <dt>{{ name }}</dt>
+      <dd>{{ value }}</dd>
+      {% endfor %}
+    </dl>
+    {% endif %}
+  </div>
+</section>
+
+{% endblock %}

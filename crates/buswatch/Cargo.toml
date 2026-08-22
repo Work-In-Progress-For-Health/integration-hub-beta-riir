@@ -1,0 +1,45 @@
+[package]
+name = "buswatch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "A Service Bus queue inspector for local development. Peeks, never consumes, and is not for any environment holding real patient data."
+
+[lib]
+name = "buswatch"
+path = "src/lib.rs"
+
+[[bin]]
+name = "buswatch"
+path = "src/main.rs"
+
+[features]
+default = []
+emulator = []
+
+[dependencies]
+askama.workspace = true
+axum.workspace = true
+futures-util = { workspace = true, features = ["alloc"] }
+ihb-bus.workspace = true
+ihb-config.workspace = true
+ihb-runtime.workspace = true
+ihb-telemetry.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+tracing.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+tokio-test.workspace = true
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true

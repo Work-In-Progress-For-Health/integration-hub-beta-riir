@@ -1,0 +1,101 @@
+{# The queue snapshots of `spec/14-buswatch.md` §3 and §4. #}
+{% extends "base.html" %}
+
+{% block title %}BusWatch — queues{% endblock %}
+
+{% block header_links %}
+<span class="taken" style="color:#fff">{{ queues.len() }} queue{{ queues.len()|pluralize }}</span>
+{% endblock %}
+
+{% block content %}
+
+{% if let Some(message) = flash %}
+{# §3.4 — one-shot, consumed by this render and then discarded. #}
+<p class="flash">{{ message }}</p>
+{% endif %}
+
+<div class="toolbar">
+  {# §3.1 — `refresh_all=true` refreshes every queue. #}
+  <a class="button" href="/?refresh_all=true">Refresh all</a>
+  <a class="button secondary" href="/">Show cached</a>
+</div>
+
+{% if queues.is_empty() %}
+<p class="empty">
+No queues configured. Set <code>BUSWATCH_QUEUE_NAMES</code>, or leave it
+blank to discover them from <code>local/ServiceBusEmulatorConfig.json</code>
+(§2.2).
+</p>
+{% endif %}
+
+{% for queue in queues %}
+<section class="queue">
+  <header>
+    <h2>{{ queue.queue }}</h2>
+
+    {% if let Some(count) = queue.active_count %}
+    <span class="count{% if *count == 0 %} zero{% endif %}">{{ count }} active</span>
+    {% endif %}
+
+    {% if let Some(count) = queue.dead_letter_count %}
+    {% if *count > 0 %}
+    <span class="count dead">{{ count }} dead-letter</span>
+    {% endif %}
+    {% endif %}
+
+    <span class="spacer"></span>
+    <span class="taken">taken {{ queue.taken_at }}</span>
+
+    {# §3.1 — one queue, rather than every queue. #}
+    <a class="button secondary" href="/?refresh_queue={{ queue.queue|urlencode }}">Refresh</a>
+
+    <form method="post" action="/queues/{{ queue.queue|urlencode }}/clear"
+          onsubmit="return confirm('Clear every message on {{ queue.queue }}?')">
+      <button type="submit" class="danger">Clear</button>
+    </form>
+  </header>
+
+  {% if let Some(error) = queue.error %}
+  {# §6.2 — this queue shows its error and the rest of the page renders. #}
+  <p class="error">
+    {{ error.reason }}
+    {% if let Some(hint) = error.hint %}
+    {# §6.1 — the difference between a five-minute and a fifty-minute
+       debugging session. #}
+    <span class="hint">{{ hint }}</span>
+    {% endif %}
+  </p>
+  {% else if queue.messages.is_empty() %}
+  <p class="empty">No messages.</p>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th>Sequence</th>
+        <th>Enqueued</th>
+        <th>Message id</th>
+        <th>Session</th>
+        <th>Size</th>
+        <th>Preview</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for message in queue.messages %}
+      <tr>
+        <td class="mono">
+          <a href="/messages/{{ queue.queue|urlencode }}/{{ message.sequence }}">{{ message.sequence }}</a>
+        </td>
+        <td class="mono">{{ message.enqueued_at }}</td>
+        <td class="mono">{{ message.message_id.as_deref().unwrap_or("—") }}</td>
+        <td class="mono">{{ message.session_id.as_deref().unwrap_or("—") }}</td>
+        <td class="mono">{{ message.size }} B</td>
+        <td class="preview">{{ message.preview }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endfor %}
+
+{% endblock %}

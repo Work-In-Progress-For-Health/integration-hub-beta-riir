@@ -1,0 +1,21 @@
+{# A page that could not be produced: `spec/14-buswatch.md` §5.2's 404, and
+   the same shell for anything else that goes wrong. #}
+{% extends "base.html" %}
+
+{% block title %}BusWatch — {{ heading }}{% endblock %}
+
+{% block header_links %}
+<a href="/">← all queues</a>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <h2>{{ heading }}</h2>
+  <div class="body">
+    <p>{{ detail }}</p>
+    {% if let Some(hint) = hint %}
+    <p class="error"><span class="hint">{{ hint }}</span></p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

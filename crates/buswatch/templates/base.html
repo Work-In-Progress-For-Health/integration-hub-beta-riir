@@ -1,0 +1,32 @@
+{# The shared shell. `spec/14-buswatch.md` §7.2's brand lives in
+   `static/buswatch.css`; this file is structure only. #}
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}BusWatch{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="/static/buswatch.css">
+</head>
+<body>
+<header>
+<img src="/static/DHCW-logo-RGB-White.png" alt="Digital Health and Care Wales">
+<h1>BusWatch</h1>
+<span class="spacer"></span>
+{% block header_links %}{% endblock %}
+</header>
+
+{# §1.2, on the page itself rather than only in the specification. #}
+<p class="warning">
+Developer tool. Message bodies are shown without redaction, so this must
+not be pointed at an environment holding real patient data.
+</p>
+
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>
