@@ -34,6 +34,7 @@ directory says what "built" means.
 | [`17-testing-and-quality.md`](17-testing-and-quality.md) | Test taxonomy, fixtures, lints, gates |
 | [`18-deployment.md`](18-deployment.md) | Container contract, images, Compose, cutover |
 | [`rust-msrv-n-minus-3.md`](rust-msrv-n-minus-3.md) | The minimum supported Rust version, and why |
+| [`agents-directory-name-is-lowercase.md`](agents-directory-name-is-lowercase.md) | What an AI agents directory is called |
 
 ---
 
