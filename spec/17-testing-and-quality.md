@@ -341,6 +341,48 @@ change per crate.
 Service Bus emulator and SQL Server as services, under Podman
 ([`18-deployment.md`](18-deployment.md) §5.0).
 
+§9.2.1 Emulator-backed tests run in **parallel**, as `cargo test` runs
+everything else, and they MUST be isolated from each other by construction
+rather than by a `--test-threads=1` nobody can enforce. Two units of
+isolation exist and both are required:
+
+- **A session id.** A session-enabled queue hands out one lock per session
+  at a time, so two tests naming the same session either fight over the lock
+  or read each other's messages. Session ids are arbitrary to the broker, so
+  each test uses its own.
+- **A queue.** A non-session queue gives any message to any receiver, and
+  there is no id to vary. Tests that *consume* from the same non-session
+  queue take turns on a lock in the test binary.
+
+§9.2.1b **A shared queue also means no fixed message ids.** A test that
+sends a message with a constant id and then looks for it will find the
+*previous* run's message instead, if that run was interrupted before it
+settled — abandoned, with a raised delivery count. The test then fails
+asserting something about first delivery, with a number and no explanation.
+
+This is not hypothetical: it is what a cancelled CI run leaves behind, and
+`gate.yml` sets `cancel-in-progress` deliberately. Ids carry a per-run
+suffix, as correlation ids in the SQL-backed tests already do.
+
+§9.2.1c These three rules exist because a test binary's own lock does
+**not** isolate across binaries — `cargo test` runs them concurrently, so
+two crates whose emulator tests touch one queue can still collide however
+carefully each is written internally. Where that is possible, the queues
+are chosen so no two binaries share one.
+
+§9.2.1a The same rule applies to **process-global** state inside one test
+binary. A test whose premise is "nothing is configured" must establish that
+premise, not inherit it: `ihb_telemetry::otel::configure` installs a global
+`tracing` subscriber permanently, so a sibling test asserting that a span is
+disabled passed or failed according to the order `cargo test` happened to
+pick. Scope the state the assertion depends on.
+
+§9.2.2 This is not a tidiness rule. Sharing one session across the
+`ihb-bus` emulator tests failed a **different** test on each run — the worst
+kind of flake, because it looks like a real defect somewhere else. Isolating
+them also made the suite twice as fast, since the contention was resolved by
+waiting.
+
 §9.3 CI builds every container image, per
 [`18-deployment.md`](18-deployment.md).
 
