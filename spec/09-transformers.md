@@ -123,21 +123,52 @@ that writes a repeating field by another route MUST have its own test
 asserting on the **rendered** message, since the in-memory tree is not where
 the loss shows up.
 
-§2.2.2 **Open question — an all-empty repeating field.** The Python's
-range-copy documents itself as preserving "all repetitions … (including
-empty)", while its single-field copy skips an empty source. The two rules
-collide for a field that is present but whose every repetition is empty:
-`PID-3` of `~` is two empty repetitions.
+§2.2.2 ~~**Open question — an all-empty repeating field.**~~ **Settled by
+the golden tests of §6.6.** The answer is that a field is copied
+**structurally**, and a repetition count is preserved whether or not the
+repetitions carry anything.
 
-`ihb-fields::copy` follows the *single-field* rule and copies nothing, so
-`PID|1||~` becomes `PID|1||`. Found by fuzzing, in seconds, and left as it
-is for now: the two forms carry the same information, and the difference is
-one HL7 separator on a field with no content.
+The question was what happens to a field that is present but whose every
+repetition is empty — `PID-3` of `~` — given that the range-copy documents
+itself as preserving "all repetitions … (including empty)" while the
+single-field copy skips an empty source.
 
-It is recorded rather than settled because the golden tests of §6.6 compare
-byte-for-byte against the Python's output, and they are the right place to
-find out whether any real message is affected. If one is, this section says
-which rule wins.
+Three findings came out of running the real messages through both
+implementations, and each is now a primitive in `ihb-fields`:
+
+§2.2.2a **A whole field is copied by cloning its parsed structure, never by
+writing its value back.** §2.2.1 states this for the repetition separator.
+It is the same defect for `^` and `&`, and repetition-by-repetition copying
+does **not** fix those, because the component separators live *inside* each
+repetition. Reading `8888888^^^252^PI` and writing it through `set` yields
+`8888888\S\\S\\S\252\S\PI` — one component, every separator escaped —
+and MPI receives an identifier that is one long nonsense string. Measured
+against the ChemoCare and PHW corpora, where it affected every message.
+`ihb_fields::copy` clones `er7::Field` and writes no text at all.
+
+§2.2.2b **An empty trailing repetition is kept.** The Python's mappers add a
+destination repetition per source repetition unconditionally, so a field
+ending in `~` keeps it. A copy that declines to write empty values never
+creates the repetition, and the rendered field is one `~` short. Three of
+the nine ChemoCare fixtures differ on exactly this. `ihb_fields::ensure_repetitions`
+is the remedy, and a repetition count is information: `PID-13` with four
+repetitions, the fourth blank, says something different from one with three.
+
+§2.2.2c **Trailing empty components within a repetition are dropped.** The
+Python's `hl7apy` does this on the way out, so `^^W00000^` renders as
+`^^W00000` and `^^` renders as empty. HL7 states that trailing component
+delimiters are not significant, so nothing is lost, but the golden
+comparison is byte for byte. `ihb_fields::trim_trailing_separators` applies
+it, and only a transformer calls it — an ingress server forwards its input
+untouched (`spec/07-hl7-server.md` §9.8) and must not normalise anything.
+
+§2.2.2d **HL7's explicit null survives a copy.** `hl7-2` decodes `""` to the
+empty string, correctly — decoded, it *is* empty — so a copy that asks only
+for the value drops it, and "clear the value you hold" becomes "I am saying
+nothing about this". PIMS sends `""` in `PID-5.3` on every message.
+`ihb_fields::copy` checks the parsed structure and calls `set_null`. This is
+the same loss recorded at [`06-validation.md`](06-validation.md) §8.4.2 for
+the XML rendering, found independently here.
 
 §2.3 **`get_hl7_field_value(seg, path)`** reads a value, returning `""` for
 anything missing. Written **`read`**.
@@ -441,8 +472,23 @@ produces a repetition with `CX.1` = the source `CX.1`, `CX.4.1` = `NHS`,
 `CX.5` = `NH`.
 
 §5.3.2 The **second** source `PID-3` repetition is mapped only when its
-`CX.1` is non-empty **and** its `CX.5` is `PI`. It produces a repetition
-with `CX.1` = the source `CX.1`, `CX.4.1` = `103`, `CX.5` = `PI`.
+`CX.1` is non-empty **and** its `CX.5` is `PI`, compared case-insensitively
+after trimming — the same rule as §5.3.1, and the same in the Python, which
+applies `.strip().upper()` to both. `CX.1` is trimmed before it is written.
+It produces a repetition with `CX.1` = the source `CX.1`, `CX.4.1` = `103`,
+`CX.5` = `PI`.
+
+§5.3.2a **The mapped repetitions are packed from the first position.** They
+are written in order — first mapped identifier into `PID-3[1]`, second into
+`PID-3[2]` — not into the position they came from. A message whose first
+source repetition fails its guard therefore has its **second** identifier
+land in `PID-3[1]`.
+
+That is the Python's behaviour (`add_field` appends) and it is load-bearing:
+MPI reads `PID-3[1]`, and leaving an empty repetition there would put the
+patient's only identifier somewhere MPI does not look. The `a08` fixture in
+`pims_messages.py` is exactly this case — its first repetition has an empty
+`CX.1` — which is why it is in the corpus.
 
 §5.3.3 Death date: when `PID-29.1` has **more than 6 characters**, it is
 timezone-stripped per §5.6; otherwise it is set to `""` — HL7's explicit
