@@ -1,0 +1,47 @@
+[package]
+name = "soap-sender"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "SOAP egress: wraps a message in an envelope, posts it, and completes it only on a positive response."
+
+[lib]
+name = "soap_sender"
+path = "src/lib.rs"
+
+[[bin]]
+name = "soap-sender"
+path = "src/bin/soap-sender.rs"
+
+[[bin]]
+name = "soap-subscription-sender"
+path = "src/bin/soap-subscription-sender.rs"
+
+[dependencies]
+hl7-2-soap.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+ihb-bus.workspace = true
+ihb-config.workspace = true
+ihb-fields.workspace = true
+ihb-health.workspace = true
+ihb-runtime.workspace = true
+ihb-sender.workspace = true
+ihb-telemetry.workspace = true
+rustls-pki-types.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
+tokio-rustls.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tokio-test.workspace = true
+
+[lints]
+workspace = true
