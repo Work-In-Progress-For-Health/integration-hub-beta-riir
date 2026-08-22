@@ -597,8 +597,17 @@ mod tests {
     #[test]
     fn a_handler_span_is_free_when_nothing_is_listening() {
         // spec/04-observability.md §4.7.3 — zero overhead when tracing is
-        // not configured. `Span::none()` is exactly that.
-        let span = handler_span("hl7-sender", "topic/subscription", None);
-        assert!(span.is_disabled());
+        // not configured.
+        //
+        // "Nothing is listening" is established here rather than assumed
+        // from the process. `configure` installs a **global** subscriber,
+        // permanently and for every test that runs after it, so a bare
+        // `assert!(span.is_disabled())` passes or fails according to the
+        // order `cargo test` happens to pick — which is the flake this
+        // scoping removes. See spec/17-testing-and-quality.md §9.2.1.
+        tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::default(), || {
+            let span = handler_span("hl7-sender", "topic/subscription", None);
+            assert!(span.is_disabled());
+        });
     }
 }
