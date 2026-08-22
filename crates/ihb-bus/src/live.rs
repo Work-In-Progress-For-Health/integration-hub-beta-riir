@@ -41,6 +41,14 @@
 //! If a future here is ever awaited outside a spawned task — in a deeply
 //! nested combinator, say — that reasoning stops holding and this allow
 //! should go.
+//!
+//! That caveat has since been exercised. `ihb-e2e`'s end-to-end test awaits
+//! a dozen of these in one linear function body, and overflows a 2 MB
+//! thread stack doing it. The fix there is a thread with a larger stack,
+//! and it is worth knowing that the limit is real rather than theoretical:
+//! roughly sixty of these futures nested in one frame is all it takes. No
+//! service does that — each of its calls is one step of a loop — but a test
+//! that writes a whole flow as one function does.
 
 // See the module documentation above for why this is a considered trade
 // rather than an inconvenience.
@@ -51,19 +59,21 @@ use std::time::Duration;
 
 use azservicebus::core::BasicRetryPolicy;
 use azservicebus::{
-    ServiceBusClient, ServiceBusClientOptions, ServiceBusMessage, ServiceBusReceivedMessage,
-    ServiceBusReceiver, ServiceBusReceiverOptions, ServiceBusSender, ServiceBusSenderOptions,
-    ServiceBusSessionReceiver, ServiceBusSessionReceiverOptions, ServiceBusTransportType,
+    ServiceBusClient, ServiceBusClientOptions, ServiceBusMessage, ServiceBusPeekedMessage,
+    ServiceBusReceivedMessage, ServiceBusReceiver, ServiceBusReceiverOptions, ServiceBusSender,
+    ServiceBusSenderOptions, ServiceBusSessionReceiver, ServiceBusSessionReceiverOptions,
+    ServiceBusTransportType,
 };
 use fe2o3_amqp_types::messaging::ApplicationProperties;
 use tokio::sync::Mutex;
 
 use crate::connection::Endpoint;
 use crate::error::BusError;
-use crate::message::{Incoming, Outcome, Outgoing, Token};
+use crate::message::{Incoming, Outcome, Outgoing, Peeked, Token};
 use crate::metadata::Properties;
 use crate::renew::{Ended, LockRenewer};
 use crate::retry::{Disposition, MAX_SEND_ATTEMPTS, classify};
+use crate::sink::MessageSink;
 
 /// How long a receive waits for a message before returning empty.
 ///
@@ -103,12 +113,42 @@ impl LiveBus {
     /// [`BusError::NotConfigured`] for a namespace-only endpoint, which needs
     /// an Azure credential this crate does not yet wire up.
     pub async fn connect(endpoint: &Endpoint) -> Result<Self, BusError> {
+        Self::connect_within(endpoint, None).await
+    }
+
+    /// Connect, with a shorter per-attempt timeout.
+    ///
+    /// [`LiveBus::connect`] leaves `azservicebus` on its default 60 seconds
+    /// per attempt, which is right for a service: a receive loop that waits
+    /// a minute for a message that is not there has lost nothing.
+    ///
+    /// It is wrong for an interactive tool. `spec/14-buswatch.md` §3 has a
+    /// developer waiting on an HTTP response, and an operation against an
+    /// **empty** queue is the normal case there — clearing a queue that is
+    /// already clear, or asking for the next session on an idle queue. A
+    /// minute of that per queue is a page that never loads.
+    ///
+    /// Shortening the timeout rather than wrapping the call in
+    /// [`tokio::time::timeout`] is deliberate: cancelling a session
+    /// acceptance mid-flight can leave the session locked, and a developer
+    /// tool must not be able to block the service it is watching.
+    ///
+    /// # Errors
+    ///
+    /// As [`LiveBus::connect`].
+    pub async fn connect_within(
+        endpoint: &Endpoint,
+        try_timeout: Option<Duration>,
+    ) -> Result<Self, BusError> {
         let namespace = endpoint.namespace();
 
-        let options = ServiceBusClientOptions {
+        let mut options = ServiceBusClientOptions {
             transport_type: ServiceBusTransportType::AmqpTcp,
             ..Default::default()
         };
+        if let Some(try_timeout) = try_timeout {
+            options.retry_options.try_timeout = try_timeout;
+        }
 
         let Some(connection_string) = endpoint.expose_connection_string() else {
             // A namespace on its own needs `DefaultAzureCredential`, which
@@ -207,6 +247,62 @@ impl LiveBus {
             .lock()
             .await
             .accept_session_for_queue(queue, session, ServiceBusSessionReceiverOptions::default())
+            .await
+            .map_err(|error| BusError::Receive {
+                entity: queue.to_string(),
+                reason: error.to_string(),
+            })?;
+
+        Ok(LiveReceiver::new(
+            Inner::Session(receiver),
+            queue.to_string(),
+        ))
+    }
+
+    /// Close the connection.
+    ///
+    /// Every service here runs until the process stops, so this exists for
+    /// the one that does not: `spec/14-buswatch.md` §7.3 requires BusWatch
+    /// to release its AMQP resources on shutdown, because a developer
+    /// restarting it repeatedly against the emulator's hard connection
+    /// quota (§6.1) will otherwise run out.
+    ///
+    /// # Errors
+    ///
+    /// [`BusError::Connect`] carrying whatever the broker said on the way
+    /// out — worth logging, not worth acting on: the process is stopping.
+    pub async fn close(self) -> Result<(), BusError> {
+        // `dispose` consumes the client, and the client lives behind a
+        // mutex shared with every receiver. Taking `self` by value proves
+        // no receiver can be handed out afterwards, so unwrapping the
+        // `Mutex` here is sound rather than a race.
+        self.client
+            .into_inner()
+            .dispose()
+            .await
+            .map_err(|error| BusError::Connect {
+                namespace: self.namespace,
+                reason: error.to_string(),
+            })
+    }
+
+    /// A receiver for whichever session of a queue is free next.
+    ///
+    /// A session-enabled queue cannot be read without holding a session
+    /// lock, so an inspector that does not know the session ids has to ask
+    /// for the next available one (`spec/14-buswatch.md` §4.4). What comes
+    /// back is one session's messages, not the queue's.
+    ///
+    /// # Errors
+    ///
+    /// [`BusError::Receive`] when no session is available, which on an idle
+    /// queue is the normal case rather than a fault.
+    pub async fn next_session_receiver(&self, queue: &str) -> Result<LiveReceiver, BusError> {
+        let receiver = self
+            .client
+            .lock()
+            .await
+            .accept_next_session_for_queue(queue, ServiceBusSessionReceiverOptions::default())
             .await
             .map_err(|error| BusError::Receive {
                 entity: queue.to_string(),
@@ -480,17 +576,45 @@ impl LiveReceiver {
     ///
     /// [`BusError::Receive`].
     pub async fn receive(&self, limit: u32) -> Result<Vec<Incoming>, BusError> {
+        self.receive_within(limit, MAX_WAIT).await
+    }
+
+    /// Receive up to `limit` messages, waiting at most `wait`.
+    ///
+    /// [`LiveReceiver::receive`] waits [`MAX_WAIT`], which is right for a
+    /// service: a receive loop that waits a minute for a message that is
+    /// not there has lost nothing.
+    ///
+    /// It is wrong for an interactive tool, where an empty queue is the
+    /// normal case and a developer is waiting on the answer
+    /// (`spec/14-buswatch.md` §3).
+    ///
+    /// Shortening the wait rather than wrapping [`LiveReceiver::receive`] in
+    /// [`tokio::time::timeout`] is deliberate, and the difference is not
+    /// cosmetic: cancelling a receive mid-flight **loses messages the
+    /// broker has already handed over** — see `spec/03-message-bus.md` §5.5,
+    /// which was written after two queues with messages on them read as
+    /// empty through fifteen attempts.
+    ///
+    /// # Errors
+    ///
+    /// [`BusError::Receive`].
+    pub async fn receive_within(
+        &self,
+        limit: u32,
+        wait: Duration,
+    ) -> Result<Vec<Incoming>, BusError> {
         let mut state = self.state.lock().await;
 
         let received = match &mut state.inner {
             Inner::Queue(receiver) => {
                 receiver
-                    .receive_messages_with_max_wait_time(limit, MAX_WAIT)
+                    .receive_messages_with_max_wait_time(limit, wait)
                     .await
             }
             Inner::Session(receiver) => {
                 receiver
-                    .receive_messages_with_max_wait_time(limit, MAX_WAIT)
+                    .receive_messages_with_max_wait_time(limit, wait)
                     .await
             }
         }
@@ -513,6 +637,36 @@ impl LiveReceiver {
         drop(state);
 
         Ok(out)
+    }
+
+    /// Look at up to `limit` messages without locking or consuming them.
+    ///
+    /// The read `spec/14-buswatch.md` §4.3 requires: a peek leaves the
+    /// message where it is, so a developer can see what a service is about
+    /// to process without taking it away from that service. `from` starts
+    /// the scan at a sequence number; `None` continues from wherever the
+    /// last peek on this receiver stopped.
+    ///
+    /// Peeked messages carry no lock token, so they come back as
+    /// [`Peeked`] rather than [`Incoming`] and cannot be settled.
+    ///
+    /// # Errors
+    ///
+    /// [`BusError::Receive`].
+    pub async fn peek(&self, limit: u32, from: Option<i64>) -> Result<Vec<Peeked>, BusError> {
+        let mut state = self.state.lock().await;
+
+        let peeked = match &mut state.inner {
+            Inner::Queue(receiver) => receiver.peek_messages(limit, from).await,
+            Inner::Session(receiver) => receiver.peek_messages(limit, from).await,
+        }
+        .map_err(|error| BusError::Receive {
+            entity: self.entity.clone(),
+            reason: error.to_string(),
+        })?;
+        drop(state);
+
+        Ok(peeked.iter().map(to_peeked).collect())
     }
 
     /// Settle a received message.
@@ -690,6 +844,38 @@ fn to_incoming(message: &ServiceBusReceivedMessage, token: Token) -> Incoming {
     }
 }
 
+/// Convert a peeked message into the type of `spec/14-buswatch.md` §4.2.
+///
+/// Same string-only property filter as [`to_incoming`], for the reason in
+/// `spec/03-message-bus.md` §4.2.
+fn to_peeked(message: &ServiceBusPeekedMessage) -> Peeked {
+    let mut properties = Properties::new();
+
+    if let Some(raw) = message.application_properties() {
+        for (key, value) in &raw.0 {
+            if let fe2o3_amqp_types::primitives::SimpleValue::String(text) = value {
+                properties.insert(key.clone(), text.clone());
+            }
+        }
+    }
+
+    Peeked {
+        body: message.body().map(<[u8]>::to_vec).unwrap_or_default(),
+        sequence: message.sequence_number(),
+        enqueued_at: message
+            .enqueued_time()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| message.enqueued_time().to_string()),
+        message_id: message.message_id().map(|id| id.to_string()),
+        session_id: message.session_id().map(str::to_string),
+        properties,
+        delivery_count: message.delivery_count(),
+        correlation_id: message.correlation_id().map(|id| id.to_string()),
+        content_type: message.content_type().map(str::to_string),
+        subject: message.subject().map(str::to_string),
+    }
+}
+
 /// Whether renewal ended cleanly.
 ///
 /// A convenience for the receive loop, which wants to log the difference
@@ -697,6 +883,17 @@ fn to_incoming(message: &ServiceBusReceivedMessage, token: Token) -> Incoming {
 #[must_use]
 pub const fn renewal_was_clean(ended: Ended) -> bool {
     matches!(ended, Ended::Stopped)
+}
+
+impl MessageSink for LiveSender {
+    /// [`LiveSender::send`], with its retry and its classification.
+    async fn send(&self, message: Outgoing) -> Result<(), BusError> {
+        Self::send(self, message).await
+    }
+
+    fn entity(&self) -> &str {
+        &self.entity
+    }
 }
 
 #[cfg(test)]

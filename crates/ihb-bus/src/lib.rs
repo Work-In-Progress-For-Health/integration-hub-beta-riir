@@ -76,6 +76,7 @@ pub mod message;
 pub mod metadata;
 pub mod renew;
 pub mod retry;
+pub mod sink;
 pub mod store;
 
 pub use connection::Endpoint;

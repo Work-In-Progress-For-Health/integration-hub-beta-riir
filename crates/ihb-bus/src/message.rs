@@ -113,6 +113,71 @@ pub struct Incoming {
     pub token: Token,
 }
 
+/// A message read without locking or consuming it.
+///
+/// The result of a **peek**, which `spec/14-buswatch.md` §4.3 makes the only
+/// way BusWatch reads a queue: it leaves the message where it is, so a
+/// developer can look at what a service is about to process without taking
+/// it away from that service.
+///
+/// Distinct from [`Incoming`] because a peeked message carries no lock
+/// token, and so cannot be settled. That is a type-level distinction rather
+/// than a documented one on purpose: there is no way to accidentally
+/// complete something that was only looked at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Peeked {
+    /// The payload.
+    pub body: Vec<u8>,
+    /// The broker's sequence number, which is how §5.1 addresses a message.
+    pub sequence: i64,
+    /// When the broker enqueued it, in RFC 3339.
+    pub enqueued_at: String,
+    /// The Service Bus message id, when the sender set one.
+    pub message_id: Option<String>,
+    /// The session it is on.
+    pub session_id: Option<String>,
+    /// The application properties, string-valued only, as [`Incoming`].
+    pub properties: Properties,
+    /// How many times it has been delivered.
+    pub delivery_count: Option<u32>,
+    /// The correlation id the broker holds, which is separate from the
+    /// `CorrelationId` application property of `spec/03-message-bus.md` §4.
+    pub correlation_id: Option<String>,
+    /// The content type, when set.
+    pub content_type: Option<String>,
+    /// The subject, when set.
+    pub subject: Option<String>,
+}
+
+impl Peeked {
+    /// The body as text, when it is valid UTF-8.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use ihb_bus::message::Peeked;
+    /// # use ihb_bus::metadata::Properties;
+    /// let peeked = Peeked {
+    ///     body: b"MSH|^~\\&|252".to_vec(),
+    ///     sequence: 7,
+    ///     enqueued_at: "2026-08-21T09:15:00Z".to_string(),
+    ///     message_id: None,
+    ///     session_id: None,
+    ///     properties: Properties::new(),
+    ///     delivery_count: None,
+    ///     correlation_id: None,
+    ///     content_type: None,
+    ///     subject: None,
+    /// };
+    ///
+    /// assert_eq!(peeked.text().as_deref(), Some("MSH|^~\\&|252"));
+    /// ```
+    #[must_use]
+    pub fn text(&self) -> Option<String> {
+        String::from_utf8(self.body.clone()).ok()
+    }
+}
+
 impl Incoming {
     /// The body as text, when it is valid UTF-8.
     #[must_use]

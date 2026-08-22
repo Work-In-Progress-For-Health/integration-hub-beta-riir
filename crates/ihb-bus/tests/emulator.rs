@@ -24,6 +24,10 @@
 // `src/lib.rs` does not reach it. Asserting is what this file is for.
 // See spec/17-testing-and-quality.md §2.3.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+// Every `azservicebus` future is about 32 KB. `src/live.rs` records why that
+// is allowed rather than boxed away; a test crate does not inherit a
+// module-level allow, so it is repeated here for the same reason.
+#![allow(clippy::large_futures)]
 
 use std::time::Duration;
 
@@ -49,8 +53,50 @@ const TOPIC: &str = "mpihl7input";
 /// The subscription on [`TOPIC`].
 const SUBSCRIPTION: &str = "mpihl7input-test-subscription";
 
-/// The PHW flow's session.
-const SESSION: &str = "phw-to-mpi";
+/// A session id nobody else in this file uses.
+///
+/// These tests used to share one session, `phw-to-mpi`. A session-enabled
+/// queue hands out **one lock per session at a time**, so two tests naming
+/// the same session either fought over the lock or read each other's
+/// messages — and `cargo test` runs them in parallel. It failed a different
+/// test on each run, which is the worst kind of flake: the one that looks
+/// like a real defect somewhere else.
+///
+/// The session id is arbitrary to the broker, so the fix is to stop sharing
+/// it. `label` keeps the failure legible when a test does fail.
+fn session(label: &str) -> String {
+    format!("emulator-{label}")
+}
+
+/// A message id unique to this run.
+///
+/// These tests share queues, so a **fixed** id is poison: an interrupted
+/// run leaves its message behind — abandoned, with a raised delivery
+/// count — and the next run finds that one instead of its own. A test
+/// asserting "this is the first delivery" then fails with a delivery count
+/// of three and no explanation.
+///
+/// That is not hypothetical. It is what a cancelled CI run does, and
+/// `.github/workflows/gate.yml` sets `cancel-in-progress`. See
+/// `spec/17-testing-and-quality.md` §9.2.1b.
+fn message_id(label: &str) -> String {
+    format!(
+        "{label}-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_nanos() % 1_000_000_000)
+            .unwrap_or_default()
+    )
+}
+
+/// Serialises the tests that **receive** from [`PLAIN_QUEUE`].
+///
+/// A non-session queue gives any message to any receiver, so two tests
+/// draining it concurrently take each other's messages. Unlike the session
+/// case there is no id to vary: the queue is the unit of isolation, so the
+/// tests that consume from it take turns. Tests on other queues are
+/// unaffected and still run in parallel.
+static PLAIN_QUEUE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Connect to the emulator.
 async fn bus() -> LiveBus {
@@ -91,11 +137,11 @@ async fn accept_session(bus: &LiveBus, queue: &str, session: &str) -> LiveReceiv
 /// Settle everything, so a run leaves the queue as it found it.
 async fn drain(receiver: &LiveReceiver) {
     loop {
-        let received = receiver.receive(50).await.unwrap();
-        if received.is_empty() {
+        let delivered = receiver.receive(50).await.unwrap();
+        if delivered.is_empty() {
             break;
         }
-        for message in &received {
+        for message in &delivered {
             receiver.settle(message, Outcome::Accepted).await.unwrap();
         }
     }
@@ -114,30 +160,32 @@ async fn a_message_survives_a_session_round_trip_with_its_metadata() {
         workflow_id: "phw-to-mpi".into(),
     };
 
+    let session = session("round-trip");
+    let round_trip_id = message_id("RT");
     let sender = bus.sender(SESSION_QUEUE).await.unwrap();
     sender
         .send(
             Outgoing::new("MSH|^~\\&|252|252|100|100|20260729||ADT^A28|RT1|P|2.5")
-                .with_message_id("RT1")
-                .with_session(SESSION)
+                .with_message_id(round_trip_id.clone())
+                .with_session(&session)
                 .with_properties(tracking.to_properties()),
         )
         .await
         .unwrap();
 
-    let receiver = accept_session(&bus, SESSION_QUEUE, SESSION).await;
-    let received = receiver.receive(10).await.unwrap();
+    let receiver = accept_session(&bus, SESSION_QUEUE, &session).await;
+    let delivered = receiver.receive(10).await.unwrap();
 
-    let message = received
+    let message = delivered
         .iter()
-        .find(|m| m.message_id.as_deref() == Some("RT1"))
+        .find(|m| m.message_id.as_deref() == Some(round_trip_id.as_str()))
         .expect("the message came back");
 
     assert_eq!(message.properties["CorrelationId"], "emulator-round-trip");
     assert_eq!(message.properties["WorkflowID"], "phw-to-mpi");
-    assert_eq!(message.session_id.as_deref(), Some(SESSION));
+    assert_eq!(message.session_id.as_deref(), Some(session.as_str()));
 
-    for message in &received {
+    for message in &delivered {
         receiver.settle(message, Outcome::Accepted).await.unwrap();
     }
     receiver.close().await.unwrap();
@@ -147,11 +195,13 @@ async fn a_message_survives_a_session_round_trip_with_its_metadata() {
 async fn abandoning_redelivers_with_a_raised_delivery_count() {
     // spec/10-senders.md §2.2 depends on this: the store event is emitted on
     // the first attempt only, so a retried message is not stored twice.
+    let _turn = PLAIN_QUEUE_LOCK.lock().await;
     let bus = bus().await;
 
+    let id = message_id("AB");
     let sender = bus.sender(PLAIN_QUEUE).await.unwrap();
     sender
-        .send(Outgoing::new("abandon-me").with_message_id("AB1"))
+        .send(Outgoing::new("abandon-me").with_message_id(id.clone()))
         .await
         .unwrap();
 
@@ -160,7 +210,7 @@ async fn abandoning_redelivers_with_a_raised_delivery_count() {
     let first = receiver.receive(10).await.unwrap();
     let target = first
         .iter()
-        .find(|m| m.message_id.as_deref() == Some("AB1"))
+        .find(|m| m.message_id.as_deref() == Some(id.as_str()))
         .expect("received once");
     assert!(
         target.is_first_delivery(),
@@ -169,7 +219,7 @@ async fn abandoning_redelivers_with_a_raised_delivery_count() {
     );
 
     for message in &first {
-        let outcome = if message.message_id.as_deref() == Some("AB1") {
+        let outcome = if message.message_id.as_deref() == Some(id.as_str()) {
             Outcome::Deferred
         } else {
             Outcome::Accepted
@@ -180,7 +230,7 @@ async fn abandoning_redelivers_with_a_raised_delivery_count() {
     let second = receiver.receive(10).await.unwrap();
     let again = second
         .iter()
-        .find(|m| m.message_id.as_deref() == Some("AB1"))
+        .find(|m| m.message_id.as_deref() == Some(id.as_str()))
         .expect("redelivered after abandon");
 
     assert!(
@@ -221,14 +271,14 @@ async fn a_topic_reaches_its_subscription() {
         "spec/03-message-bus.md §2.2 — a subscription names itself this way"
     );
 
-    let received = receiver.receive(10).await.unwrap();
+    let delivered = receiver.receive(10).await.unwrap();
     assert!(
-        received
+        delivered
             .iter()
             .any(|m| m.message_id.as_deref() == Some("TOP1"))
     );
 
-    for message in &received {
+    for message in &delivered {
         receiver.settle(message, Outcome::Accepted).await.unwrap();
     }
     receiver.close().await.unwrap();
@@ -242,19 +292,20 @@ async fn a_session_lock_is_renewed_while_a_batch_is_held() {
     // happening.
     let bus = bus().await;
 
+    let session = session("renewal");
     let sender = bus.sender(SESSION_QUEUE).await.unwrap();
     sender
         .send(
             Outgoing::new("held-a-while")
                 .with_message_id("HOLD1")
-                .with_session(SESSION),
+                .with_session(&session),
         )
         .await
         .unwrap();
 
-    let receiver = accept_session(&bus, SESSION_QUEUE, SESSION).await;
-    let received = receiver.receive(10).await.unwrap();
-    assert!(!received.is_empty());
+    let receiver = accept_session(&bus, SESSION_QUEUE, &session).await;
+    let delivered = receiver.receive(10).await.unwrap();
+    assert!(!delivered.is_empty());
 
     let renewer = receiver
         .renew_session_lock()
@@ -275,7 +326,7 @@ async fn a_session_lock_is_renewed_while_a_batch_is_held() {
         "renewal ended badly: {ended:?}"
     );
 
-    for message in &received {
+    for message in &delivered {
         receiver
             .settle(message, Outcome::Accepted)
             .await
@@ -290,7 +341,7 @@ async fn closing_while_the_renewer_still_holds_the_receiver_is_refused() {
     // ordering the Python spent a nine-line comment explaining is a type
     // error here.
     let bus = bus().await;
-    let receiver = accept_session(&bus, SESSION_QUEUE, SESSION).await;
+    let receiver = accept_session(&bus, SESSION_QUEUE, &session("closing")).await;
 
     let renewer = receiver.renew_session_lock().unwrap();
 
@@ -305,6 +356,7 @@ async fn closing_while_the_renewer_still_holds_the_receiver_is_refused() {
 
 #[tokio::test]
 async fn a_batch_send_delivers_every_message() {
+    let _turn = PLAIN_QUEUE_LOCK.lock().await;
     // spec/03-message-bus.md §3.3 — batching with auto-split.
     let bus = bus().await;
 
@@ -320,12 +372,12 @@ async fn a_batch_send_delivers_every_message() {
 
     let mut seen = 0;
     for _ in 0..5 {
-        let received = receiver.receive(25).await.unwrap();
-        if received.is_empty() {
+        let delivered = receiver.receive(25).await.unwrap();
+        if delivered.is_empty() {
             break;
         }
-        seen += received.len();
-        for message in &received {
+        seen += delivered.len();
+        for message in &delivered {
             receiver.settle(message, Outcome::Accepted).await.unwrap();
         }
         if seen >= 25 {
@@ -345,11 +397,14 @@ async fn an_empty_queue_returns_nothing_rather_than_failing() {
     // Against a non-session queue: only `local-inthub-messagestore` and
     // `local-inthub-mpi-mock-receiver` are, per
     // `local/ServiceBusEmulatorConfig.json`.
+    //
+    // This uses [`PLAIN_QUEUE`] — the other one — because `buswatch`'s
+    // emulator tests own `local-inthub-mpi-mock-receiver`, and a lock in
+    // *this* binary cannot isolate against *that* one: `cargo test` runs
+    // the two concurrently. See spec/17-testing-and-quality.md §9.2.1c.
+    let _turn = PLAIN_QUEUE_LOCK.lock().await;
     let bus = bus().await;
-    let receiver = bus
-        .queue_receiver("local-inthub-mpi-mock-receiver")
-        .await
-        .unwrap();
+    let receiver = bus.queue_receiver(PLAIN_QUEUE).await.unwrap();
 
     drain(&receiver).await;
 

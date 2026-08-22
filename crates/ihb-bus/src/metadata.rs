@@ -166,33 +166,12 @@ pub fn correlation_id_for_event(value: &str) -> Option<&str> {
     }
 }
 
-/// Wrap a list of codes in pipes, for a routing property.
-///
-/// Implements `spec/03-message-bus.md` §4.1.
-///
-/// The leading and trailing pipes are not decoration: the dashboard and the
-/// message store query these with SQL `LIKE '%|108|%'`, and without them
-/// `108` would match inside `1108`. An empty list renders as `""` rather
-/// than `"||"`, so an absent value is absent rather than matching a query
-/// for the empty code.
-///
-/// # Examples
-///
-/// ```
-/// use ihb_bus::metadata::pipe_wrap;
-///
-/// assert_eq!(pipe_wrap(&["252".to_string(), "109".to_string()]), "|252|109|");
-/// assert_eq!(pipe_wrap(&[]), "");
-/// assert!(!pipe_wrap(&["1084".to_string()]).contains("|108|"));
-/// ```
-#[must_use]
-pub fn pipe_wrap(values: &[String]) -> String {
-    if values.is_empty() {
-        String::new()
-    } else {
-        format!("|{}|", values.join("|"))
-    }
-}
+// `pipe_wrap` used to live here as well as in `ihb-fields`, byte for byte
+// identical. Two copies of a rule whose specification says "MUST be
+// reproduced exactly" (`spec/03-message-bus.md` §4.1) is two things to keep
+// in step, and this copy had no callers outside its own tests. It is
+// `ihb_fields::pipe_wrap` now, next to `authority_codes`, which is what
+// produces the lists it wraps.
 
 #[cfg(test)]
 mod tests {
@@ -268,26 +247,5 @@ mod tests {
         assert_eq!(correlation_id_for_event(""), None);
         assert_eq!(correlation_id_for_event(" N/A "), None);
         assert_eq!(correlation_id_for_event(" 3f6d "), Some("3f6d"));
-    }
-
-    #[test]
-    fn pipe_wrapping_delimits_both_ends() {
-        // spec/03-message-bus.md §4.1
-        assert_eq!(pipe_wrap(&["252".into(), "109".into()]), "|252|109|");
-        assert_eq!(pipe_wrap(&["108".into()]), "|108|");
-    }
-
-    #[test]
-    fn pipe_wrapping_an_empty_list_gives_an_empty_string() {
-        // Not "||", which a LIKE query for the empty code would match.
-        assert_eq!(pipe_wrap(&[]), "");
-    }
-
-    #[test]
-    fn pipe_wrapping_stops_a_substring_match() {
-        // The entire reason the delimiters exist.
-        assert!(!pipe_wrap(&["1084".into()]).contains("|108|"));
-        assert!(!pipe_wrap(&["1108".into()]).contains("|108|"));
-        assert!(pipe_wrap(&["108".into()]).contains("|108|"));
     }
 }

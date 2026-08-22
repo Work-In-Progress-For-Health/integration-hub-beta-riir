@@ -22,11 +22,13 @@
 #![allow(clippy::significant_drop_tightening)]
 
 use std::collections::VecDeque;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use crate::error::BusError;
 use crate::message::{Incoming, Outcome, Outgoing, Token};
 use crate::metadata::Properties;
+use crate::sink::MessageSink;
 
 /// One queue or topic inside a [`FakeBus`].
 #[derive(Debug, Default)]
@@ -121,6 +123,39 @@ impl FakeBus {
             .push_back(incoming);
 
         Ok(())
+    }
+
+    /// A [`MessageSink`] onto one entity.
+    ///
+    /// The live bus hands out a sender per entity
+    /// ([`LiveBus::sender`](crate::live::LiveBus::sender)); this is the same
+    /// shape, so a service under test is wired up exactly as it is in
+    /// production rather than through a test-only side door.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ihb_bus::fake::FakeBus;
+    /// use ihb_bus::message::Outgoing;
+    /// use ihb_bus::sink::MessageSink;
+    ///
+    /// # tokio_test::block_on(async {
+    /// let bus = FakeBus::new();
+    /// let sink = bus.sender("mpi-sender-ingress");
+    ///
+    /// sink.send(Outgoing::new("MSH|^~\\&|252").with_message_id("M1"))
+    ///     .await
+    ///     .unwrap();
+    ///
+    /// assert_eq!(bus.all_sent("mpi-sender-ingress").len(), 1);
+    /// # });
+    /// ```
+    #[must_use]
+    pub fn sender(&self, entity: &str) -> FakeSender {
+        FakeSender {
+            bus: self.clone(),
+            entity: entity.to_string(),
+        }
     }
 
     /// Receive up to `limit` messages, moving them in flight.
@@ -485,5 +520,37 @@ mod tests {
                 .len(),
             1
         );
+    }
+}
+
+/// A [`MessageSink`] onto one entity of a [`FakeBus`].
+///
+/// Made by [`FakeBus::sender`]. Cloning it, or making a second one for the
+/// same entity, shares the one bus — as two senders on the same queue do.
+#[derive(Debug, Clone)]
+pub struct FakeSender {
+    /// The bus this writes to.
+    bus: FakeBus,
+    /// The queue or topic.
+    entity: String,
+}
+
+impl MessageSink for FakeSender {
+    /// Put the message on the bus, honouring any armed failure.
+    ///
+    /// No retry, deliberately: [`FakeBus::fail_next_send`] arms **one**
+    /// failure, and a fake that retried would swallow it and quietly test
+    /// the opposite of what the test asked for.
+    ///
+    /// Written as a ready future rather than an `async fn` because there is
+    /// nothing here to await — the fake is a `Mutex` and a `Vec`. An `async`
+    /// body with no suspension point would be a future that only ever
+    /// completes on its first poll, which is what this says directly.
+    fn send(&self, message: Outgoing) -> impl Future<Output = Result<(), BusError>> + Send {
+        std::future::ready(self.bus.send(&self.entity, message))
+    }
+
+    fn entity(&self) -> &str {
+        &self.entity
     }
 }
