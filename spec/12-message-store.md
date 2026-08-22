@@ -152,6 +152,55 @@ per statement, all statements sharing one transaction. `MAX_BATCH_SIZE` of
 §5.7 A connection string, a username, or a password MUST NOT appear in any
 log line or error, at any level.
 
+### §5.8 This build cannot encrypt to SQL
+
+**Status: open. Blocks production use against Azure SQL. Tracked as P6.6.**
+
+`tiberius` 0.12.3 — its latest release — pins `tokio-rustls` 0.24, and so
+`rustls` 0.21 and `rustls-webpki` 0.101. That version of `rustls-webpki`
+carries three unfixed advisories:
+
+| Advisory | Defect |
+| --- | --- |
+| RUSTSEC-2026-0098 | URI name constraints ignored rather than rejected |
+| RUSTSEC-2026-0099 | Name constraints accepted for wildcard names |
+| RUSTSEC-2026-0104 | Reachable panic parsing a certificate revocation list |
+
+All three are in certificate verification, and the fix needs
+`rustls-webpki` >= 0.103.12. There is no patched 0.101 release, so no
+upgrade path exists while `tiberius` pins `rustls` 0.21.
+
+§5.8.1 **The response is to carry no TLS backend at all**, rather than to
+carry a weak one. `tiberius` is built with neither `rustls` nor
+`native-tls`, which removes the vulnerable crates from the dependency graph
+entirely — `cargo deny` passes with no ignore, and there is no possibility
+of a future change quietly starting to use them.
+
+`native-tls` is not an alternative:
+[`17-testing-and-quality.md`](17-testing-and-quality.md) §8.2 forbids
+openssl, and [`18-deployment.md`](18-deployment.md) §2.3 depends on there
+being no system TLS library to link against.
+
+§5.8.2 **`SQL_ENCRYPT=Yes` is therefore a connection failure**, naming this
+section. It is not downgraded to plaintext. This is the connection that
+carries `RawPayload` — every message crossing the Hub, in full and
+unredacted (§2.3) — and an operator who asked for TLS and silently got none
+would have no way to find out.
+
+§5.8.3 **What this permits today.** A local SQL Server over plaintext,
+which is what §6.5's tests use, and which is how the local stack of
+[`18-deployment.md`](18-deployment.md) §5 runs. It does **not** permit
+production use against Azure SQL, which requires encryption in transit.
+
+§5.8.4 The other thing blocking production use is §5.4.1: managed-identity
+authentication is not implemented, so only password authentication works.
+The two are tracked together, because either alone is enough to stop a
+deployment.
+
+§5.8.5 The fix is upstream, and is one line here when it lands: `tiberius`
+moving to `rustls` 0.23. Until then this section is the reason not to
+deploy these two services against Azure SQL.
+
 ---
 
 ## §6 Tests
