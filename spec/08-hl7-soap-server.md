@@ -45,6 +45,17 @@ Checked before the body is read, in this order
 reader MUST additionally be bounded so a lying `Content-Length` cannot
 allocate without limit.
 
+§2.2 **An unparseable `Content-Length` is answered by the HTTP layer, not
+this table.** The Rust serves HTTP through `hyper`, which treats a
+`Content-Length` it cannot parse as a protocol violation and answers `400`
+with an empty body before any handler runs. The **status is as this table
+requires**; the fault envelope is absent. That is accepted: RFC 9112 §6.3
+requires a recipient to reject such a message, and refusing it at the
+protocol layer is more correct than parsing it at the application layer as
+the Python did. The row's check is still implemented, and still applies to
+any value `hyper` admits. See
+[`plan.md` §9](../plan.md#9-deliberate-deviations-from-the-python).
+
 ---
 
 ## §3 Processing
