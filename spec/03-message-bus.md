@@ -160,6 +160,17 @@ processing succeeded.
 §5.1.2 The maximum wait for a receive is **60 seconds**
 (`MAX_WAIT_TIME_SECONDS`). An empty result is not an error.
 
+§5.1.2a A caller MAY receive with a **shorter** wait, and an interactive one
+MUST: sixty seconds costs a receive loop nothing when the queue is empty and
+costs an HTTP response everything
+([`14-buswatch.md`](14-buswatch.md) §3.3.1). The shorter wait is passed to
+the operation. It MUST NOT be imposed by wrapping the receive in a
+cancellation — see §5.5.
+
+§5.1.2b The same applies one layer down, to the per-attempt timeout of the
+client itself. A caller that expects empty answers configures it at
+connection time.
+
 §5.1.3 A session receiver MUST have automatic lock renewal enabled, with a
 renewal duration of **300 seconds** (`LOCK_RENEWAL_DURATION_SECONDS`).
 
@@ -190,6 +201,42 @@ a session.
 
 §5.2.3 On success, every message is completed. On failure, every message is
 abandoned.
+
+### §5.4a Peeking
+
+§5.4a.1 A **peek** reads messages without locking or consuming them. It is
+how an inspector reads a queue without taking messages away from the service
+that was about to process them ([`14-buswatch.md`](14-buswatch.md) §1.1).
+
+§5.4a.2 A peeked message carries no lock token and cannot be settled. This
+is a type-level distinction rather than a documented one: there must be no
+way to accidentally complete something that was only looked at.
+
+§5.4a.3 A peek of a **session-enabled** queue needs a session receiver, and
+so returns one session's messages rather than the queue's
+([`14-buswatch.md`](14-buswatch.md) §4.4.2).
+
+### §5.5 A receive must run to its own timeout
+
+§5.5.1 A caller MUST NOT wrap `receive` in a shorter timeout of its own.
+
+`LiveReceiver::receive` blocks until a message arrives or its own window
+(`ihb_runtime::backoff::MAX_WAIT`) expires. Establishing the AMQP link on a
+cold queue can take longer than a few seconds, and a `tokio::time::timeout`
+around it **cancels the in-flight receive** rather than observing it. The
+next attempt starts a new one, which is cancelled in turn, so a queue with
+messages waiting on it reports empty indefinitely.
+
+§5.5.2 This is not hypothetical: it cost an afternoon during the end-to-end
+work of `tasks.md` P5.7. Two queues that had messages on them read as empty
+through fifteen consecutive two-second attempts, and the same receive
+returned four messages the moment the window was widened.
+
+§5.5.3 A caller that needs to give up early should bound the **number of
+receives**, not the duration of one. `ihb-e2e`'s `receive_until` is the
+worked example.
+
+---
 
 ### §5.3 Failure handling in the receive loop
 
