@@ -1,0 +1,43 @@
+[package]
+name = "ihb-e2e"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "End-to-end tests: a sample message from a socket, through real Service Bus queues, to a mock receiver."
+
+[lib]
+name = "ihb_e2e"
+path = "src/lib.rs"
+
+[features]
+default = []
+# Tests that need the local Service Bus emulator running.
+# See spec/03-message-bus.md §7.3.
+emulator = []
+
+[dependencies]
+ihb-bus.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+
+[dev-dependencies]
+hl7-2-mllp.workspace = true
+hl7-mock-receiver.workspace = true
+hl7-phw-transformer.workspace = true
+hl7-sender.workspace = true
+hl7-server.workspace = true
+ihb-bus.workspace = true
+ihb-fields.workspace = true
+ihb-runtime.workspace = true
+ihb-transformer.workspace = true
+ihb-sender.workspace = true
+ihb-telemetry.workspace = true
+ihb-validation.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
+tracing.workspace = true
+
+[lints]
+workspace = true
