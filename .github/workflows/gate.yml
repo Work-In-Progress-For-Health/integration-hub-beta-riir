@@ -1,0 +1,235 @@
+# The gate of spec/17-testing-and-quality.md §1, plus §9's extra jobs.
+#
+# Three jobs, deliberately separate:
+#
+#   gate      — §1, on every push and pull request (§9.1).
+#   msrv      — §1.4, against the *declared* toolchain rather than a
+#               version pinned a second time here.
+#   emulator  — §9.2, the tests that need a broker and a database.
+#
+# They are separate because they fail for different reasons and a reader
+# should not have to work out which. An MSRV break is a dependency raising
+# its floor; an emulator break is usually a service that did not come up.
+#
+# §9.4: a merge with a failing gate is not possible. That is enforced by a
+# branch protection rule on `gate`, not by this file — a workflow cannot
+# make itself required.
+
+name: gate
+
+on:
+  push:
+  pull_request:
+
+# A new push supersedes an in-flight run of the same ref. The emulator job
+# binds fixed host ports, so two concurrent runs on one runner would fight
+# over 5672 and 1433.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # A build that warns is a build that fails (§1).
+  RUSTFLAGS: -D warnings
+
+jobs:
+  gate:
+    name: gate (spec/17 §1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The HL7 and ER7 crates are path dependencies three levels above
+      # this repository (see the root Cargo.toml's `path = "../../../git/…"`).
+      #
+      # `actions/checkout` cannot place them: it refuses any `path` outside
+      # `$GITHUB_WORKSPACE`. So they are cloned directly, into a location
+      # computed from the workspace rather than hardcoded — the depth is
+      # what the manifest says, and a runner layout change would otherwise
+      # be a confusing "crate not found".
+      - name: Check out the sibling crate repositories
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          siblings="$(cd "$GITHUB_WORKSPACE/../../.." && pwd)/git"
+          mkdir -p "$siblings"
+          for repo in hl7-rust er7-rust; do
+            git clone --depth 1 \
+              "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository_owner }}/$repo.git" \
+              "$siblings/$repo"
+          done
+          # Fail here rather than inside cargo, where the message is a
+          # resolution error that does not mention the layout at all.
+          test -d "$siblings/hl7-rust/hl7-rust/hl7-2" \
+            || { echo "the HL7 crates are not where Cargo.toml expects them"; exit 1; }
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      # §1's order, cheapest first, so a failure arrives as fast as it can.
+      #
+      # §1.0: `cargo xtask fmt-check`, NOT `cargo fmt --all` — `--all`
+      # reaches through this workspace's path dependencies and rewrites
+      # files in the checkouts above, which are separate repositories. The
+      # task also fails if its member list has drifted from the manifest's,
+      # which is how a newly added crate gets noticed.
+      - run: cargo xtask fmt-check
+
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Without `--all-features`: the emulator and sqlserver features need
+      # services this job does not have. They run in `emulator` below.
+      - run: cargo test --workspace
+
+      - name: Documentation
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      # The XSD-derived dictionaries are generated and committed; this
+      # fails if the committed form no longer matches the source.
+      - run: cargo xtask verify-dictionaries
+
+      - run: cargo deny check
+
+  msrv:
+    name: MSRV (spec/17 §1.4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # As in `gate` — see the comment there.
+      - name: Check out the sibling crate repositories
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          siblings="$(cd "$GITHUB_WORKSPACE/../../.." && pwd)/git"
+          mkdir -p "$siblings"
+          for repo in hl7-rust er7-rust; do
+            git clone --depth 1 \
+              "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository_owner }}/$repo.git" \
+              "$siblings/$repo"
+          done
+          # Fail here rather than inside cargo, where the message is a
+          # resolution error that does not mention the layout at all.
+          test -d "$siblings/hl7-rust/hl7-rust/hl7-2" \
+            || { echo "the HL7 crates are not where Cargo.toml expects them"; exit 1; }
+
+      # Stable first, only to run `cargo xtask msrv`.
+      - uses: dtolnay/rust-toolchain@stable
+
+      # §1.4 — the toolchain is read from the declaration rather than
+      # pinned a second time here. A version written in this file would
+      # drift from `[workspace.package] rust-version` and the drift would
+      # be invisible until somebody looked.
+      - name: Read the declared MSRV
+        id: msrv
+        run: echo "version=$(cargo xtask msrv)" >> "$GITHUB_OUTPUT"
+
+      - name: Install the declared toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      # `check`, not `test`: §1.4 is about the floor compiling. Running the
+      # suite twice buys nothing and doubles the wall clock.
+      - name: Build against the declared MSRV
+        run: cargo +${{ steps.msrv.outputs.version }} check --workspace --all-targets
+
+  emulator:
+    name: emulator-backed (spec/17 §9.2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # As in `gate` — see the comment there.
+      - name: Check out the sibling crate repositories
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          siblings="$(cd "$GITHUB_WORKSPACE/../../.." && pwd)/git"
+          mkdir -p "$siblings"
+          for repo in hl7-rust er7-rust; do
+            git clone --depth 1 \
+              "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository_owner }}/$repo.git" \
+              "$siblings/$repo"
+          done
+          # Fail here rather than inside cargo, where the message is a
+          # resolution error that does not mention the layout at all.
+          test -d "$siblings/hl7-rust/hl7-rust/hl7-2" \
+            || { echo "the HL7 crates are not where Cargo.toml expects them"; exit 1; }
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # `local/.secrets` is not committed. The password is a local-stack
+      # credential for a container that exists for the length of this job
+      # and is reachable only from it.
+      - name: Write the local stack's secret
+        run: |
+          printf 'MSSQL_SA_PASSWORD=%s\n' "${{ secrets.MSSQL_SA_PASSWORD || 'CI-only-Passw0rd!' }}" \
+            > local/.secrets
+
+      # spec/18-deployment.md §5.0 — Podman, not Docker.
+      - name: Start the local stack
+        run: podman compose -f local/docker-compose.yml up -d
+
+      # The emulator prints this line when it is ready to accept AMQP.
+      # Polling the log is more reliable than polling the port: the port
+      # opens before the broker will answer.
+      - name: Wait for the Service Bus emulator
+        run: |
+          for _ in $(seq 1 60); do
+            if podman logs ihb-rs-sb-emulator 2>&1 | grep -q 'Successfully Up'; then
+              echo "the emulator is up"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "the emulator did not start"
+          podman logs ihb-rs-sb-emulator 2>&1 | tail -40
+          exit 1
+
+      - name: Wait for the database
+        run: |
+          for _ in $(seq 1 60); do
+            if podman exec ihb-rs-sqledge bash -c 'exit 0' 2>/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "the database did not start"
+          podman logs ihb-rs-sqledge 2>&1 | tail -40
+          exit 1
+
+      # §9.2.1 — run in parallel, as `cargo test` runs everything else.
+      # These tests are isolated by construction (a per-test session id, and
+      # a lock on the shared non-session queue), so `--test-threads=1` is
+      # deliberately NOT passed here: it would hide exactly the contention
+      # that rule exists to prevent.
+      - name: Emulator-backed tests
+        env:
+          MSSQL_SA_PASSWORD: ${{ secrets.MSSQL_SA_PASSWORD || 'CI-only-Passw0rd!' }}
+        run: cargo test --workspace --all-features
+
+      - name: Stack logs on failure
+        if: failure()
+        run: |
+          podman logs ihb-rs-sb-emulator 2>&1 | tail -60
+          podman logs ihb-rs-sqledge 2>&1 | tail -60
+
+      - name: Stop the local stack
+        if: always()
+        run: podman compose -f local/docker-compose.yml down --volumes
