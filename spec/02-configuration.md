@@ -286,6 +286,13 @@ managed-identity authentication.
 | `BUSWATCH_QUEUE_NAMES` | csv | *(unset)* | Blank means discover queues. |
 | `BUSWATCH_PEEK_COUNT` | usize | `25` | Messages peeked per queue. |
 | `BUSWATCH_DETAIL_SEARCH_LIMIT` | usize | `250` | Messages scanned when resolving a sequence number. |
+| `HOST` | string | `127.0.0.1` | Where the page binds. Loopback by default: [`14-buswatch.md`](14-buswatch.md) §1.2 means this is not a page to expose by accident. The container image overrides it to `0.0.0.0`. |
+| `PORT` | u16 | `8000` | The container image overrides it to `8080`, which is what the Python's `Dockerfile` exposes. |
+| `BUSWATCH_MAX_PARALLEL_QUEUE_FETCHES` | usize | `2` | Queues refreshed at once ([`14-buswatch.md`](14-buswatch.md) §3.3). The Python's spelling, kept for the same reason `SERVICEBUS_CONNECTION_STRING` is. Bounded because the emulator's connection quota is what an unbounded fan-out exhausts. |
+
+§9.1.1 BusWatch MUST start with no queues configured and none discovered,
+serving a page that says what to set. A developer tool that refuses to start
+is a developer wondering why.
 
 ### §9.2 `dashboard`
 
@@ -298,19 +305,56 @@ managed-identity authentication.
 | `AZURE_RESOURCE_GROUP` | string | *(unset)* | |
 | `AZURE_SERVICE_BUS_NAMESPACE` | string | *(unset)* | |
 | `AZURE_LOG_ANALYTICS_WORKSPACE_ID` | string | *(unset)* | |
-| `FLASK_SECRET_KEY` | secret | *(unset)* | Session signing key; kept under its Python name for deployment compatibility. |
+| `AZURE_APP_INSIGHTS_RESOURCE_ID` | string | *(unset)* | Narrows the queries that honour it to one resource ([`15-dashboard.md`](15-dashboard.md) §4.3.3). |
+| `AZURE_CONTAINER_APPS_ENVIRONMENT` | string | *(unset)* | |
+| `AZURE_CONTAINER_APPS_RESOURCE_GROUP` | string | *(`AZURE_RESOURCE_GROUP`)* | Defaults to the main resource group. |
+| `FLASK_SECRET_KEY` | secret | *(unset)* | Session signing key; kept under its Python name for deployment compatibility. **Absent means a key generated at startup**, not the Python's hardcoded default — see §9.2.3. |
 | `COSMOS_ENDPOINT` | url | *(unset)* | Blank disables alarm persistence; reads return empty. |
 | `COSMOS_KEY` | secret | *(unset)* | Present selects key auth and auto-creation; blank selects AAD RBAC. |
-| `COSMOS_DATABASE` | string | `integration-hub-dashboard` | |
+| `COSMOS_DATABASE` | string | `integration-hub` | The Python's default. See §9.2.2. |
 | `COSMOS_CONTAINER` | string | `alarms` | Partition key `/pk`. |
-| `COSMOS_DISABLE_SSL_VERIFY` | bool | `false` | True only for the local emulator. |
+| `COSMOS_DISABLE_SSL_VERIFY` | bool | `false` | True only for the local emulator, and refused against any other host. |
 | `QUEUE_WARNING_THRESHOLD` | u64 | `10` | |
 | `QUEUE_CRITICAL_THRESHOLD` | u64 | `50` | |
 | `DLQ_WARNING_THRESHOLD` | u64 | `1` | |
+| `API_CACHE_TTL` | u64 | `30` | Seconds `/api/status` is cached ([`15-dashboard.md`](15-dashboard.md) §2.2.1). |
+| `DEFAULT_LANGUAGE` | string | `en` | `en` or `cy`. |
+| `DASHBOARD_REDACT_MESSAGES` | bool | `true` | [`15-dashboard.md`](15-dashboard.md) §1.3. No Python equivalent: the Python never redacts. |
+| `ALERT_EMAIL_ENABLED` | bool | `false` | |
+| `ALERT_EMAIL_TO` | string | *(unset)* | |
+| `ALERT_EMAIL_FROM` | string | *(unset)* | |
+| `ALERT_EMAIL_MAX_RETRIES` | u32 | `3` | Retries on an ACS `429`. |
+| `ALERT_EMAIL_RETRY_BACKOFF_SECONDS` | f64 | `2` | Doubled per attempt, unless the response carries `Retry-After`. |
+| `AZURE_KEY_VAULT_URL` | url | *(unset)* | Where the ACS connection string is read from. Blank falls back to `ACS_CONNECTION_STRING`. |
+| `ACS_EMAIL_SECRET_NAME` | string | `acs-email-connection-string` | |
+| `ACS_CONNECTION_STRING` | secret | *(unset)* | Local development only. |
+| `ACS_SECRET_CACHE_TTL` | u64 | `3600` | Seconds the Key Vault fetch is cached. |
 
 §9.2.1 The dashboard MUST start and serve every page when no Azure
 configuration is present, returning empty state rather than errors. This is
 load-bearing for local development and for the test suite.
+
+§9.2.2 `COSMOS_DATABASE` defaults to **`integration-hub`**. An earlier draft
+of this table said `integration-hub-dashboard`, which is not what
+`dashboard/config.py` reads. The default decides which Cosmos database
+alarm configuration is loaded from, so getting it wrong would have made
+every alarm rule silently disappear at cutover while the dashboard reported
+no error at all — it would simply have found an empty database. Corrected
+against the source.
+
+§9.2.3 `FLASK_SECRET_KEY` absent MUST mean **a key generated at startup**.
+The Python defaults it to the literal `dev-secret-key-change-in-production`,
+which is in a public repository: any deployment that has not set the
+variable is signing its sessions with a key an attacker already has. A
+generated key costs a logout on restart and is the safe end of that trade.
+Raised as [`15-dashboard.md`](15-dashboard.md) §9.3.
+
+§9.2.4 `FLASK_DEBUG`, `DEMO_MODE`, `SPLASH_SCREEN_ENABLED`,
+`ENVIRONMENT_LABEL_MAP` and `ENVIRONMENT_COLOR_MAP` are **not** read. Debug
+mode is a Flask concept with no analogue here; demo mode is superseded by
+§1.2, which makes every page work with no Azure at all; the other three are
+presentation settings deferred with the i18n work of
+[`15-dashboard.md`](15-dashboard.md) §6.
 
 ---
 
