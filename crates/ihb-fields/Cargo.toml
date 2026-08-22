@@ -12,6 +12,7 @@ description = "Reading, copying and formatting HL7 v2 fields, for the Integratio
 [dependencies]
 er7.workspace = true
 hl7-2.workspace = true
+time.workspace = true
 
 [lints]
 workspace = true

@@ -57,6 +57,8 @@
 
 use hl7_2::{Error, Message};
 
+pub mod timestamp;
+
 /// Read a field, component or subcomponent, or `""` when it is not there.
 ///
 /// The Python's `get_hl7_field_value`. Returning `""` rather than an
@@ -248,20 +250,78 @@ pub fn copy_to(source: &Message, target: &mut Message, from: &str, to: &str) -> 
     // A path that already pins down a repetition, or goes deeper than the
     // field, has nothing to iterate and is written directly.
     if is_field_path(from) {
-        let values = repetitions(source, from);
-        if values.is_empty() {
-            return Ok(());
-        }
-        for (index, value) in values.iter().enumerate() {
-            if value.is_empty() {
-                continue;
-            }
-            target.set(&format!("{to}[{}]", index + 1), value)?;
-        }
+        copy_whole_field(source, target, from, to);
         return Ok(());
     }
 
+    // An explicit null decodes to the empty string, so `read_some` reports
+    // nothing and the copy would drop it. The two mean opposite things —
+    // "clear what you hold" against "I am saying nothing" — and PIMS sends
+    // `""` in `PID-5.3` on every message.
+    if is_explicit_null(source, from) {
+        return target.set_null(to);
+    }
+
     read_some(source, from).map_or(Ok(()), |value| target.set(to, &value))
+}
+
+/// Copy a whole field by cloning its parsed structure.
+///
+/// # Why not write the value back
+///
+/// Because [`Message::set`] escapes, and escaping is right for a *value*
+/// and wrong for *encoded text*. A field read as one string comes back
+/// carrying its own separators — `8888888^^^252^PI~4444444444^^^NHS^NH` —
+/// and writing that through `set` produces
+/// `8888888\S\\S\\S\252\S\PI\R\…`: one repetition, one component,
+/// every separator turned into an escape sequence. The message still parses.
+/// It just says something entirely different, and MPI receives an
+/// identifier that is one long nonsense string.
+///
+/// `spec/09-transformers.md` §2.2.1 states this for the repetition
+/// separator. It is the same defect for `^` and `&`, and repetition-by-
+/// repetition copying does not fix those — the separators are *inside* each
+/// repetition.
+///
+/// So the field is not re-encoded at all. The parsed `er7::Field` is
+/// cloned from source to target, which cannot lose or add a separator
+/// because no text is written.
+fn copy_whole_field(source: &Message, target: &mut Message, from: &str, to: &str) {
+    let Some((from_segment, from_index)) = split_field_path(from) else {
+        return;
+    };
+    let Some((to_segment, to_index)) = split_field_path(to) else {
+        return;
+    };
+
+    let Some(field) = source
+        .raw()
+        .segment(from_segment)
+        .and_then(|segment| segment.field(from_index))
+    else {
+        // §2.1 — a source that has nothing leaves the target untouched.
+        return;
+    };
+    if field.repetitions.is_empty() {
+        return;
+    }
+
+    let field = field.clone();
+    let Some(segment) = target.raw_mut().segment_at_mut(to_segment, 1) else {
+        return;
+    };
+    if segment.fields.len() < to_index {
+        segment
+            .fields
+            .resize(to_index, hl7_2::er7::Field::default());
+    }
+    segment.fields[to_index - 1] = field;
+}
+
+/// `PID-13` becomes `("PID", 13)`. `None` for anything else.
+fn split_field_path(path: &str) -> Option<(&str, usize)> {
+    let (segment, index) = path.split_once('-')?;
+    Some((segment, index.parse().ok()?))
 }
 
 /// Whether a path names a whole field, rather than a component, a
@@ -397,6 +457,219 @@ pub fn pipe_wrap(values: &[String]) -> String {
         String::new()
     } else {
         format!("|{}|", values.join("|"))
+    }
+}
+
+/// HL7's explicit null: two literal double-quote characters.
+///
+/// It means "clear the value you hold", which is the opposite of an empty
+/// field's "I am saying nothing about this". `hl7-2`'s
+/// [`Message::get`](hl7_2::Message::get) decodes it to the empty string —
+/// correctly, since decoded it *is* empty — so a reader that only asks for
+/// the value cannot tell the two apart.
+pub const EXPLICIT_NULL: &str = "\"\"";
+
+/// Whether the value at `path` is HL7's explicit null.
+///
+/// Reads the parsed structure rather than the decoded value, because
+/// decoding is exactly what loses the distinction.
+///
+/// # Examples
+///
+/// ```
+/// # fn main() -> Result<(), hl7_2::Error> {
+/// use ihb_fields::{is_explicit_null, read};
+///
+/// let message = hl7_2::parse("MSH|^~\\&|252\rPID|1|\"\"||X")?;
+///
+/// // Both read as empty...
+/// assert_eq!(read(&message, "PID-2"), "");
+/// assert_eq!(read(&message, "PID-3"), "");
+///
+/// // ...but only one is a null.
+/// assert!(is_explicit_null(&message, "PID-2"));
+/// assert!(!is_explicit_null(&message, "PID-3"));
+/// # Ok(())
+/// # }
+/// ```
+#[must_use]
+pub fn is_explicit_null(message: &Message, path: &str) -> bool {
+    raw_at(message, path).is_some_and(|raw| raw == EXPLICIT_NULL)
+}
+
+/// The undecoded text at `path`, for the handful of decisions that cannot
+/// be made from the decoded value.
+///
+/// Handles the path shapes the mapping tables of
+/// `spec/09-transformers.md` use: `SEG-N`, `SEG-N[R]`, `SEG-N.C`,
+/// `SEG-N[R].C`, `SEG-N.C.S` and `SEG-N[R].C.S`.
+fn raw_at<'a>(message: &'a Message, path: &str) -> Option<&'a str> {
+    let (segment_name, rest) = path.split_once('-')?;
+    let mut parts = rest.split('.');
+
+    let field_part = parts.next()?;
+    let (field_index, repetition) = match field_part.split_once('[') {
+        Some((index, repetition)) => (
+            index.parse::<usize>().ok()?,
+            repetition.trim_end_matches(']').parse::<usize>().ok()?,
+        ),
+        None => (field_part.parse::<usize>().ok()?, 1),
+    };
+
+    let component = parts.next().and_then(|part| part.parse::<usize>().ok());
+    let subcomponent = parts.next().and_then(|part| part.parse::<usize>().ok());
+
+    let field = message.raw().segment(segment_name)?.field(field_index)?;
+    let repetition = field.repetitions.get(repetition.checked_sub(1)?)?;
+    let component = repetition.components.get(component.unwrap_or(1) - 1)?;
+    let subcomponent = component.subcomponents.get(subcomponent.unwrap_or(1) - 1)?;
+
+    Some(&subcomponent.raw)
+}
+
+/// Drop trailing empty components and subcomponents from every field.
+///
+/// Implements the normalisation the Python's `hl7apy` performs on the way
+/// out, which `spec/09-transformers.md` §6.6 compares against byte for
+/// byte.
+///
+/// # What it does
+///
+/// Within each repetition, a run of empty components at the **end** carries
+/// no information and is removed. The same applies to subcomponents within
+/// a component. Repetitions themselves are left alone.
+///
+/// ```text
+/// ^^W00000^   becomes  ^^W00000     a trailing empty component
+/// ^^          becomes  (empty)      every component empty
+/// A^^H~^^^^^^ becomes  A^^H~        the second repetition empties
+/// ```
+///
+/// # Why this exists rather than living in the serialiser
+///
+/// `er7` renders a message exactly as it parsed it, and that faithfulness
+/// is the right default — it is what lets `hl7-server` forward a message
+/// byte for byte (`spec/07-hl7-server.md` §9.8). A transformer is the one
+/// place that *builds* a message rather than passing one through, and there
+/// the trailing separators are an artefact of how it was built rather than
+/// something a sender wrote.
+///
+/// Nothing is lost: HL7 states that trailing component delimiters are not
+/// significant, so `^^W00000^` and `^^W00000` are the same value to every
+/// conformant reader, MPI included.
+///
+/// # Examples
+///
+/// ```
+/// # fn main() -> Result<(), hl7_2::Error> {
+/// use ihb_fields::trim_trailing_separators;
+///
+/// let mut message = hl7_2::parse("MSH|^~\\&|252\rPD1|||^^W00000^|G999999")?;
+/// trim_trailing_separators(&mut message);
+///
+/// assert_eq!(message.to_er7(), "MSH|^~\\&|252\rPD1|||^^W00000|G999999");
+/// # Ok(())
+/// # }
+/// ```
+///
+/// A repetition whose every component is empty becomes empty, but the
+/// repetition itself stays — losing it would change how many identifiers a
+/// field carries:
+///
+/// ```
+/// # fn main() -> Result<(), hl7_2::Error> {
+/// use ihb_fields::trim_trailing_separators;
+///
+/// let mut message = hl7_2::parse("MSH|^~\\&|252\rPID|||A^^H~^^^^^^")?;
+/// trim_trailing_separators(&mut message);
+///
+/// assert_eq!(message.to_er7(), "MSH|^~\\&|252\rPID|||A^^H~");
+/// # Ok(())
+/// # }
+/// ```
+pub fn trim_trailing_separators(message: &mut Message) {
+    for segment in &mut message.raw_mut().segments {
+        for field in &mut segment.fields {
+            for repetition in &mut field.repetitions {
+                for component in &mut repetition.components {
+                    while component
+                        .subcomponents
+                        .last()
+                        .is_some_and(|last| last.raw.is_empty())
+                    {
+                        component.subcomponents.pop();
+                    }
+                }
+                while repetition
+                    .components
+                    .last()
+                    .is_some_and(|last| last.subcomponents.iter().all(|s| s.raw.is_empty()))
+                {
+                    repetition.components.pop();
+                }
+            }
+        }
+    }
+}
+
+/// Make sure a field has at least `count` repetitions, adding empty ones.
+///
+/// # Why an empty repetition is worth keeping
+///
+/// The Python's mappers create a destination repetition per source
+/// repetition unconditionally (`new_segment.add_field(...)`), so a source
+/// field ending in `~` — an empty last repetition — keeps it. [`copy`]
+/// alone will not: it declines to write an empty value (§2.1 of
+/// `spec/09-transformers.md`), so the repetition never comes into
+/// existence and the rendered field is one `~` shorter.
+///
+/// That difference is visible to MPI. A repeating field's *count* is
+/// information: `PID-13` with four repetitions where the fourth is blank
+/// says something different from one with three.
+///
+/// # Examples
+///
+/// ```
+/// # fn main() -> Result<(), hl7_2::Error> {
+/// use ihb_fields::{ensure_repetitions, repetitions};
+///
+/// let mut message = hl7_2::parse("MSH|^~\\&|252\rPID|||A")?;
+/// ensure_repetitions(&mut message, "PID-3", 3);
+///
+/// assert_eq!(message.to_er7(), "MSH|^~\\&|252\rPID|||A~~");
+/// assert_eq!(repetitions(&message, "PID-3").len(), 3);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// It never removes one, so a target that already has more keeps them:
+///
+/// ```
+/// # fn main() -> Result<(), hl7_2::Error> {
+/// use ihb_fields::ensure_repetitions;
+///
+/// let mut message = hl7_2::parse("MSH|^~\\&|252\rPID|||A~B~C")?;
+/// ensure_repetitions(&mut message, "PID-3", 1);
+///
+/// assert_eq!(message.to_er7(), "MSH|^~\\&|252\rPID|||A~B~C");
+/// # Ok(())
+/// # }
+/// ```
+pub fn ensure_repetitions(message: &mut Message, path: &str, count: usize) {
+    let Some((name, index)) = split_field_path(path) else {
+        return;
+    };
+    let Some(segment) = message.raw_mut().segment_at_mut(name, 1) else {
+        return;
+    };
+    if segment.fields.len() < index {
+        segment.fields.resize(index, hl7_2::er7::Field::default());
+    }
+    let field = &mut segment.fields[index - 1];
+    if field.repetitions.len() < count {
+        field
+            .repetitions
+            .resize(count, hl7_2::er7::Repetition::default());
     }
 }
 
