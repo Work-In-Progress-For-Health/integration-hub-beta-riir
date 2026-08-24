@@ -26,6 +26,7 @@ ihb-fields.workspace = true
 ihb-health.workspace = true
 ihb-runtime.workspace = true
 ihb-telemetry.workspace = true
+ihb-tls.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
 tracing.workspace = true
 

@@ -43,6 +43,8 @@
 
 use std::collections::BTreeMap;
 
+use opentelemetry_sdk::trace::TracerProvider;
+
 /// The trace id and span id written on a record when no span is active.
 ///
 /// Emitted rather than omitted: a Log Analytics join behaves differently on
@@ -84,6 +86,14 @@ pub struct Config {
 pub struct Outcome {
     /// Whether telemetry export is on.
     pub export_enabled: bool,
+    /// Whether a tracer provider was actually built.
+    ///
+    /// Distinct from [`Outcome::export_enabled`], which records what the
+    /// configuration **asked for**. §6.2 says a failure to initialise the
+    /// exporter is logged and the process continues, so these two differ
+    /// exactly when export was wanted and could not be set up — which is
+    /// the case an operator needs to see.
+    pub tracing_installed: bool,
     /// The `EnvFilter` directive that was installed, for the log line that
     /// says what the levels ended up as.
     pub filter: String,
@@ -161,19 +171,21 @@ fn normalise_level(value: &str, fallback: &str) -> String {
 /// With no connection string, nothing is exported and the process starts
 /// cleanly — the normal case for a local run and for every test (§6.1).
 ///
-/// # What this does not do yet
+/// # Export
 ///
-/// **Export.** There is no Azure Monitor exporter for Rust, and the OTLP
-/// exporter is not wired up here; `export_enabled` records the decision so a
-/// deployment can see it in its logs, and the traces themselves go nowhere
-/// until [`plan.md` §8]'s OTLP work lands. Logs are unaffected: they are
-/// emitted either way, and Container Apps collects stdout.
+/// There is no Azure Monitor exporter for Rust, so this exports over OTLP
+/// to whatever `OTEL_EXPORTER_OTLP_ENDPOINT` names — a collector, not
+/// Application Insights directly, which does not ingest raw OTLP. The
+/// exporter sits behind [`TraceExporter`] so an Azure-native one can
+/// replace it without touching a call site (§6.3).
 ///
-/// **Real trace ids.** §4.5 requires `otel_trace_id` and `otel_span_id` on
-/// every record. Until a tracer provider exists there is nothing truthful to
-/// put there — [`NO_TRACE_ID`] and [`NO_SPAN_ID`] are the values, and
-/// emitting them as fields is deferred with the exporter rather than faked
-/// now. See `spec/04-observability.md` §4.5a.
+/// Two things worth knowing before changing this function:
+///
+/// - Building the OTLP exporter needs a **Tokio runtime**. Call this from
+///   inside one, as every service's `main` does (§6.3.3).
+/// - The provider must be built **before** the subscriber, because the
+///   subscriber needs the tracer to build its layer — and without that
+///   layer the provider is inert (§6.3.2).
 ///
 /// # Examples
 ///
@@ -191,7 +203,49 @@ fn normalise_level(value: &str, fallback: &str) -> String {
 /// // A blank connection string is an absent one.
 /// assert!(!configure(&config).export_enabled);
 /// ```
+#[must_use]
 pub fn configure(config: &Config) -> Outcome {
+    configure_with(config, &Otlp)
+}
+
+/// [`configure`], with the exporter named explicitly.
+///
+/// §6.3's seam made usable: a test passes its own [`TraceExporter`] and a
+/// future Azure-native exporter is a different argument here rather than an
+/// edit to every `main`.
+///
+/// # Examples
+///
+/// An exporter that refuses to build must not stop the process (§6.2):
+///
+/// ```
+/// use ihb_telemetry::otel::{Config, TraceExporter, configure_with};
+/// use opentelemetry_sdk::trace::TracerProvider;
+///
+/// struct Broken;
+/// impl TraceExporter for Broken {
+///     fn build(&self, _: &str) -> Result<TracerProvider, String> {
+///         Err("the collector is not reachable".into())
+///     }
+///     fn describe(&self) -> &'static str { "broken" }
+/// }
+///
+/// let outcome = configure_with(
+///     &Config {
+///         service_name: "s".into(),
+///         log_level: "info".into(),
+///         azure_log_level: "warn".into(),
+///         rust_log: None,
+///         connection_string: Some("InstrumentationKey=x".into()),
+///     },
+///     &Broken,
+/// );
+///
+/// // Export was asked for and could not be set up. The process continues.
+/// assert!(outcome.export_enabled);
+/// assert!(!outcome.tracing_installed);
+/// ```
+pub fn configure_with(config: &Config, exporter: &dyn TraceExporter) -> Outcome {
     let filter = filter_directive(config);
     let export_enabled = config
         .connection_string
@@ -199,14 +253,39 @@ pub fn configure(config: &Config) -> Outcome {
         .map(str::trim)
         .is_some_and(|value| !value.is_empty());
 
+    // §6.3 — build the provider **before** the subscriber, because the
+    // subscriber needs the tracer to build its layer. §6.2 — a failure
+    // here is not fatal; the error is held and logged once the subscriber
+    // that can carry it exists.
+    let (provider, export_error) = if export_enabled {
+        match exporter.build(&config.service_name) {
+            Ok(provider) => (Some(provider), None),
+            Err(error) => (None, Some(error)),
+        }
+    } else {
+        (None, None)
+    };
+    let tracing_installed = provider.is_some();
+
     // Installing a global subscriber can only happen once per process.
     // `try_init` failing means another one is already there, which is the
     // idempotence §4.1 asks for rather than an error.
-    let installed = install_subscriber(&filter);
+    let installed = install_subscriber(&filter, provider);
+
+    if let Some(error) = export_error {
+        tracing::error!(
+            %error,
+            exporter = exporter.describe(),
+            "could not initialise trace export; continuing without it \
+             (spec/04-observability.md §6.2)"
+        );
+    }
 
     if export_enabled {
         tracing::info!(
             service_name = %config.service_name,
+            exporter = exporter.describe(),
+            tracing_installed,
             "telemetry export is configured"
         );
     } else {
@@ -218,10 +297,73 @@ pub fn configure(config: &Config) -> Outcome {
 
     Outcome {
         export_enabled,
+        tracing_installed,
         filter,
         installed,
     }
 }
+
+/// Where traces are sent.
+///
+/// `spec/04-observability.md` §6.3's seam. There is no Azure Monitor
+/// exporter for Rust, so this ships an OTLP one — but the call sites know
+/// only this trait, so an Azure-native exporter can replace it later
+/// without touching them.
+///
+/// The trait is deliberately tiny: building a provider is the only thing
+/// that differs between exporters, and everything downstream of it is
+/// `opentelemetry`'s own API.
+pub trait TraceExporter {
+    /// Build a tracer provider, or explain why not.
+    ///
+    /// # Errors
+    ///
+    /// A string describing the failure. §6.2 makes this non-fatal — the
+    /// caller logs it and continues with export disabled — so there is no
+    /// typed error to match on.
+    fn build(&self, service_name: &str) -> Result<TracerProvider, String>;
+
+    /// What to call this exporter in a log line.
+    fn describe(&self) -> &'static str;
+}
+
+/// The OTLP exporter (§6.3).
+///
+/// Sends over gRPC to whatever `OTEL_EXPORTER_OTLP_ENDPOINT` names, which
+/// in this estate is a collector sidecar rather than Application Insights
+/// directly: App Insights does not ingest raw OTLP, which is the whole
+/// reason [`plan.md` §8] lists this as a gap.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Otlp;
+
+impl TraceExporter for Otlp {
+    fn build(&self, service_name: &str) -> Result<TracerProvider, String> {
+        use opentelemetry_otlp::WithExportConfig as _;
+
+        let exporter = opentelemetry_otlp::SpanExporter::builder()
+            .with_tonic()
+            .with_timeout(EXPORT_TIMEOUT)
+            .build()
+            .map_err(|error| format!("building the OTLP span exporter: {error}"))?;
+
+        Ok(TracerProvider::builder()
+            .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
+            .with_resource(opentelemetry_sdk::Resource::new([
+                opentelemetry::KeyValue::new("service.name", service_name.to_owned()),
+            ]))
+            .build())
+    }
+
+    fn describe(&self) -> &'static str {
+        "OTLP/gRPC"
+    }
+}
+
+/// How long an export attempt may take.
+///
+/// Short on purpose: an exporter that blocks is an exporter that turns a
+/// telemetry problem into a service problem, which §6.2 forbids.
+const EXPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Install a subscriber, reporting whether this call was the one that did.
 ///
@@ -232,9 +374,12 @@ pub fn configure(config: &Config) -> Outcome {
 /// `tracing::subscriber::with_default`, which sets a thread-local dispatcher
 /// that takes precedence over whatever is installed globally — so this does
 /// not fight the test suite.
-fn install_subscriber(filter: &str) -> bool {
+fn install_subscriber(filter: &str, provider: Option<TracerProvider>) -> bool {
+    use opentelemetry::trace::TracerProvider as _;
     use tracing_subscriber::EnvFilter;
     use tracing_subscriber::fmt;
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
 
     let Ok(env_filter) = EnvFilter::try_new(filter) else {
         // An unparseable directive is the operator's typo, not a reason to
@@ -251,8 +396,24 @@ fn install_subscriber(filter: &str) -> bool {
         return installed;
     };
 
-    fmt::Subscriber::builder()
-        .with_env_filter(env_filter)
+    // Without this layer the tracer provider is inert: setting it globally
+    // does **not** make `tracing` spans become OTel spans, so nothing would
+    // ever be exported and `tracing_installed` would be a lie. The layer is
+    // what connects the two.
+    let Some(provider) = provider else {
+        return fmt::Subscriber::builder()
+            .with_env_filter(env_filter)
+            .try_init()
+            .is_ok();
+    };
+
+    let tracer = provider.tracer("ihb");
+    opentelemetry::global::set_tracer_provider(provider);
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt::layer())
+        .with(tracing_opentelemetry::layer().with_tracer(tracer))
         .try_init()
         .is_ok()
 }
@@ -297,7 +458,52 @@ pub fn inject(properties: &BTreeMap<String, String>) -> BTreeMap<String, String>
     reason = "this reads a thread-local tracer provider once P1.6a lands"
 )]
 fn current_traceparent() -> Option<String> {
-    None
+    let (trace_id, span_id) = current_ids();
+    if trace_id == NO_TRACE_ID {
+        return None;
+    }
+    // W3C `traceparent`: version 00, sampled. The sampled flag is `01`
+    // because a span that reached here was recorded; an unsampled span
+    // carries no ids worth propagating.
+    Some(format!("00-{trace_id}-{span_id}-01"))
+}
+
+/// The current trace and span ids, or the all-zero placeholders.
+///
+/// `spec/04-observability.md` §4.5. Both are lower-case hex, 32 and 16
+/// characters — the widths [`NO_TRACE_ID`] and [`NO_SPAN_ID`] declare, so a
+/// consumer can parse one column without knowing which it got.
+///
+/// Zeros mean there is no recording span: either export is off, or this
+/// code is not inside a handler span. That is information, not a failure —
+/// it says "this record cannot be joined to a trace" rather than pretending
+/// it can.
+///
+/// # Examples
+///
+/// Outside any span, with no exporter configured:
+///
+/// ```
+/// use ihb_telemetry::otel::{current_ids, NO_SPAN_ID, NO_TRACE_ID};
+///
+/// let (trace_id, span_id) = current_ids();
+/// assert_eq!(trace_id, NO_TRACE_ID);
+/// assert_eq!(span_id, NO_SPAN_ID);
+/// ```
+#[must_use]
+pub fn current_ids() -> (String, String) {
+    use opentelemetry::trace::TraceContextExt as _;
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+    let context = tracing::Span::current().context();
+    let span = context.span();
+    let sc = span.span_context();
+
+    if sc.is_valid() {
+        (sc.trace_id().to_string(), sc.span_id().to_string())
+    } else {
+        (NO_TRACE_ID.to_owned(), NO_SPAN_ID.to_owned())
+    }
 }
 
 /// Extract the propagation headers a received message carries.
@@ -483,13 +689,90 @@ mod tests {
         }
     }
 
+    /// An exporter that builds nothing, so the decision can be tested
+    /// without a collector or a runtime.
+    struct Never;
+
+    impl TraceExporter for Never {
+        fn build(&self, _: &str) -> Result<TracerProvider, String> {
+            Err("no exporter in tests".into())
+        }
+        fn describe(&self) -> &'static str {
+            "never"
+        }
+    }
+
     #[test]
     fn a_present_connection_string_enables_export() {
         let config = Config {
             connection_string: Some("InstrumentationKey=abc".into()),
             ..config()
         };
-        assert!(configure(&config).export_enabled);
+        // `configure_with` rather than `configure`: the real OTLP exporter
+        // builds a batch pipeline that needs a Tokio runtime, and this test
+        // is about the *decision*, not the transport. See §6.3.1.
+        assert!(configure_with(&config, &Never).export_enabled);
+    }
+
+    #[test]
+    fn ids_inside_a_recording_span_are_real_and_the_right_width() {
+        // §4.5. The point of P1.6a: before a tracer provider existed these
+        // were always zeros, and a column of zeros is not a partial
+        // implementation — it is no information at all.
+        use opentelemetry::trace::TracerProvider as _;
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        // An in-memory provider: no collector, no runtime, real ids.
+        let provider = TracerProvider::builder().build();
+        let tracer = provider.tracer("test");
+        let subscriber =
+            tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+        let (trace_id, span_id) = tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!("handler");
+            let _entered = span.enter();
+            current_ids()
+        });
+
+        assert_ne!(
+            trace_id, NO_TRACE_ID,
+            "a recording span has a real trace id"
+        );
+        assert_ne!(span_id, NO_SPAN_ID, "and a real span id");
+        assert_eq!(trace_id.len(), NO_TRACE_ID.len(), "32 hex characters");
+        assert_eq!(span_id.len(), NO_SPAN_ID.len(), "16 hex characters");
+        assert!(
+            trace_id
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+            "lower-case hex, so one column parses the same way everywhere: {trace_id}"
+        );
+    }
+
+    #[test]
+    fn a_traceparent_is_produced_only_when_there_is_a_trace_to_name() {
+        // §4.6.3 — outside a recording span there is nothing to propagate,
+        // and inventing a `traceparent` of zeros would make every unrelated
+        // message look like one trace.
+        assert!(current_traceparent().is_none());
+    }
+
+    #[test]
+    fn an_exporter_that_cannot_be_built_does_not_stop_the_process() {
+        // §6.2. The two flags differ exactly here: export was asked for
+        // and could not be set up.
+        let config = Config {
+            connection_string: Some("InstrumentationKey=abc".into()),
+            ..config()
+        };
+        let outcome = configure_with(&config, &Never);
+
+        assert!(outcome.export_enabled, "the configuration asked for export");
+        assert!(
+            !outcome.tracing_installed,
+            "and it could not be provided, which must be visible rather than \
+             indistinguishable from success"
+        );
     }
 
     #[test]

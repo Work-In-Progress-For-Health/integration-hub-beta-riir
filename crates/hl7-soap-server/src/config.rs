@@ -182,7 +182,7 @@ impl Config {
                 .list_or("ALLOWED_ASSIGNING_AUTHORITIES", DEFAULT_AUTHORITIES),
             max_request_size: read_max_request_size(&mut reader),
             tls: read_tls(&mut reader),
-            redaction_enabled: reader.bool_or("HL7_LOG_REDACTION_ENABLED", true),
+            redaction_enabled: reader.lenient_bool_or("HL7_LOG_REDACTION_ENABLED", true),
         };
 
         reader.finish()?;

@@ -1,16 +1,14 @@
 [package]
 name = "ihb-config"
+description = "Reading a service's configuration out of the environment."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-authors.workspace = true
-publish = false
-description = "Environment configuration for the Integration Hub: parsing, validation, and secret-safe types."
 
 [dependencies]
-thiserror.workspace = true
+env-reader.workspace = true
 uuid.workspace = true
 
 [lints]

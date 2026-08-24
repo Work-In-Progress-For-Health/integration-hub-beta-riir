@@ -1,0 +1,330 @@
+# Build every Rust service, or a chosen subset.
+#
+# The Python's equivalent runs a code-quality stage PER APP — sixteen of
+# them — because each app is a separate Python package with its own
+# dependency set. This workspace is one Cargo workspace, so the gate of
+# spec/17-testing-and-quality.md §1 runs ONCE and every build depends on
+# it. That is not a shortcut: a change to a shared crate is checked
+# against every crate that uses it, which per-app stages could not do.
+#
+# Manual trigger only. The per-service definitions
+# (`hl7serverrust-build.yml` and its siblings) are what the branch
+# triggers use; this one exists for a coordinated rebuild of everything.
+
+trigger: none
+pr: none
+
+parameters:
+  - name: SEMANTIC_VERSION
+    displayName: 'Semantic Version'
+    type: string
+    default: 'v0.1.0'
+
+  - name: appsToBuild
+    displayName: 'Apps to build (leave all checked for full build)'
+    type: object
+    default:
+      - 'HL7 Server'
+      - 'HL7 Sender'
+      - 'HL7 Subscription Sender'
+      - 'HL7 SOAP Server'
+      - 'HL7 Phw Transformer'
+      - 'HL7 Chemo Transformer'
+      - 'HL7 Pims Transformer'
+      - 'HL7 Mock Receiver'
+      - 'Message Store Service'
+      - 'Message Replay Job'
+      - 'Dashboard'
+      - 'SOAP Sender'
+      - 'SOAP Subscription Sender'
+      - 'HTTP Mock Receiver'
+      - 'XML FHIR PROMs Transformer'
+      - 'Bus Watch'
+
+variables:
+  acrName: 'uksdhcwihsharedcr'
+  azureServiceConnection: 'Azure - NHSWales-DHCW-IntegrationHub-Subscription'
+  POOL_NAME: 'UKS-DHCW-IH-DEV-ADOManagedPool'
+
+stages:
+  - stage: CodeQuality
+    displayName: 'Code Quality & Tests — Whole Workspace'
+    jobs:
+      - template: templates/code-quality-template.yml
+        parameters:
+          jobName: 'CodeQualityWorkspace'
+          appDisplayName: 'Whole Workspace'
+          poolName: ${{ variables.POOL_NAME }}
+
+  - ${{ if containsValue(parameters.appsToBuild, 'HL7 Server') }}:
+    - stage: BuildAndPush_hl7server
+      displayName: 'Build — HL7 Server'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHl7Server'
+            displayName: 'Build and Push HL7 Server'
+            appName: 'hl7server'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=hl7-server'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'HL7 Sender') }}:
+    - stage: BuildAndPush_hl7sender
+      displayName: 'Build — HL7 Sender'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHl7Sender'
+            displayName: 'Build and Push HL7 Sender'
+            appName: 'hl7sender'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=hl7-sender'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'HL7 Subscription Sender') }}:
+    - stage: BuildAndPush_hl7subscriptionsender
+      displayName: 'Build — HL7 Subscription Sender'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHl7SubscriptionSender'
+            displayName: 'Build and Push HL7 Subscription Sender'
+            appName: 'hl7subsndr'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=hl7-subscription-sender'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'HL7 SOAP Server') }}:
+    - stage: BuildAndPush_hl7soapserver
+      displayName: 'Build — HL7 SOAP Server'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHl7SoapServer'
+            displayName: 'Build and Push HL7 SOAP Server'
+            appName: 'hl7soapserver'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=hl7-soap-server'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'HL7 Phw Transformer') }}:
+    - stage: BuildAndPush_hl7phwtransformer
+      displayName: 'Build — HL7 Phw Transformer'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHl7PhwTransformer'
+            displayName: 'Build and Push HL7 Phw Transformer'
+            appName: 'phw-hl7transformer'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=hl7-phw-transformer'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'HL7 Chemo Transformer') }}:
+    - stage: BuildAndPush_hl7chemotransformer
+      displayName: 'Build — HL7 Chemo Transformer'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHl7ChemoTransformer'
+            displayName: 'Build and Push HL7 Chemo Transformer'
+            appName: 'chemo-hl7transformer'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=hl7-chemo-transformer'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'HL7 Pims Transformer') }}:
+    - stage: BuildAndPush_hl7pimstransformer
+      displayName: 'Build — HL7 Pims Transformer'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHl7PimsTransformer'
+            displayName: 'Build and Push HL7 Pims Transformer'
+            appName: 'pims-hl7transformer'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=hl7-pims-transformer'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'HL7 Mock Receiver') }}:
+    - stage: BuildAndPush_hl7mockreceiver
+      displayName: 'Build — HL7 Mock Receiver'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHl7MockReceiver'
+            displayName: 'Build and Push HL7 Mock Receiver'
+            appName: 'hl7mockreceiver'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=hl7-mock-receiver'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'Message Store Service') }}:
+    - stage: BuildAndPush_messagestoreservice
+      displayName: 'Build — Message Store Service'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushMessageStoreService'
+            displayName: 'Build and Push Message Store Service'
+            appName: 'message-store-service'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=message-store-service'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'Message Replay Job') }}:
+    - stage: BuildAndPush_messagereplayjob
+      displayName: 'Build — Message Replay Job'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushMessageReplayJob'
+            displayName: 'Build and Push Message Replay Job'
+            appName: 'message-replay-job'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=message-replay-job'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'Dashboard') }}:
+    - stage: BuildAndPush_dashboard
+      displayName: 'Build — Dashboard'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushDashboard'
+            displayName: 'Build and Push Dashboard'
+            appName: 'dashboard'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=dashboard'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'SOAP Sender') }}:
+    - stage: BuildAndPush_soapsender
+      displayName: 'Build — SOAP Sender'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushSoapSender'
+            displayName: 'Build and Push SOAP Sender'
+            appName: 'soapsender'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=soap-sender'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'SOAP Subscription Sender') }}:
+    - stage: BuildAndPush_soapsubscriptionsender
+      displayName: 'Build — SOAP Subscription Sender'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushSoapSubscriptionSender'
+            displayName: 'Build and Push SOAP Subscription Sender'
+            appName: 'soapsubsndr'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=soap-subscription-sender'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'HTTP Mock Receiver') }}:
+    - stage: BuildAndPush_httpmockreceiver
+      displayName: 'Build — HTTP Mock Receiver'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHttpMockReceiver'
+            displayName: 'Build and Push HTTP Mock Receiver'
+            appName: 'httpmockreceiver'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=http-mock-receiver'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'XML FHIR PROMs Transformer') }}:
+    - stage: BuildAndPush_xmlfhirpromstransformer
+      displayName: 'Build — XML FHIR PROMs Transformer'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushXmlFhirPromsTransformer'
+            displayName: 'Build and Push XML FHIR PROMs Transformer'
+            appName: 'xml-fhir-proms-transformer'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=xml-fhir-proms-transformer'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'Bus Watch') }}:
+    - stage: BuildAndPush_buswatch
+      displayName: 'Build — Bus Watch'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushBuswatch'
+            displayName: 'Build and Push Bus Watch'
+            appName: 'buswatch'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=buswatch'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}

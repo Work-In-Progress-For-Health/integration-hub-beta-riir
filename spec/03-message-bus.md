@@ -174,6 +174,19 @@ connection time.
 §5.1.3 A session receiver MUST have automatic lock renewal enabled, with a
 renewal duration of **300 seconds** (`LOCK_RENEWAL_DURATION_SECONDS`).
 
+§5.1.3a **A service that opens a session receiver and does not renew is
+broken after one lock expiry, silently.** The failure is not a crash: every
+later `receive` returns `IllegalSessionState`, the loop logs and backs off,
+and the service processes nothing for the rest of its life — while its
+health check stays green, because the health listener knows nothing about
+the bus.
+
+This was the state of `ihb-transformer` and `ihb-sender` until it was found
+by running the local stack: `ihb-bus` had `renew_session_lock` and its
+emulator tests exercised it, but neither main loop called it. Every unit
+test uses the fake bus of §7.1, and the end-to-end test completes long
+before a lock expires, so nothing else could have caught it.
+
 §5.1.4 The lock renewer MUST be shut down **before** the receiver is
 closed, waiting for any in-flight renewal to finish. Closing it afterwards
 races the receiver's own teardown and surfaces as
@@ -187,6 +200,35 @@ Two processing modes, matching `receive_messages` and
 `receive_messages_batch`:
 
 **Per-message.** Messages are processed one at a time in order.
+
+§5.1.5 **A lost session MUST reopen the receiver, not retry it.**
+
+Renewal is bounded. When it gives up — a long batch, a broker hiccup, a
+container the host paused — the broker drops the session, and every
+subsequent receive on that receiver fails **forever**:
+
+```text
+WARN  a batch has held its session for 300s; giving up renewal
+ERROR receive failed: Session has dropped
+ERROR receive failed: Local error: IllegalSessionState   (for the rest of the process's life)
+```
+
+Observed in `phw-hl7-transformer` running in Compose. The container stayed
+**healthy** throughout: the health check answers, the process is alive, and
+nothing is processed ever again. That is the same failure shape as §5.1.3,
+which is why it is written down beside it.
+
+`BusError::is_session_lost` distinguishes this from an ordinary transient
+receive failure, and the transformer and sender main loops act on it: stop
+the renewer, close the dead receiver, accept the session afresh, carry on.
+
+§5.1.5a If the receiver cannot be reopened, the process exits **non-zero**.
+A container that cannot reach its own ingress should be restarted by its
+orchestrator, not left running and idle while reporting healthy.
+
+§5.1.5b Matching on the broker's message text is unpleasant and is done
+anyway: the AMQP layer surfaces these as opaque strings. The alternative —
+treating them as ordinary transient failures — is the defect above.
 
 §5.2.1 On success, the message is completed and the next is processed.
 

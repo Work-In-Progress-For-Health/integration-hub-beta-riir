@@ -1,0 +1,151 @@
+# The gate of spec/17-testing-and-quality.md §1, as an Azure DevOps job.
+#
+# This is the same gate as `.github/workflows/gate.yml`, in a second
+# dialect. The duplication is deliberate and worth naming: GitHub Actions
+# runs on every push during development, and ADO runs before an image is
+# built for deployment (spec/18-deployment.md §6.2). Neither is allowed to
+# be the weaker of the two, so both run §1 in full and in the same order.
+#
+# The order is cheapest-first, so a failure arrives as fast as it can.
+
+parameters:
+  - name: jobName
+    type: string
+    default: 'CodeQuality'
+    displayName: 'Job name (must be unique within a stage)'
+  - name: appDisplayName
+    type: string
+    displayName: 'Application display name, for the job label'
+  - name: poolName
+    type: string
+    default: 'Azure Pipelines'
+    displayName: 'Agent pool name'
+  - name: runEmulatorTests
+    type: boolean
+    default: false
+    displayName: 'Also run the emulator-backed tests of §9.2'
+
+jobs:
+  - job: ${{ parameters.jobName }}
+    displayName: 'Code Quality & Tests - ${{ parameters.appDisplayName }}'
+    pool:
+      ${{ if eq(parameters.poolName, 'Azure Pipelines') }}:
+        vmImage: 'ubuntu-latest'
+      ${{ else }}:
+        name: ${{ parameters.poolName }}
+
+    variables:
+      CARGO_TERM_COLOR: always
+      # A build that warns is a build that fails (§1).
+      RUSTFLAGS: '-D warnings'
+
+    steps:
+      - checkout: self
+        displayName: 'Checkout Repository'
+        fetchDepth: 1
+
+      # The toolchain is whatever `rust-toolchain.toml` declares, so the
+      # version lives in one place. Pinning it here as well would drift,
+      # and the drift would be invisible until somebody looked.
+      - script: |
+          set -euo pipefail
+          echo "##[group]Install Rust"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --component rustfmt,clippy
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH" 2>/dev/null || true
+          echo "##vso[task.prependpath]$HOME/.cargo/bin"
+          echo "##[endgroup]"
+        displayName: 'Install Rust Toolchain'
+
+      - script: |
+          set -euo pipefail
+          rustc --version
+          cargo --version
+          cargo clippy --version
+          cargo fmt --version
+        displayName: 'Report Toolchain Versions'
+
+      - task: Cache@2
+        displayName: 'Cache Cargo Registry and Target'
+        inputs:
+          key: 'cargo | "$(Agent.OS)" | Cargo.lock'
+          restoreKeys: |
+            cargo | "$(Agent.OS)"
+          path: |
+            $(Pipeline.Workspace)/.cargo/registry
+            $(Pipeline.Workspace)/.cargo/git
+            $(Build.SourcesDirectory)/target
+
+      # §1.0 — `cargo xtask fmt-check`, NOT `cargo fmt --all`. The task
+      # also fails if its member list has drifted from the manifest's,
+      # which is how a newly added crate gets noticed.
+      - script: |
+          set -euo pipefail
+          cargo xtask fmt-check
+        displayName: 'Formatting (spec/17 §1.0)'
+
+      - script: |
+          set -euo pipefail
+          cargo clippy --workspace --all-targets -- -D warnings
+        displayName: 'Clippy (spec/17 §2)'
+
+      # Without `--all-features`: the emulator and sqlserver features need
+      # services this job does not have. See `runEmulatorTests` below.
+      - script: |
+          set -euo pipefail
+          cargo test --workspace
+        displayName: 'Tests including doc tests (spec/17 §1.1)'
+
+      - script: |
+          set -euo pipefail
+          cargo doc --workspace --no-deps
+        displayName: 'Documentation'
+        env:
+          RUSTDOCFLAGS: '-D warnings'
+
+      # The XSD-derived dictionaries are generated and committed; this
+      # fails if the committed form no longer matches the source.
+      - script: |
+          set -euo pipefail
+          cargo xtask verify-dictionaries
+        displayName: 'Verify Generated Dictionaries'
+
+      # spec/18 §6.6 — a new service without a build definition never
+      # ships, and nothing else notices.
+      - script: |
+          set -euo pipefail
+          cargo xtask verify-pipelines
+        displayName: 'Verify Build Definitions (spec/18 §6.6)'
+
+      - script: |
+          set -euo pipefail
+          cargo install cargo-deny --locked
+          cargo deny check
+        displayName: 'Licences and Advisories (cargo-deny)'
+
+      # §9.2 — only where an agent can run the local stack. Off by default
+      # because a build agent without a container runtime would fail here
+      # for a reason that has nothing to do with the code.
+      - ${{ if eq(parameters.runEmulatorTests, true) }}:
+        - script: |
+            set -euo pipefail
+            printf 'MSSQL_SA_PASSWORD=%s\n' "${MSSQL_SA_PASSWORD}" > local/.secrets
+            podman compose -f local/docker-compose.yml up -d
+            for _ in $(seq 1 60); do
+              if podman logs ihb-rs-sb-emulator 2>&1 | grep -q 'Successfully Up'; then
+                cargo test --workspace --all-features
+                exit $?
+              fi
+              sleep 5
+            done
+            echo "##[error]the emulator did not start"
+            podman logs ihb-rs-sb-emulator 2>&1 | tail -40
+            exit 1
+          displayName: 'Emulator-backed Tests (spec/17 §9.2)'
+          env:
+            MSSQL_SA_PASSWORD: $(MSSQL_SA_PASSWORD)
+
+        - script: |
+            podman compose -f local/docker-compose.yml down --volumes || true
+          displayName: 'Stop the Local Stack'
+          condition: always()

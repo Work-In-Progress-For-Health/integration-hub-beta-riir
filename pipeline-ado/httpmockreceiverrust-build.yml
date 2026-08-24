@@ -1,0 +1,65 @@
+# HTTP Mock Receiver Build Pipeline (Rust)
+#
+# The Python repository containerises this service but has NO ADO build
+# definition for it, so there is nothing to mirror and no release
+# definition consuming the image. The ACR repository name `httpmockreceiver`
+# is therefore chosen here rather than inherited — see §6.5.
+
+trigger:
+  branches:
+    include:
+      - main
+      - release-*
+  paths:
+    include:
+      - crates/*
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - deny.toml
+      - docker/*
+      - local/*
+      - pipeline-ado/*
+    exclude:
+      - spec/*
+      - docs/*
+
+pr: none
+
+parameters:
+  - name: SEMANTIC_VERSION
+    displayName: 'Semantic Version'
+    type: string
+    default: 'v0.1.0'
+
+variables:
+  acrName: 'uksdhcwihsharedcr'
+  azureServiceConnection: 'Azure - NHSWales-DHCW-IntegrationHub-Subscription'
+  POOL_NAME: 'UKS-DHCW-IH-DEV-ADOManagedPool'
+
+stages:
+  - stage: CodeQuality
+    displayName: 'Code Quality & Tests'
+    jobs:
+      - template: templates/code-quality-template.yml
+        parameters:
+          jobName: 'CodeQualityHttpMockReceiver'
+          appDisplayName: 'HTTP Mock Receiver'
+          poolName: ${{ variables.POOL_NAME }}
+
+  - stage: BuildAndPushHttpMockReceiver
+    displayName: 'Build and Push HTTP Mock Receiver'
+    dependsOn: CodeQuality
+    jobs:
+      - template: templates/docker-build-push-template.yml
+        parameters:
+          jobName: 'BuildPushHttpMockReceiver'
+          displayName: 'Build and Push HTTP Mock Receiver'
+          appName: 'httpmockreceiver'
+          dockerfilePath: 'docker/Dockerfile'
+          buildContext: '.'
+          buildArgs: 'BIN=http-mock-receiver'
+          acrName: $(acrName)
+          azureServiceConnection: $(azureServiceConnection)
+          POOL_NAME: ${{ variables.POOL_NAME }}
+          SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}

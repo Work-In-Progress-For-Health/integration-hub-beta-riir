@@ -1,0 +1,44 @@
+# PR Validation Pipeline — the gate of spec/17-testing-and-quality.md §1.
+#
+# The Python's equivalent consolidates sixteen per-app checks into one job
+# "to avoid 16× agent allocation overhead". This workspace needs no such
+# consolidation: `cargo` checks the whole workspace in one invocation, so
+# there is one job because there is one gate, not as an optimisation.
+#
+# §9.4: a merge with a failing gate is not possible. That is a branch
+# policy in Azure DevOps, not something this file can assert.
+
+trigger: none
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+      - release-*
+  paths:
+    include:
+      - crates/**
+      - xtask/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - deny.toml
+      - docker/**
+      - local/**
+      - pipeline-ado/**
+    exclude:
+      - docs/**
+
+variables:
+  POOL_NAME_NON_PROD: 'UKS-DHCW-IH-DEV-ADOManagedPool'
+
+stages:
+  - stage: PRValidation
+    displayName: 'PR Code Quality & Unit Tests'
+    jobs:
+      - template: templates/code-quality-template.yml
+        parameters:
+          jobName: 'PRValidationGate'
+          appDisplayName: 'Whole Workspace'
+          poolName: $(POOL_NAME_NON_PROD)

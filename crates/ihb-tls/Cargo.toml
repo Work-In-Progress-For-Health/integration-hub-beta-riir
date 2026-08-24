@@ -1,0 +1,15 @@
+[package]
+name = "ihb-tls"
+description = "Client trust roots, and the startup check that a configured CA bundle is usable."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rustls-extra-roots.workspace = true
+tokio-rustls.workspace = true
+
+[lints]
+workspace = true

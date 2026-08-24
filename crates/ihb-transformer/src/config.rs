@@ -117,7 +117,7 @@ impl Config {
             ),
             connection_string: reader.optional_secret("SERVICE_BUS_CONNECTION_STRING"),
             namespace: reader.optional_string("SERVICE_BUS_NAMESPACE"),
-            redaction_enabled: reader.bool_or("HL7_LOG_REDACTION_ENABLED", true),
+            redaction_enabled: reader.lenient_bool_or("HL7_LOG_REDACTION_ENABLED", true),
         };
 
         reader.finish()?;

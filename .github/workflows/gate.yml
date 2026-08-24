@@ -40,31 +40,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The HL7 and ER7 crates are path dependencies three levels above
-      # this repository (see the root Cargo.toml's `path = "../../../git/…"`).
-      #
-      # `actions/checkout` cannot place them: it refuses any `path` outside
-      # `$GITHUB_WORKSPACE`. So they are cloned directly, into a location
-      # computed from the workspace rather than hardcoded — the depth is
-      # what the manifest says, and a runner layout change would otherwise
-      # be a confusing "crate not found".
-      - name: Check out the sibling crate repositories
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          siblings="$(cd "$GITHUB_WORKSPACE/../../.." && pwd)/git"
-          mkdir -p "$siblings"
-          for repo in hl7-rust er7-rust; do
-            git clone --depth 1 \
-              "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository_owner }}/$repo.git" \
-              "$siblings/$repo"
-          done
-          # Fail here rather than inside cargo, where the message is a
-          # resolution error that does not mention the layout at all.
-          test -d "$siblings/hl7-rust/hl7-rust/hl7-2" \
-            || { echo "the HL7 crates are not where Cargo.toml expects them"; exit 1; }
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -79,10 +54,9 @@ jobs:
       # §1's order, cheapest first, so a failure arrives as fast as it can.
       #
       # §1.0: `cargo xtask fmt-check`, NOT `cargo fmt --all` — `--all`
-      # reaches through this workspace's path dependencies and rewrites
-      # files in the checkouts above, which are separate repositories. The
-      # task also fails if its member list has drifted from the manifest's,
-      # which is how a newly added crate gets noticed.
+      # reaches beyond this workspace. The task also fails if its member
+      # list has drifted from the manifest's, which is how a newly added
+      # crate gets noticed.
       - run: cargo xtask fmt-check
 
       - run: cargo clippy --workspace --all-targets -- -D warnings
@@ -100,6 +74,10 @@ jobs:
       # fails if the committed form no longer matches the source.
       - run: cargo xtask verify-dictionaries
 
+      # spec/18 §6.6 — a new service without a build definition never
+      # ships, and nothing else notices.
+      - run: cargo xtask verify-pipelines
+
       - run: cargo deny check
 
   msrv:
@@ -107,24 +85,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # As in `gate` — see the comment there.
-      - name: Check out the sibling crate repositories
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          siblings="$(cd "$GITHUB_WORKSPACE/../../.." && pwd)/git"
-          mkdir -p "$siblings"
-          for repo in hl7-rust er7-rust; do
-            git clone --depth 1 \
-              "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository_owner }}/$repo.git" \
-              "$siblings/$repo"
-          done
-          # Fail here rather than inside cargo, where the message is a
-          # resolution error that does not mention the layout at all.
-          test -d "$siblings/hl7-rust/hl7-rust/hl7-2" \
-            || { echo "the HL7 crates are not where Cargo.toml expects them"; exit 1; }
-
       # Stable first, only to run `cargo xtask msrv`.
       - uses: dtolnay/rust-toolchain@stable
 
@@ -153,24 +113,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # As in `gate` — see the comment there.
-      - name: Check out the sibling crate repositories
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          siblings="$(cd "$GITHUB_WORKSPACE/../../.." && pwd)/git"
-          mkdir -p "$siblings"
-          for repo in hl7-rust er7-rust; do
-            git clone --depth 1 \
-              "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository_owner }}/$repo.git" \
-              "$siblings/$repo"
-          done
-          # Fail here rather than inside cargo, where the message is a
-          # resolution error that does not mention the layout at all.
-          test -d "$siblings/hl7-rust/hl7-rust/hl7-2" \
-            || { echo "the HL7 crates are not where Cargo.toml expects them"; exit 1; }
-
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 

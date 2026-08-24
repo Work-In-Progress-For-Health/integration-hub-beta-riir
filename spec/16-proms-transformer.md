@@ -32,8 +32,20 @@ JSON.
 
 ## §2 Routing
 
-§2.1 The WPAS payload's root element is always `PromsEventRequest`. Routing
-is on the `eventCode` **child element**, never on the root tag.
+§2.1 Routing is on the `eventCode` **child element**, and the root element
+is **not** required to be `PromsEventRequest`. Ten of the eleven fixtures
+use that root; `EXPLICIT_EVENT_CODE_MESSAGE` uses `WpasMessage`, and it
+routes on its `eventCode` exactly like the others. An earlier draft of this
+section said the root "is always `PromsEventRequest`", which the corpus
+disproves.
+
+§2.1.1 The root tag is a **fallback**, tried only when no event code is
+found at all (§2.5.7). No root in the corpus is one of §2.2's six codes, so
+the fallback never resolves there — it raises §2.3's failure instead. An
+earlier draft of this section said routing is "never on the root tag"; the
+code does consult it, and it is written down here so a reader of
+`resolve_message_type` does not conclude the specification is describing
+something else.
 
 §2.2 The six message types and their bundle shapes:
 
@@ -51,6 +63,67 @@ abandoned per [`09-transformers.md`](09-transformers.md) §1.6.
 
 §2.4 `CANCELLED` has the same shape as `PREOP` and `PREREAD` the same shape
 as `INPATIENT`; they differ in status and coding, not structure.
+
+§2.4.1 **The routing table, in full.** `eventCode` selects exactly one type;
+`event_code` and `event_display` go to `MessageHeader.eventCoding`, and
+`definition` to `MessageHeader.definition`.
+
+| `eventCode` | Type | `eventCoding.code` | `eventCoding.display` | Clinical resource | `definition` suffix |
+| --- | --- | --- | --- | --- | --- |
+| `REFERRAL` | `REFERRAL` | `REFERRAL` | Patient Referral | `ServiceRequest` | `/referral` |
+| `SURGERY` | `PROCEDURE_PERFORMED` | `SURGERY` | Procedure Performed | `Procedure` | `/procedure` |
+| `PREOP` | `APPOINTMENT_SCHEDULED` | `PREOP` | Appointment Scheduled | `Appointment`, `booked` | `/appointment` |
+| `INPATIENT` | `INPATIENT_ADMISSION` | `INPATIENT` | Inpatient Admission | `Encounter` | `/encounter` |
+| `CANCELLED` | `APPOINTMENT_CANCELLED` | `CANCELLED` | Appointment Cancellation | `Appointment`, `cancelled` | `/appointment-cancellation` |
+| `PREREAD` | `PREADMISSION` | `PREREAD` | Pre-admission Notification | `Encounter` | `/preadmission` |
+
+§2.4.2 Three further types are **defined and unreachable** —
+`SURGERY_PERFORMED`, `OUTPATIENT_VISIT` and `DISCHARGE`. Each shares an
+`eventCode` with a type that is selected instead. They are **not** ported:
+a type nothing can route to is not behaviour, and carrying it across would
+suggest a choice exists where none does. What they reveal is recorded as
+§9.8, which is a question for the Hub team rather than a porting decision.
+
+---
+
+## §2.5 Parsing
+
+§2.5.1 The payload is a bespoke XML schema, **not** HL7 v2.xml, so none of
+the HL7 tooling of [`06-validation.md`](06-validation.md) applies. Fields
+are simple leaf elements: `<nhsNumber>1234567890</nhsNumber>`.
+
+§2.5.2 Every **leaf** element in document order is indexed under its
+normalised name (§6.0). A leaf whose text is empty or whitespace is skipped
+**entirely** — see §2.5.5a for what that costs — so "absent" and "empty"
+are indistinguishable to a reader (§6.0a).
+
+§2.5.3 A namespace prefix is stripped before normalising, so a namespaced
+payload reads the same as a bare one.
+
+§2.5.4 **The first occurrence of a repeated name wins**, and the rest are
+dropped with a debug line. The specification uses no repeating leaf, so a
+repeat is a payload problem; overwriting silently would hide it. A duplicate
+skips the **whole leaf**, so the second element's attributes are dropped
+with it.
+
+§2.5.5 Attributes are indexed under `{tag}_{attribute}`, normalised. **The
+first value for a key wins, whichever kind it came from** — an element does
+not take precedence over an attribute; document order decides.
+
+§2.5.5a **An attribute on a text-free element is unreachable.** §2.5.2's
+skip happens before attributes are examined, so `<event code="REFERRAL"/>`
+indexes nothing at all. This is the Python's behaviour and it is
+reproduced; it is called out because `resolve_message_type` describes the
+root-tag fallback as being "for future attribute-based format", and this
+parser could not read such a format. See §9.7.
+
+§2.5.6 An empty payload, or one that is not well-formed XML, fails the
+transform — the same outcome as §2.3's unknown event code.
+
+§2.5.7 Routing reads `eventCode`, then `event_code`/`EVENT_CODE`, then the
+legacy `MESSAGE_TYPE`/`messageType`/`MSG_TYPE`/`msgType`, upper-cased and
+first-non-empty. With none of them present the **root tag** is tried
+(§2.1.1), and failing that the transform fails per §2.3.
 
 ---
 
@@ -136,12 +209,28 @@ matched. See §9.2.
 
 Derived from the eleven mappers in `xml_fhir_proms_transformer/mappers/`.
 
-§6.0 **Field lookup is by alias, not by name.** Every read takes an ordered
-list of candidate element names and returns the first that is present — the
-WPAS payload carries several naming conventions at once (`nhsNumber` and
-`NHS_NUMBER`; `system_id`, `SYSTEM_ID` and `systemId`). The alias lists
-below are normative **in order**, because a payload can carry more than one
-and the first wins.
+§6.0 **Field lookup is by normalised key, then by alias order.** Two things
+happen, and conflating them leads to the wrong conclusion about what the
+alias lists mean:
+
+1. Every element name is **normalised** — lowercased, with everything
+   outside `[a-z0-9]` removed (§2.5). So `nhsNumber`, `NHS_NUMBER` and
+   `nhs-number` are one key, not three.
+2. A read then tries its aliases **in order** and takes the first
+   **non-empty** value.
+
+So an alias list matters only where the aliases are genuinely different
+words. `message.get("nhsNumber", "NHS_NUMBER")` is one lookup written
+twice; `message.get("crn", "UNIT_NUMBER", "unitNumber")` is two — `crn`
+first, then `unitnumber`. Where the order is load-bearing the tables below
+are normative in that order.
+
+§6.0a The distinction between **absent** and **present but empty** is lost
+by the lookup: `get` returns the default for both, because §2.5.2 does not
+index an empty element at all. One mapper needs the difference — §6.3.3's
+`deceased` — and it uses `has`, which has the same blind spot. This is
+reproduced, and it is why §6.3.3's "present and empty" case is reached only
+when the element carries whitespace rather than nothing.
 
 §6.0.1 An absent or unparseable value leaves its element **unset**. Nothing
 in §6 substitutes a default for a missing clinical value; §5.2.2's endpoint
@@ -293,13 +382,20 @@ available option. See §9.6.
 fallback exists because `referrer_org` is present-but-empty in real SIT
 payloads.
 
-### §6.11 `Location`
+### §6.11 `Location` — always present
 
 | Target | Source | Rule |
 | --- | --- | --- |
 | `identifier` | `referrer_location`, `referrerLocation` | The whole free-text string, used as-is |
 | `name` | `referrer_location` | **The first comma-delimited segment** — §9.5 |
 | `address.postalCode` | `referrer_postcode`, `referrerPostcode` | |
+
+§6.11.0 **A `Location` entry is emitted even when there is nothing to put
+in it.** Unlike §6.9's `Practitioner` and §6.10's `Organization`,
+`map_location` has no guard: a bundle whose payload carries neither
+`referrer_location` nor `referrer_postcode` still ends with a `Location`
+holding only an `id` and a `meta.profile`. Measured —
+`EXPLICIT_EVENT_CODE_MESSAGE` is exactly that case. See §9.13.
 
 §6.11.1 `referrer_location` is a full free-text address, e.g.
 `"YSBYTY GWYNEDD, PENRHOSGARNEDD, BANGOR, GWYNEDD, LL57 2PW"`. The
@@ -315,12 +411,47 @@ taken.
 
 ## §7 Reference data
 
-§7.1 Code lookups are resolved through a `ReferenceDataResolver`, with a
-default implementation and an injectable one for tests.
+§7.1 Two kinds of lookup exist and they behave **differently** on an
+unrecognised code. Conflating them gets one of them wrong.
 
-§7.2 A code that cannot be resolved MUST leave the coding absent rather than
-emitting a placeholder. A fabricated clinical code is worse than a missing
-one.
+### §7.1.1 The resolver seam — absent on failure
+
+`resolve_gender` and `resolve_language` sit behind a
+`ReferenceDataResolver`, with a static default and an injectable one for
+tests. They exist because the Fiorano workflow called an external
+`CoreReferenceDataLookup_Service` for `SEX` and `PREFERRED_LANGUAGE`, and
+the Integration Hub has no equivalent.
+
+| Lookup | Behaviour |
+| --- | --- |
+| `resolve_gender` | WPAS `SEX` → `male`/`female`/`other`/`unknown`; `None` otherwise |
+| `resolve_language` | **always `None`** — see §9.9 |
+
+§7.2 A code the resolver cannot map MUST leave the element **absent** rather
+than emitting a placeholder. A fabricated clinical code is worse than a
+missing one.
+
+### §7.1.2 The wiki lookups — the code echoed back
+
+`nhs_certification_display` and `dha_code_name` are ports of JavaScript
+functions from the INSE wiki, and each **returns its input unchanged** when
+the code is not recognised. That is the Fiorano workflow's behaviour and it
+is preserved so this service produces the same output.
+
+| Lookup | Known code | Unknown code |
+| --- | --- | --- |
+| `nhs_certification_display` | the display text | **the code itself** |
+| `dha_code_name` | the health board name | **the code itself** |
+
+§7.2.1 So §7.2's rule does **not** hold for these two: an unrecognised
+certification code `99` is emitted as
+`Coding.display = "99"`, which asserts that `"99"` is the human-readable
+description of that status. Recorded as §9.10 rather than silently
+corrected, because changing it would change what Promptly stores.
+
+§7.3 The gender table accepts both letter and numeric WPAS codes:
+`M`/`1` → `male`, `F`/`2` → `female`, `O`/`9` → `other`, and
+`U`/`0`/`X` → `unknown`. Matching is upper-cased and trimmed.
 
 ---
 
@@ -412,3 +543,122 @@ calls it "the best available option pending spec clarification". Reproduced,
 and raised here because it is an assertion rather than an omission — §7.2's
 principle is that a fabricated code is worse than a missing one, and this is
 the same class of thing one level up.
+
+§9.7 **An attribute-carrying payload would not parse.** `proms_parser.py`
+skips a leaf with no text before it looks at that leaf's attributes, so
+`<event code="REFERRAL"/>` yields no fields at all — not the event code, and
+not anything else on that element. Attributes are only reachable on an
+element that also has text.
+
+This is worth knowing because `resolve_message_type`'s docstring gives the
+root-tag fallback as being "for future attribute-based format". If such a
+format is coming, the parser needs a change before it arrives, and the
+symptom otherwise is a message that routes as unroutable with no indication
+that its data was silently dropped. Reproduced exactly (§2.5.5a) so nothing
+changes on cutover.
+
+§9.8 **`eventCode` cannot distinguish five WPAS scenarios, and two of them
+would produce a different clinical resource.**
+
+`message_types.py` defines nine types for six codes. The three that never
+route are not redundant duplicates — two of them differ in the resource
+they would emit:
+
+| Unreachable type | Shares `eventCode` with | Would emit | Actually emitted |
+| --- | --- | --- | --- |
+| `SURGERY_PERFORMED` | `PROCEDURE_PERFORMED` (`SURGERY`) | `Procedure` | `Procedure` — same shape |
+| `DISCHARGE` | `PROCEDURE_PERFORMED` (`SURGERY`) | **`Encounter`** | **`Procedure`** |
+| `OUTPATIENT_VISIT` | `APPOINTMENT_SCHEDULED` (`PREOP`) | **`Encounter`** | **`Appointment`** |
+
+The Python's own comment says the spreadsheet "defines multiple scenarios
+for SURGERY and PREOP but the eventCode alone cannot distinguish them — a
+single mapping is used per code until the specification owner confirms a
+disambiguation field."
+
+§9.8.1 The consequence for `DISCHARGE` is not a mis-shaped bundle, it is a
+**false clinical statement**. A discharge arriving as `eventCode=SURGERY`
+becomes `Procedure { status: "completed", code.display: "Procedure
+performed" }` — a positive assertion that a procedure was carried out on
+that patient, on that date. §7.2 already holds that a fabricated clinical
+code is worse than a missing one; this is the same principle at the level of
+the resource type.
+
+§9.8.2 What cannot be answered from this repository: whether WPAS ever
+actually sends a discharge or an outpatient visit under those codes. If it
+never does, this is latent and harmless. If it does, it is wrong today and
+has been for as long as the Python has been running. Either way the fix is
+a disambiguation field in the payload, which is the Hub team's to specify.
+
+§9.8.3 Reproduced exactly (§2.4.1), because changing which resource a code
+produces would change what Promptly stores.
+
+§9.9 **`Patient.communication` is never emitted.**
+`StaticReferenceDataResolver.resolve_language` returns `None` for every
+input, so §6.3's `communication` element is omitted from every bundle the
+Python has ever produced. The mapper's fallback — use the raw
+`spoken_language` display text when the code cannot be resolved — is
+therefore live code that never runs with the default resolver.
+
+The comment says the authoritative code set "lives in the Core Reference
+Data service, which the Integration Hub does not yet consume". So a
+patient's recorded spoken language does not reach Promptly at all. For a
+service operating under the Welsh Language Standards that is worth knowing
+about explicitly — a Welsh-speaking patient's preference is captured in
+WPAS and dropped in transit. Reproduced; the seam is in place so a
+service-backed resolver needs no mapper change.
+
+§9.10 **Two lookups emit the unrecognised code as its own display text.**
+Per §7.1.2, `nhs_certification_display("99")` returns `"99"`, which becomes
+`Coding.display = "99"` — a claim that `"99"` is the description of that
+NHS-number verification status. `dha_code_name` does the same for an
+unknown organisation code, becoming `Organization.name = "7Z9"`.
+
+This is the wiki's documented behaviour and is preserved, but it is the
+opposite of §7.2's principle and it produces a resource that reads as
+though the value were meaningful. Omitting the display instead would leave
+the `code` intact and lose nothing.
+
+§9.11 **Two identifier systems name a laboratory host.**
+`ServiceRequest.identifier.system` and
+`PractitionerRole.identifier.system` are
+
+```
+https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-servicerequest
+https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-practitionerrole
+```
+
+`tools.labs.promptly.health` reads as a development or integration-guide
+environment, not a production namespace. Every other identifier system in
+the bundle is an `fhir.nhs.uk`, `fhir.nhs.wales` or `fhir.hl7.org.uk` URL.
+
+An identifier system is the namespace a receiver files the value under, so
+if these change later, every previously sent `ServiceRequest` is namespaced
+differently from every subsequent one and the two do not match. Reproduced
+exactly, and raised because it looks like a value that was never finalised
+rather than one that was chosen.
+
+§9.12 **The NHS-number verification code system and its extension differ by
+a suffix.** The extension is
+`…/StructureDefinition/Extension-UKCore-NHSNumberVerificationStatus` and
+the code system is
+`…/CodeSystem/UKCore-NHSNumberVerificationStatus**Wales**`. Writing them as
+a matching pair is the obvious mistake and produces a coding in a code
+system that does not exist. Not a defect in the Python — it has them right
+— but recorded because this port got it wrong on a first pass and only the
+constant-by-constant check against the source caught it.
+
+§9.13 **An empty `Location` is emitted for every bundle.**
+`map_location` returns a `Location` unconditionally, where
+`map_practitioner` and `map_organization` beside it return `None` when
+their sources are absent. So a payload with no location data produces an
+entry containing nothing but a generated id and a profile URL.
+
+It is not harmful — a resource with no content asserts nothing — but it is
+an entry a consumer has to skip, it shifts nothing because it is last, and
+it reads as an oversight rather than a decision given the two guarded
+mappers beside it. Reproduced exactly (§6.11.0), because removing it would
+change the entry count of every bundle.
+
+Worth noting how this was found: reading the three mappers side by side
+suggests they behave alike, and only the byte-for-byte comparison against
+the Python's own output showed otherwise.

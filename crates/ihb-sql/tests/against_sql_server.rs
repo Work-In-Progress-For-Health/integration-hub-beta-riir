@@ -45,6 +45,40 @@ const SCHEMA: &str = include_str!("../../../local/sql/schema.sql");
 /// each other's rows.
 const TABLE: &str = "monitoring.Message";
 
+/// The database the services use.
+///
+/// `spec/18-deployment.md` §5.2 keeps the Python's `.env` files unchanged,
+/// and they say `SQL_DATABASE=IntegrationHub`. These tests used `master`,
+/// so the schema they applied was in a different database from the one the
+/// containers read — and nothing created `IntegrationHub` at all.
+const DATABASE: &str = "IntegrationHub";
+
+/// The database the schema is applied *from*.
+///
+/// `CREATE DATABASE` cannot run inside the database it creates.
+const BOOTSTRAP_DATABASE: &str = "master";
+
+/// A connection to `master`, for applying the schema.
+///
+/// The schema's first statement is `CREATE DATABASE IntegrationHub`, which
+/// cannot run inside the database it creates.
+fn bootstrap_connection() -> SqlConnection {
+    let password = std::env::var("MSSQL_SA_PASSWORD")
+        .expect("MSSQL_SA_PASSWORD; see this file's documentation");
+
+    SqlConnection::new(
+        SqlConfig::from_pairs([
+            ("SQL_SERVER", "127.0.0.1"),
+            ("SQL_DATABASE", BOOTSTRAP_DATABASE),
+            ("SQL_USERNAME", "sa"),
+            ("MSSQL_SA_PASSWORD", password.as_str()),
+            ("SQL_ENCRYPT", "No"),
+            ("SQL_TRUST_SERVER_CERTIFICATE", "Yes"),
+        ])
+        .expect("the test configuration is complete"),
+    )
+}
+
 /// A connection to the local container.
 ///
 /// `SQL_ENCRYPT=No` because this build carries no TLS backend
@@ -56,7 +90,7 @@ fn connection() -> SqlConnection {
 
     let config = SqlConfig::from_pairs([
         ("SQL_SERVER", "127.0.0.1"),
-        ("SQL_DATABASE", "master"),
+        ("SQL_DATABASE", DATABASE),
         ("SQL_USERNAME", "sa"),
         ("MSSQL_SA_PASSWORD", password.as_str()),
         ("SQL_ENCRYPT", "No"),
@@ -84,7 +118,7 @@ async fn prepared() -> SqlConnection {
 
 /// Run every statement in `schema.sql`.
 async fn apply_schema() {
-    let mut sql = connection();
+    let mut sql = bootstrap_connection();
     let mut client = sql.take().await.expect("the database is reachable");
 
     // `GO` is a batch separator understood by client tools, not by the
@@ -327,7 +361,7 @@ async fn a_credential_never_reaches_an_error() {
     // the wrong password, and the resulting error is checked for it.
     let config = SqlConfig::from_pairs([
         ("SQL_SERVER", "127.0.0.1"),
-        ("SQL_DATABASE", "master"),
+        ("SQL_DATABASE", DATABASE),
         ("SQL_USERNAME", "sa"),
         ("MSSQL_SA_PASSWORD", "a-deliberately-wrong-password-9f3c"),
         ("SQL_ENCRYPT", "No"),

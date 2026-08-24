@@ -1,0 +1,36 @@
+[package]
+name = "xml-fhir-proms-transformer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "Turns a WPAS PromsEventRequest XML document into a FHIR R4B message Bundle for Promptly."
+
+[lib]
+name = "xml_fhir_proms_transformer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "xml-fhir-proms-transformer"
+path = "src/main.rs"
+
+[dependencies]
+ihb-config.workspace = true
+ihb-runtime.workspace = true
+ihb-telemetry.workspace = true
+ihb-transformer.workspace = true
+roxmltree.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "signal"] }
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio-test.workspace = true

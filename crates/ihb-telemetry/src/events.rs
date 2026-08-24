@@ -375,12 +375,16 @@ impl EventLogger {
     /// infallible in `tracing`, so there is nothing to catch and nothing a
     /// caller could do about it. See `spec/04-observability.md` §1.2.2a.
     ///
-    /// `otel_trace_id` and `otel_span_id` are **not** set here. They are
-    /// added to every record by the subscriber layer in
-    /// `spec/04-observability.md` §4.5, which is the right level: an event
-    /// should not have to know whether tracing is configured.
+    /// `otel_trace_id` and `otel_span_id` carry the ids of the recording
+    /// span, or the all-zero placeholders when there is none
+    /// (`spec/04-observability.md` §4.5). The event does not need to know
+    /// whether tracing is configured: [`crate::otel::current_ids`] answers
+    /// that, and answers it the same way everywhere.
     fn emit(event: &LogEvent) {
+        let (otel_trace_id, otel_span_id) = crate::otel::current_ids();
         tracing::info!(
+            otel_trace_id = %otel_trace_id,
+            otel_span_id = %otel_span_id,
             workflow_id = %event.workflow_id,
             microservice_id = %event.microservice_id,
             event_type = event.event_type.as_str(),

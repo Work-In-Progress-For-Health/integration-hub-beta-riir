@@ -301,10 +301,10 @@ and its tag rewriter are deleted.
 
 §5.8.1a A prefixed document converting correctly is now a **requirement**,
 not an observation, and `convert::tests::a_namespace_prefixed_document_needs_no_help`
-tests it directly. The dependency is a path dependency on a repository under
-active development, so an upstream regression here is a live possibility
-rather than a theoretical one — and it would take the whole LIMS flow down
-silently. Deleting the workaround without leaving a test behind would have
+tests it directly. The dependency is on a repository under active
+development, pinned to an exact published version, so an upstream
+regression arrives only on a deliberate version bump — but it would take
+the whole LIMS flow down silently if it did. Deleting the workaround without leaving a test behind would have
 traded a known problem for an unmonitored one.
 
 §5.8.2 **Empty elements are dropped.** The converter renders an empty
@@ -637,8 +637,16 @@ equivalent one.
 
 ### §9.4 Finding — `uppsala` misresolves an unprefixed type reference
 
-**Status: a defect in `uppsala` 0.9.0. Reported; the cross-check is
-failing until it is fixed.**
+**Status: a defect in `uppsala` 0.9.0, the latest published version.
+Reported upstream as <https://github.com/kushaldas/uppsala/issues/39>. The cross-check
+fails until it is fixed.**
+
+An earlier draft of this section claimed it had been reported before it
+had, while `tasks.md` P2.17 tracked the reporting as outstanding — the two
+disagreed for some time. It is now true, and the issue number is here so
+the claim can be checked rather than taken on trust. The working copy of
+the report is
+[`docs/upstream/uppsala-id-type-resolution.md`](../docs/upstream/uppsala-id-type-resolution.md).
 
 An unprefixed `base="ID"` in a schema whose default namespace is its target
 namespace must resolve to **that schema's** `ID`, not to the built-in

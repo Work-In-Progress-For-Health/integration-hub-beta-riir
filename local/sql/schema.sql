@@ -7,6 +7,22 @@
 -- reference for what the Azure SQL database holds. Every statement is
 -- idempotent so a test run does not depend on a clean container.
 
+-- The database the local stack's `.env` files name
+-- (`SQL_DATABASE=IntegrationHub`). Those files are the Python's, used
+-- unchanged per `spec/18-deployment.md` §5.2, so the database has to be
+-- created rather than renamed.
+--
+-- Nothing else creates it: Azure SQL Edge ships no `sqlcmd` (§5.3.5), so
+-- there is no entry-point script, and the tests that apply this schema
+-- connected to `master`. Without this the two persistence services start,
+-- report **healthy**, and fail every batch with "Cannot open database".
+IF DB_ID('IntegrationHub') IS NULL
+    EXEC('CREATE DATABASE IntegrationHub');
+GO
+
+USE IntegrationHub;
+GO
+
 IF SCHEMA_ID('monitoring') IS NULL
     EXEC('CREATE SCHEMA monitoring');
 GO

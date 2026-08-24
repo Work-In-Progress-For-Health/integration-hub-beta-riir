@@ -10,6 +10,16 @@
 //! parts a test needs to drive are separable from the parts that need a
 //! broker.
 //!
+//! # This crate is a facade
+//!
+//! The implementation lives in [`graceful_worker`], which was extracted
+//! from this workspace and published: cooperative shutdown and an
+//! exponential retry schedule are not Integration Hub inventions. What
+//! stays here is which clauses they implement, and the schedule
+//! `spec/03-message-bus.md` §5.4.1 fixes — five seconds, doubling to
+//! fifteen minutes — which the general crate takes as a parameter and this
+//! workspace does not.
+//!
 //! # Modules
 //!
 //! - [`shutdown`] — noticing `SIGTERM` and stopping between messages rather
@@ -20,8 +30,9 @@
 //!
 //! **A message that has been acknowledged must have been forwarded.** Both
 //! modules are shaped by it: shutdown is cooperative so a stop cannot land
-//! mid-message, and backoff sleeps in slices so waiting for a retry cannot
-//! outlast the platform's grace period and turn a stop into a kill.
+//! mid-message, and a worker waits for a retry through
+//! [`shutdown::Watcher::sleep`], so a stop cuts the wait short rather than
+//! outlasting the platform's grace period.
 //!
 //! # Examples
 //!
@@ -46,13 +57,134 @@
 //! ```
 
 #![forbid(unsafe_code)]
-// A test asserts; asserting is what `unwrap` and `panic` are for. The lints
-// stay on for everything the container actually runs.
-// See spec/17-testing-and-quality.md §2.3.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
-pub mod backoff;
-pub mod shutdown;
+/// How long a failing receive waits before trying again.
+///
+/// Implements `spec/03-message-bus.md` §5.4.
+///
+/// The schedule is the Python's, and it is the Python's for a reason worth
+/// knowing: the flows are session-ordered, so a message that cannot be
+/// processed blocks every message behind it in its flow. Retrying too
+/// eagerly turns one poison message into a hot loop against Service Bus;
+/// retrying too lazily stalls a clinical feed. Five seconds, doubling to a
+/// fifteen-minute ceiling, is the compromise already in production, and
+/// changing it would change how long a stalled flow stays stalled.
+pub mod backoff {
+    use std::time::Duration;
+
+    pub use graceful_worker::Backoff;
+
+    /// The wait before the first retry.
+    pub const INITIAL_DELAY: Duration = graceful_worker::backoff::DEFAULT_INITIAL_DELAY;
+
+    /// The longest this will ever wait between attempts.
+    ///
+    /// `spec/03-message-bus.md` §5.4.1 states this as 900 seconds; fifteen
+    /// minutes is the same quantity said the way an operator reads it.
+    pub const MAX_DELAY: Duration = graceful_worker::backoff::DEFAULT_MAX_DELAY;
+
+    /// The longest a single receive call blocks waiting for a message.
+    ///
+    /// Also the longest slice a sliced wait sleeps in, so a shutdown signal
+    /// is never more than this away from being noticed
+    /// (`spec/03-message-bus.md` §5.4.3).
+    pub const MAX_WAIT: Duration = graceful_worker::backoff::DEFAULT_SLICE;
+}
+
+/// Noticing `SIGTERM`, and stopping without losing a message.
+///
+/// Implements `spec/01-architecture.md` §1.3 and `spec/07-hl7-server.md` §8.
+///
+/// Azure Container Apps stops a container by sending `SIGTERM` and then
+/// waiting a fixed grace period before `SIGKILL`. Everything in that window
+/// is the process's own responsibility, and for this estate the requirement
+/// is sharp: **a message that has been acknowledged must have been
+/// forwarded**. Shutting down in the middle of one is how that promise gets
+/// broken, so shutdown is cooperative — a signal asks loops to stop between
+/// messages, rather than cancelling whatever is in flight.
+pub mod shutdown {
+    pub use graceful_worker::{Shutdown, Watcher};
+}
 
 pub use backoff::Backoff;
 pub use shutdown::{Shutdown, Watcher};
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::backoff::{Backoff, INITIAL_DELAY, MAX_DELAY, MAX_WAIT};
+    use super::shutdown::Shutdown;
+
+    #[test]
+    fn the_schedule_is_the_one_the_specification_fixes() {
+        // spec/03-message-bus.md §5.4.1. The upstream crate takes these as
+        // parameters; this workspace does not, and this is what notices if
+        // an upstream default ever moves.
+        assert_eq!(INITIAL_DELAY, Duration::from_secs(5));
+        // Deliberately the specification's own number and unit, not a
+        // restatement of it: §5.4.1 says "900 seconds", and this line is
+        // what fails if that changes.
+        #[allow(
+            clippy::duration_suboptimal_units,
+            reason = "citing the specification verbatim is the point"
+        )]
+        let ceiling = Duration::from_secs(900);
+        assert_eq!(MAX_DELAY, ceiling);
+        assert_eq!(MAX_WAIT, Duration::from_secs(60));
+
+        assert_eq!(Backoff::new().delay(), INITIAL_DELAY);
+    }
+
+    #[test]
+    fn the_delay_doubles_and_stops_at_the_ceiling() {
+        // spec/03-message-bus.md §5.4.1
+        let mut backoff = Backoff::new();
+        let seen: Vec<u64> = (0..6).map(|_| backoff.failed().as_secs()).collect();
+        assert_eq!(seen, [5, 10, 20, 40, 80, 160]);
+
+        for _ in 0..50 {
+            backoff.failed();
+        }
+        assert_eq!(backoff.delay(), MAX_DELAY);
+    }
+
+    #[test]
+    fn any_success_resets_it_completely() {
+        // spec/03-message-bus.md §5.4.2
+        let mut backoff = Backoff::new();
+        for _ in 0..10 {
+            backoff.failed();
+        }
+        backoff.succeeded();
+        assert_eq!(backoff.delay(), INITIAL_DELAY);
+        assert_eq!(backoff.attempt(), 0);
+    }
+
+    #[tokio::test]
+    async fn dropping_a_shutdown_does_not_stop_anything() {
+        // spec/01-architecture.md §1.3 — shutdown must be deliberate, never
+        // a scope accident.
+        let watcher = {
+            let shutdown = Shutdown::new();
+            shutdown.watcher()
+        };
+        assert!(watcher.is_running());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_retry_wait_is_cut_short_by_a_stop() {
+        // spec/03-message-bus.md §5.4.3 — the property the main loops rely
+        // on: they wait through `watcher.sleep(backoff.delay())`, so a
+        // fifteen-minute backoff cannot outlast the grace period.
+        let shutdown = Shutdown::new();
+        let watcher = shutdown.watcher();
+
+        let sleeping = tokio::spawn(async move { watcher.sleep(MAX_DELAY).await });
+        tokio::task::yield_now().await;
+        shutdown.stop();
+
+        assert!(!sleeping.await.expect("the sleeping task"));
+    }
+}

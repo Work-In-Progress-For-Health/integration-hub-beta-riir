@@ -3,7 +3,7 @@
 //! Implements `spec/09-transformers.md` §1.1 and §1.2.
 //!
 //! Every transformer's binary is the same eight lines around a different
-//! [`Transformer`]; this is those eight lines.
+//! [`crate::Transformer`]; this is those eight lines.
 
 // Startup calls `azservicebus`, whose futures are about 32 KB. `ihb_bus::live`
 // records why that is allowed rather than boxed away; here they are all
@@ -21,7 +21,7 @@ use ihb_runtime::shutdown::Shutdown;
 
 use crate::config::Config;
 use crate::runtime::Runtime;
-use crate::{Outcome, Transformer};
+use crate::{Outcome, PayloadTransformer};
 
 /// Read the configuration, connect, and run until shutdown.
 ///
@@ -29,7 +29,10 @@ use crate::{Outcome, Transformer};
 ///
 /// Never returns an error type; the exit code is the report, because this
 /// is what `main` returns.
-pub async fn run<T: Transformer + 'static>(transformer: T, default_service: &str) -> ExitCode {
+pub async fn run<T: PayloadTransformer + 'static>(
+    transformer: T,
+    default_service: &str,
+) -> ExitCode {
     let config = match Config::from_env() {
         Ok(config) => config,
         Err(errors) => {
@@ -42,6 +45,13 @@ pub async fn run<T: Transformer + 'static>(transformer: T, default_service: &str
     };
 
     let telemetry = ihb_telemetry::otel::configure(&telemetry_config(default_service));
+
+    // `spec/18-deployment.md` §4.3 — a configured CA bundle that cannot be
+    // used stops the service here, rather than becoming a TLS failure in
+    // whichever component happens to need it first.
+    if !ihb_tls::startup_check() {
+        return ExitCode::FAILURE;
+    }
     tracing::info!(
         transformer = transformer.name(),
         ingress = %config.ingress_queue_name,
@@ -74,15 +84,57 @@ pub async fn run<T: Transformer + 'static>(transformer: T, default_service: &str
     shutdown.listen_for_signals();
     let watcher = shutdown.watcher();
 
+    // `spec/03-message-bus.md` §5.1.3 — a session receiver MUST have
+    // automatic lock renewal. Without it the lock expires while the
+    // transformer is idle, every later receive fails with
+    // `IllegalSessionState`, and the service processes nothing for the
+    // rest of its life while its health check stays green.
     let batch_size = config.max_batch_size;
+    let queue = config.ingress_queue_name.clone();
+    let session = config.ingress_session_id.clone();
     let mut runtime = Runtime::new(config, transformer, egress);
-    receive_loop(&mut runtime, &receiver, batch_size, &watcher).await;
 
-    // The receiver closes before the sender, so nothing can be received
-    // that cannot then be forwarded — the same ordering argument as
-    // `spec/07-hl7-server.md` §8.2a.
-    if let Err(error) = receiver.close().await {
-        tracing::warn!(%error, "the receiver did not close cleanly");
+    // §5.1.5 — reopen on a lost session rather than retrying a dead
+    // receiver. Renewal is bounded, and when it gives up the broker drops
+    // the session; without this loop every later receive fails forever
+    // while the health check stays green.
+    let mut receiver = receiver;
+    loop {
+        let renewer = receiver.renew_session_lock();
+        let ended_because = receive_loop(&mut runtime, &receiver, batch_size, &watcher).await;
+
+        // §5.1.4 — the renewer stops **before** the receiver closes, so no
+        // renewal is in flight against a receiver being torn down. `close`
+        // refuses while the renewer holds it, which makes the ordering
+        // enforced rather than remembered.
+        if let Some(renewer) = renewer {
+            let ended = renewer.stop().await;
+            if !ihb_bus::live::renewal_was_clean(ended) {
+                tracing::warn!(?ended, "the session lock renewer ended badly");
+            }
+        }
+
+        // The receiver closes before the sender, so nothing can be received
+        // that cannot then be forwarded — the same ordering argument as
+        // `spec/07-hl7-server.md` §8.2a.
+        if let Err(error) = receiver.close().await {
+            tracing::warn!(%error, "the receiver did not close cleanly");
+        }
+
+        if ended_because == LoopEnd::Stopped || !watcher.is_running() {
+            break;
+        }
+
+        let Some(fresh) = reopen(&bus, &queue, session.as_deref()).await else {
+            // Nothing else can be done: the queue is unreachable. Exit
+            // non-zero so the orchestrator restarts the container, rather
+            // than sitting here healthy and idle.
+            tracing::error!(%queue, "could not reopen the receiver after a lost session");
+            health.stop().await;
+            return ExitCode::FAILURE;
+        };
+        tracing::info!(%queue, "reopened the receiver after a lost session");
+        receiver = fresh;
     }
     health.stop().await;
 
@@ -135,13 +187,41 @@ async fn open(bus: &LiveBus, config: &Config) -> Option<(LiveSender, LiveReceive
     Some((egress, receiver))
 }
 
-/// Receive and process until shutdown (§1.2).
-async fn receive_loop<T: Transformer, E: ihb_bus::sink::MessageSink>(
+/// Why the receive loop returned.
+///
+/// `spec/03-message-bus.md` §5.1.5. A lost session is not a failure to
+/// report and stop on — the service is healthy and the queue is fine, and
+/// the only thing wrong is that this particular receiver's session lock
+/// expired. The caller accepts the session again and carries on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoopEnd {
+    /// The shutdown watcher said stop.
+    Stopped,
+    /// The session lock is gone; the receiver must be reopened.
+    SessionLost,
+}
+
+/// Accept the ingress session again after it was lost (§5.1.5).
+///
+/// Only the receiver is rebuilt. The egress sender is unaffected by a
+/// receive-side session lock and reopening it would drop messages already
+/// accepted into its batch.
+async fn reopen(bus: &LiveBus, queue: &str, session: Option<&str>) -> Option<LiveReceiver> {
+    match session {
+        Some(session) => bus.session_receiver(queue, session).await,
+        None => bus.queue_receiver(queue).await,
+    }
+    .inspect_err(|error| tracing::error!(%error, %queue, "could not reopen the receiver"))
+    .ok()
+}
+
+/// Receive and process until shutdown (§1.2), or until the session is lost.
+async fn receive_loop<T: PayloadTransformer, E: ihb_bus::sink::MessageSink>(
     runtime: &mut Runtime<T, E>,
     receiver: &LiveReceiver,
     batch_size: usize,
     watcher: &ihb_runtime::shutdown::Watcher,
-) {
+) -> LoopEnd {
     let mut backoff = Backoff::new();
 
     while watcher.is_running() {
@@ -150,6 +230,16 @@ async fn receive_loop<T: Transformer, E: ihb_bus::sink::MessageSink>(
             .await
         {
             Ok(batch) => batch,
+            Err(error) if error.is_session_lost() => {
+                // The session lock is gone and this receiver will never
+                // work again. Retrying it is an infinite loop that
+                // processes nothing while the health check stays green,
+                // which is exactly what happened before
+                // `spec/03-message-bus.md` §5.1.5 existed. Hand back to
+                // the caller, which accepts the session afresh.
+                tracing::warn!(%error, "the session was lost; reopening the receiver");
+                return LoopEnd::SessionLost;
+            }
             Err(error) => {
                 tracing::error!(%error, "receive failed");
                 backoff.failed();
@@ -185,6 +275,8 @@ async fn receive_loop<T: Transformer, E: ihb_bus::sink::MessageSink>(
             }
         }
     }
+
+    LoopEnd::Stopped
 }
 
 /// Telemetry configuration, read straight from the environment.

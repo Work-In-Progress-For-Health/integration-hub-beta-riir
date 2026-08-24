@@ -1,4 +1,4 @@
-# Integration Hub Beta — Rust
+# Integration Hub Beta — Rewrite It In Rust (RIIR)
 
 A rewrite of the NHS Wales [Integration Hub](../Integration-Hub-Beta) in
 Rust: the cloud-native platform that receives HL7 v2 clinical messages from
@@ -13,13 +13,16 @@ where the work has reached.
 
 ## Where to start
 
-| If you want to | Read |
-| --- | --- |
-| Know what is being built and why | [`plan.md`](plan.md) |
-| Know exactly how something must behave | [`spec/`](spec/) |
-| Know what is done and what is next | [`tasks.md`](tasks.md) |
-| Understand the flows and queues | [`spec/01-architecture.md`](spec/01-architecture.md) |
-| Configure a service | [`spec/02-configuration.md`](spec/02-configuration.md) |
+| If you want to                         | Read                                                   |
+| -------------------------------------- | ------------------------------------------------------ |
+| Know what is being built and why       | [`plan.md`](plan.md)                                   |
+| Know exactly how something must behave | [`spec/`](spec/)                                       |
+| Know what is done and what is next     | [`tasks.md`](tasks.md)                                 |
+| Understand the flows and queues        | [`spec/01-architecture.md`](spec/01-architecture.md)   |
+| Configure a service                    | [`spec/02-configuration.md`](spec/02-configuration.md) |
+| Find any document at all               | [`index.md`](index.md)                                 |
+| Work here as an AI agent               | [`AGENTS.md`](AGENTS.md)                               |
+| Cut a container over to Rust           | [`docs/cutover-runbook.md`](docs/cutover-runbook.md)   |
 
 **[`spec/`](spec/) is the source of truth.** Code implements a section
 there; a section there does not describe code. Where the two disagree, the
@@ -53,17 +56,18 @@ The local container runtime is **Podman**
 podman compose -f local/docker-compose.yml up -d
 ```
 
-The workspace depends on the `hl7-rust` and `er7-rust` crates by path, so
-both must be checked out beside this repository:
+The workspace depends on eight first-party crates — `hl7-2`, `er7` and
+their companions — **from crates.io, by exact version**. Nothing needs to be
+checked out beside this repository.
 
-```
-~/git/hl7-rust/hl7-rust/
-~/git/er7-rust/er7-rust/
-```
-
-They are what makes this tractable — MLLP framing, SOAP envelopes, the HL7
-v2 dictionary, and ER7 ↔ v2.xml conversion are solved there rather than
+They are what makes this tractable: MLLP framing, SOAP envelopes, the HL7 v2
+dictionary, and ER7 ↔ v2.xml conversion are solved there rather than
 reimplemented here. See [`plan.md` §6](plan.md#6-dependencies).
+
+They were path dependencies until the container builds needed a build
+context that could reach them (`spec/18-deployment.md` §2.4). The trade is
+explicit: a local edit to `hl7-rust` or `er7-rust` no longer appears here
+without a publish, or a `[patch.crates-io]` entry that is not committed.
 
 ## The gate
 
@@ -76,6 +80,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 cargo xtask verify-dictionaries
+cargo xtask verify-pipelines
 cargo deny check
 cargo +$(cargo xtask msrv) check --workspace --all-targets
 ```
@@ -87,9 +92,12 @@ cargo bench                            # criterion benchmarks
 cd fuzz && cargo +nightly fuzz run redact -- -max_total_time=60
 ```
 
-Note `cargo xtask fmt-check` rather than `cargo fmt --all`: `--all` reaches
-through the path dependencies and rewrites files in the `hl7-rust` and
-`er7-rust` checkouts, which are separate repositories.
+Note `cargo xtask fmt-check` rather than `cargo fmt --all`. `--all` reaches
+beyond this workspace — it once rewrote files in the `hl7-rust` and
+`er7-rust` checkouts, when those were path dependencies. The task is kept
+because it does something `cargo fmt` cannot: it fails when its member list
+has drifted from the manifest's, which is how a newly added crate gets
+noticed instead of sitting silently unformatted.
 
 ## Automation
 
@@ -98,6 +106,7 @@ cargo xtask fmt                   # format this workspace only
 cargo xtask fmt-check             # check formatting, changing nothing
 cargo xtask build-dictionaries    # regenerate the HL7 schema dictionaries
 cargo xtask verify-dictionaries   # fail if the committed ones drifted
+cargo xtask verify-pipelines      # ADO build definitions vs the workspace
 cargo xtask msrv                  # print the declared MSRV
 ```
 
@@ -107,32 +116,49 @@ cargo xtask msrv                  # print the declared MSRV
 
 ```
 Cargo.toml          workspace: members, shared dependencies, lints
+AGENTS.md           instructions for AI agents; CLAUDE.md for Claude Code
 plan.md             what is being built, and why
 tasks.md            the ordered work list
 spec/               the normative specification
+agents/             longer per-area guides for agents
+docs/               cutover runbook, deviation sign-off
 xtask/              workspace automation
+local/              Compose stack, .env files, sample messages
+docker/             one parameterised Dockerfile for every service
+pipeline-ado/       Azure DevOps build definitions
 fuzz/               fuzz targets (own workspace; needs nightly)
 crates/
-  ihb-config        environment configuration                     ✅
-  ihb-health        the TCP health-check listener                 ✅
-  ihb-telemetry     events, redaction, metrics, tracing           ✅
-  ihb-fields        HL7 field navigation and copying              ✅
-  ihb-runtime       signals, shutdown, backoff                    ✅
-  ihb-bus           Azure Service Bus clients                    ✅
-  ihb-validation    HL7 validation and ER7 ↔ v2.xml               ✅
-  ihb-transformer   the transformer trait and its runtime
-  ihb-sql           Azure SQL access
-  hl7-server        MLLP ingress                            [bin]
-  hl7-soap-server   SOAP ingress                            [bin]
-  hl7-*-transformer PHW, ChemoCare and PIMS                 [bin]
-  hl7-sender, soap-sender, and their subscription variants  [bin]
-  *-mock-receiver   test doubles                            [bin]
-  message-store-service, message-replay-job                 [bin]
-  buswatch, dashboard                                       [bin]
-  xml-fhir-proms-transformer                                [bin]
+  ihb-config             environment configuration
+  ihb-health             the TCP health check, and health-probe
+  ihb-telemetry          events, redaction, metrics, tracing
+  ihb-fields             HL7 field navigation, copying, timestamps
+  ihb-validation         HL7 validation, ER7 <-> v2.xml
+  ihb-runtime            signals, shutdown, backoff
+  ihb-bus                Azure Service Bus clients
+  ihb-sql                Azure SQL access — see spec/12 §5.8
+  ihb-tls                trust roots, and the CA-bundle startup check
+  ihb-transformer        the transformer runtime and its trait
+  ihb-sender             the sender runtime, throttle and pipeline
+  hl7-server             MLLP ingress, one deployment per flow      [bin]
+  hl7-soap-server        SOAP/HTTP ingress for the LIMS flow        [bin]
+  hl7-phw-transformer    PHW → MPI                                  [bin]
+  hl7-chemo-transformer  ChemoCare → MPI                            [bin]
+  hl7-pims-transformer   PIMS → MPI                                 [bin]
+  xml-fhir-proms-transformer  WPAS XML → FHIR PROMs bundles         [bin]
+  hl7-sender             MLLP egress, queue and subscription        [bin]
+  soap-sender            SOAP egress, queue and subscription        [bin]
+  message-store-service  drains the store queue into SQL            [bin]
+  message-replay-job     replays stored messages onto the bus       [bin]
+  hl7-mock-receiver      a downstream MLLP system, for tests        [bin]
+  http-mock-receiver     a downstream SOAP system, for tests        [bin]
+  buswatch               browse queues and messages                 [bin]
+  dashboard              flow health, alarms, e-mail                [bin]
+  ihb-e2e                the whole chain, in process and in Compose
 ```
 
-Crates appear as their phase begins; [`tasks.md`](tasks.md) is the order.
+26 crates plus `xtask`. [`agents/workspace.md`](agents/workspace.md)
+explains how they fit together; [`tasks.md`](tasks.md) is the order they
+were built in.
 
 ---
 

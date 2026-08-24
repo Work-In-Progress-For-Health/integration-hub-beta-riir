@@ -35,6 +35,13 @@ fn main() -> ExitCode {
 async fn run() -> ExitCode {
     let telemetry = ihb_telemetry::otel::configure(&telemetry_config());
 
+    // `spec/18-deployment.md` §4.3 — a configured CA bundle that cannot be
+    // used stops the service here, rather than becoming a TLS failure in
+    // whichever component happens to need it first.
+    if !ihb_tls::startup_check() {
+        return ExitCode::FAILURE;
+    }
+
     let host = read("HOST").unwrap_or_else(|| "127.0.0.1".to_string());
     let port: u16 = match read("PORT").map(|value| value.parse::<u16>()) {
         None => 8080,

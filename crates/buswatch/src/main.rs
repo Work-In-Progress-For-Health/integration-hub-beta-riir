@@ -62,6 +62,13 @@ async fn run() -> ExitCode {
 
     let telemetry = ihb_telemetry::otel::configure(&telemetry_config());
 
+    // `spec/18-deployment.md` §4.3 — a configured CA bundle that cannot be
+    // used stops the service here, rather than becoming a TLS failure in
+    // whichever component happens to need it first.
+    if !ihb_tls::startup_check() {
+        return ExitCode::FAILURE;
+    }
+
     // §2.2 — blank means discover.
     if config.queue_names.is_empty() {
         config.queue_names = discover_queues(EMULATOR_CONFIG);

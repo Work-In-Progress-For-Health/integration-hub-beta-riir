@@ -334,7 +334,7 @@ impl Config {
             (Some(endpoint), None) => CosmosMode::Rbac { endpoint },
         };
 
-        let cosmos_disable_ssl_verify = reader.bool_or("COSMOS_DISABLE_SSL_VERIFY", false);
+        let cosmos_disable_ssl_verify = reader.lenient_bool_or("COSMOS_DISABLE_SSL_VERIFY", false);
 
         // §5.6.1 — "MAY be true **only** for the local emulator's
         // self-signed certificate". Anywhere else it silently accepts any
@@ -386,7 +386,7 @@ impl Config {
             session_key: reader.optional_secret("FLASK_SECRET_KEY"),
             // §1.3 — on by default, and the deviation from the Python is
             // that the Python has no setting because it never redacts.
-            redact: reader.bool_or("DASHBOARD_REDACT_MESSAGES", true),
+            redact: reader.lenient_bool_or("DASHBOARD_REDACT_MESSAGES", true),
         };
 
         Ok(config)

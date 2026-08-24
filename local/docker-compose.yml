@@ -34,10 +34,17 @@ services:
         aliases:
           - "sb-emulator"
 
+  # Azure SQL Edge, not SQL Server. Edge ships an arm64 image and
+  # `mcr.microsoft.com/mssql/server` does not, so on an Apple Silicon
+  # machine this is the only one that runs — the `sqlserver` service below
+  # segfaults under emulation. See spec/18-deployment.md §5.3.
   sqledge:
     container_name: "ihb-rs-sqledge"
     image: "mcr.microsoft.com/azure-sql-edge:latest"
     restart: on-failure
+    ports:
+      # Published so `ihb-sql`'s tests can reach it from the host.
+      - "1433:1433"
     environment:
       ACCEPT_EULA: "Y"
     env_file:
@@ -46,6 +53,13 @@ services:
       integration-hub:
         aliases:
           - "sqledge"
+          # `message-store-service.env` and `message-replay-job.env` both
+          # set `SQL_SERVER=sqlserver`, and spec/18-deployment.md §5.2
+          # requires those files to be used **unchanged**. On arm64 the
+          # `sqlserver` service cannot run at all (§5.3.2), so the name is
+          # aliased onto Edge here — the env file stays byte-identical to
+          # the Python's and the name still resolves.
+          - "sqlserver"
 
   sqlserver:
     container_name: "ihb-rs-sqlserver"
@@ -64,6 +78,544 @@ services:
         aliases:
           - "sqlserver"
 
+  # ---------------------------------------------------------------------
+  # The services, mirroring the Python's compose profile for profile
+  # (spec/18-deployment.md §5.1). Each name matches the Python service it
+  # replaces, so the `.env` files of §5.2 are used unchanged and a mixed
+  # stack (§5.5) is a matter of which compose file a container comes from.
+  #
+  # `container_name` is prefixed `ihb-rs-` so a Rust container and its
+  # Python counterpart can run side by side during a cutover; the network
+  # alias is the plain name, so neither has to know which it is talking to.
+  # ---------------------------------------------------------------------
+
+  message-store-service:
+    container_name: "ihb-rs-message-store-service"
+    image: "ihb-rs/message-store-service:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: message-store-service
+    env_file:
+      - ./.secrets
+      - ./message-store-service.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+      - sqledge
+    networks:
+      integration-hub:
+        aliases:
+          - "message-store-service"
+
+  message-replay-job:
+    container_name: "ihb-rs-message-replay-job"
+    image: "ihb-rs/message-replay-job:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: message-replay-job
+    env_file:
+      - ./.secrets
+      - ./message-replay-job.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+      - sqledge
+    profiles:
+      - replay
+    networks:
+      integration-hub:
+        aliases:
+          - "message-replay-job"
+
+  phw-hl7-server:
+    container_name: "ihb-rs-phw-hl7-server"
+    image: "ihb-rs/hl7-server:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-server
+    env_file:
+      - ./phw-hl7-server.env
+    ports:
+      - "2575:2575"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - phw-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "phw-hl7-server"
+
+  hl7-soap-server:
+    container_name: "ihb-rs-hl7-soap-server"
+    image: "ihb-rs/hl7-soap-server:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-soap-server
+    env_file:
+      - ./lims-soap-hl7-server.env
+    ports:
+      - "8082:8080"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - lims-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "hl7-soap-server"
+
+  phw-hl7-transformer:
+    container_name: "ihb-rs-phw-hl7-transformer"
+    image: "ihb-rs/hl7-phw-transformer:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-phw-transformer
+    env_file:
+      - ./phw-hl7-transformer.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - phw-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "phw-hl7-transformer"
+
+  mpi-hl7-sender:
+    container_name: "ihb-rs-mpi-hl7-sender"
+    image: "ihb-rs/hl7-sender:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-sender
+    env_file:
+      - ./mpi-hl7-sender.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - phw-to-mpi
+      - lims-to-mpi
+      - paris-to-mpi
+      - chemo-to-mpi
+      - pims-to-mpi
+      - mosaiq-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "mpi-hl7-sender"
+
+  mpi-hl7-mock-receiver:
+    container_name: "ihb-rs-mpi-hl7-mock-receiver"
+    image: "ihb-rs/hl7-mock-receiver:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-mock-receiver
+    env_file:
+      - ./mpi-hl7-mock-receiver.env
+    ports:
+      - "2576:2576"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - phw-to-mpi
+      - lims-to-mpi
+      - paris-to-mpi
+      - chemo-to-mpi
+      - pims-to-mpi
+      - mosaiq-to-mpi
+      - mpi-to-topic
+    networks:
+      integration-hub:
+        aliases:
+          - "mpi-hl7-mock-receiver"
+
+  paris-hl7-server:
+    container_name: "ihb-rs-paris-hl7-server"
+    image: "ihb-rs/hl7-server:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-server
+    env_file:
+      - ./paris-hl7-server.env
+    ports:
+      - "2577:2577"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - paris-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "paris-hl7-server"
+
+  mosaiq-hl7-server:
+    container_name: "ihb-rs-mosaiq-hl7-server"
+    image: "ihb-rs/hl7-server:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-server
+    env_file:
+      - ./mosaiq-hl7-server.env
+    ports:
+      - "2583:2583"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - mosaiq-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "mosaiq-hl7-server"
+
+  chemo-hl7-server:
+    container_name: "ihb-rs-chemo-hl7-server"
+    image: "ihb-rs/hl7-server:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-server
+    env_file:
+      - ./chemo-hl7-server.env
+    ports:
+      - "2578:2578"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - chemo-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "chemo-hl7-server"
+
+  chemo-hl7-transformer:
+    container_name: "ihb-rs-chemo-hl7-transformer"
+    image: "ihb-rs/hl7-chemo-transformer:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-chemo-transformer
+    env_file:
+      - ./chemo-hl7-transformer.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - chemo-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "chemo-hl7-transformer"
+
+  pims-hl7-server:
+    container_name: "ihb-rs-pims-hl7-server"
+    image: "ihb-rs/hl7-server:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-server
+    env_file:
+      - ./pims-hl7-server.env
+    ports:
+      - "2579:2579"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - pims-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "pims-hl7-server"
+
+  pims-hl7-transformer:
+    container_name: "ihb-rs-pims-hl7-transformer"
+    image: "ihb-rs/hl7-pims-transformer:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-pims-transformer
+    env_file:
+      - ./pims-hl7-transformer.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - pims-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "pims-hl7-transformer"
+
+  mpi-hl7-server:
+    container_name: "ihb-rs-mpi-hl7-server"
+    image: "ihb-rs/hl7-server:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-server
+    env_file:
+      - ./mpi-hl7-server.env
+    ports:
+      - "2580:2580"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - mpi-to-topic
+    networks:
+      integration-hub:
+        aliases:
+          - "mpi-hl7-server"
+
+  mpi-hl7-chemo-sender:
+    container_name: "ihb-rs-mpi-hl7-chemo-sender"
+    image: "ihb-rs/hl7-subscription-sender:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-subscription-sender
+    env_file:
+      - ./mpi-hl7-chemo-sender.env
+    ports:
+      - "2581:2581"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - mpi-to-topic
+    networks:
+      integration-hub:
+        aliases:
+          - "mpi-hl7-chemo-sender"
+
+  bus-watch:
+    container_name: "ihb-rs-bus-watch"
+    image: "ihb-rs/buswatch:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: buswatch
+    env_file:
+      - ./buswatch.env
+    environment:
+      # The Python's buswatch takes its host and port from its Dockerfile
+      # `CMD` (`uvicorn --host 0.0.0.0 --port 8080`), so `buswatch.env`
+      # sets neither and spec/02-configuration.md §9.1's defaults are the
+      # laptop ones. In a container both have to be set, or it binds
+      # loopback and nothing — including its own healthcheck — can reach
+      # it. Found by bringing the profile up, not by reading the file.
+      HOST: "0.0.0.0"
+      PORT: "8080"
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: on-failure
+    healthcheck:
+      # buswatch is a web service on `PORT`, not an `ihb-health` listener
+      # on `HEALTH_CHECK_PORT`, so the probe is told which port to use.
+      test: ["CMD", "/usr/local/bin/health-probe", "8080"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - phw-to-mpi
+      - lims-to-mpi
+      - paris-to-mpi
+      - chemo-to-mpi
+      - pims-to-mpi
+      - mosaiq-to-mpi
+      - mpi-to-topic
+    networks:
+      integration-hub:
+        aliases:
+          - "bus-watch"
+  # §5.1's `dashboard` profile. The Cosmos emulator is copied from the
+  # Python's compose unchanged; the dashboard itself is a Rust image, and
+  # spec/15-dashboard.md §1.2 means it serves every page whether or not
+  # this container is up.
+  cosmos-emulator:
+    container_name: "ihb-rs-cosmos-emulator"
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
+    ports:
+      - "8081:8081"
+      - "10250-10255:10250-10255"
+    environment:
+      AZURE_COSMOS_EMULATOR_PARTITION_COUNT: "3"
+      AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE: "true"
+    volumes:
+      - "cosmos-data:/tmp/cosmos/appdata"
+    restart: unless-stopped
+    profiles:
+      - dashboard
+    networks:
+      integration-hub:
+        aliases:
+          - "cosmos-emulator"
+
+  dashboard:
+    container_name: "ihb-rs-dashboard"
+    image: "ihb-rs/dashboard:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: dashboard
+    environment:
+      # spec/02-configuration.md §9.2 — the container binds every
+      # interface; the default is loopback, which is right on a laptop and
+      # unreachable from outside a container.
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      COSMOS_ENDPOINT: "https://cosmos-emulator:8081"
+      COSMOS_DISABLE_SSL_VERIFY: "true"
+    ports:
+      - "8000:8000"
+    restart: on-failure
+    healthcheck:
+      # The dashboard serves HTTP, so §2.2's `/healthz` is the better
+      # probe — but a distroless image has no `curl`. The TCP probe of
+      # §3.1 answers the question a healthcheck asks: is it listening.
+      test: ["CMD", "/usr/local/bin/health-probe", "8000"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    profiles:
+      - dashboard
+    networks:
+      integration-hub:
+        aliases:
+          - "dashboard"
+
+
 networks:
   integration-hub:
     driver: bridge
+
+volumes:
+  cosmos-data:

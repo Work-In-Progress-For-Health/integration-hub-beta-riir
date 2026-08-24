@@ -10,8 +10,13 @@ publish = false
 description = "Events, PII redaction, metrics and tracing for the Integration Hub."
 
 [dependencies]
+hl7-2-redact.workspace = true
+opentelemetry.workspace = true
+opentelemetry-otlp.workspace = true
+opentelemetry_sdk.workspace = true
 time.workspace = true
 tracing.workspace = true
+tracing-opentelemetry.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]

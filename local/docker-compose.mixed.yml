@@ -1,0 +1,38 @@
+# §5.5 — the stack running **mixed**, some containers Rust and some Python,
+# because that is what a cutover looks like.
+#
+# Overlay this on the main file to replace one Rust service with its Python
+# counterpart:
+#
+#   podman compose -f local/docker-compose.yml -f local/docker-compose.mixed.yml \
+#     --profile phw-to-mpi up -d
+#
+# Only the image changes. The `.env` file, the queue names, the session ids
+# and the network alias are identical, which is the point: neither
+# neighbour can tell which language the container beside it is written in.
+#
+# The Python image is built from the sibling checkout:
+#
+#   podman build -t ihb-py/hl7-phw-transformer:dev \
+#     --build-context ca-certs=<dir with a *.crt> \
+#     --build-context shared_libs=../Integration-Hub-Beta/shared_libs \
+#     -f ../Integration-Hub-Beta/hl7_phw_transformer/Dockerfile \
+#     ../Integration-Hub-Beta/hl7_phw_transformer
+
+services:
+  phw-hl7-transformer:
+    image: "ihb-py/hl7-phw-transformer:${IHB_PY_TAG:-dev}"
+    build: !reset null
+    # The Python image has a shell and an interpreter, so it uses the
+    # Python stack's own healthcheck rather than the `health-probe` of
+    # spec/18-deployment.md §2.1 — which is not in this image.
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 9000)); s.close()"
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

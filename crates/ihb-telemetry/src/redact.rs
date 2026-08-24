@@ -44,13 +44,12 @@
 ///
 /// Three asterisks, matching `event_logger_lib/redaction.py`, so a log line
 /// from a Rust container and one from a Python container read alike during
-/// a cutover.
-pub const MASK: &str = "***";
+/// a cutover. It is [`hl7_2_redact`]'s default, and the test below is what
+/// notices if that ever changes.
+pub const MASK: &str = hl7_2_redact::DEFAULT_MASK;
 
-/// The `MSH` field numbers, in HL7's own 1-based numbering, that are kept.
-///
-/// Chosen for being routing and metadata rather than content
-/// (`spec/04-observability.md` §2.6):
+/// The policy `spec/04-observability.md` §2.6 fixes: the ten `MSH` fields
+/// below, and nothing else from any segment.
 ///
 /// | | |
 /// |---|---|
@@ -63,17 +62,12 @@ pub const MASK: &str = "***";
 /// | `MSH-11` | processing id |
 /// | `MSH-12` | version id |
 ///
-/// `MSH-8` (security) is deliberately absent. `MSH-1` is the field
-/// separator itself and is structural, reconstructed when the fields are
-/// rejoined.
-const SAFE_MSH_FIELDS: [usize; 10] = [2, 3, 4, 5, 6, 7, 9, 10, 11, 12];
-
-/// The shortest `MSH` segment that can be read: the three-character
-/// identifier plus the field separator that follows it.
+/// `MSH-8` (security) is deliberately absent.
 ///
-/// Counted in **characters**, not bytes; see the separator handling in
-/// [`redact_hl7`] for why that distinction is load-bearing.
-const MINIMUM_MSH_LENGTH: usize = 4;
+/// Built once rather than per call: this is on the logging path of every
+/// message the estate carries, and `benches/redaction.rs` measures it.
+static POLICY: std::sync::LazyLock<hl7_2_redact::Policy> =
+    std::sync::LazyLock::new(hl7_2_redact::Policy::routing_metadata);
 
 /// Return a copy of a payload that is safe to log.
 ///
@@ -125,107 +119,26 @@ const MINIMUM_MSH_LENGTH: usize = 4;
 /// ```
 #[must_use]
 pub fn redact_hl7(payload: &str) -> String {
-    if payload.trim().is_empty() {
-        return payload.to_string();
-    }
-
-    let normalised = payload.replace('\n', "\r");
-    let segments: Vec<&str> = normalised.split('\r').filter(|s| !s.is_empty()).collect();
-
-    let Some(header) = segments.first() else {
-        return MASK.to_string();
-    };
-
-    if !header.starts_with("MSH") || header.chars().count() < MINIMUM_MSH_LENGTH {
-        // Not something this function can read, so nothing about it is
-        // shown. See `spec/04-observability.md` §2.4.
-        return MASK.to_string();
-    }
-
-    // The separator is whatever the sender put in MSH-1: the fourth
-    // *character* of the segment. `|` in practice, but not by assumption.
-    //
-    // Taking the fourth **byte** — `&header[3..4]` — panics when that byte
-    // is in the middle of a multi-byte character, which `MSH` followed by
-    // any non-ASCII character produces. A fuzzer found it in seconds with
-    // five bytes, and an ingress server takes whatever arrives on a socket,
-    // so a five-byte frame must not be able to stop one.
-    // See spec/04-observability.md §2.5a.
-    let Some(separator) = header.chars().nth(3) else {
-        // Fewer than four characters: not a header this can read.
-        return MASK.to_string();
-    };
-    let separator = separator.to_string();
-    let separator = separator.as_str();
-
-    let redacted: Vec<String> = segments
-        .iter()
-        .map(|segment| {
-            if segment.starts_with("MSH") {
-                redact_msh(segment, separator)
-            } else {
-                redact_other(segment, separator)
-            }
-        })
-        .collect();
-
-    redacted.join("\r")
-}
-
-/// Redact an `MSH` segment, keeping [`SAFE_MSH_FIELDS`].
-///
-/// The index arithmetic is the fiddly part, and it is fiddly because `MSH`
-/// is. Splitting `MSH|^~\&|252|…` on the separator gives
-/// `["MSH", "^~\&", "252", …]`, so element 0 is the segment identifier,
-/// element 1 is `MSH-2`, and element *n* is `MSH-(n + 1)`. `MSH-1` is the
-/// separator that was split on and never appears as an element.
-fn redact_msh(segment: &str, separator: &str) -> String {
-    let fields: Vec<&str> = segment.split(separator).collect();
-    let mut out: Vec<String> = Vec::with_capacity(fields.len());
-
-    for (index, field) in fields.iter().enumerate() {
-        if index == 0 {
-            out.push((*field).to_string());
-            continue;
-        }
-        let field_number = index + 1;
-        if SAFE_MSH_FIELDS.contains(&field_number) {
-            out.push((*field).to_string());
-        } else {
-            out.push(mask(field));
-        }
-    }
-
-    out.join(separator)
-}
-
-/// Redact any segment other than `MSH`: the identifier is kept and every
-/// populated field is masked.
-fn redact_other(segment: &str, separator: &str) -> String {
-    let mut fields = segment.split(separator);
-    let identifier = fields.next().unwrap_or_default().to_string();
-
-    let mut out: Vec<String> = vec![identifier];
-    out.extend(fields.map(mask));
-    out.join(separator)
-}
-
-/// Mask a populated value, leaving an empty one empty.
-///
-/// The asymmetry is deliberate: an empty field carries no information about
-/// a patient, and preserving it is what keeps a redacted message's shape
-/// readable (`spec/04-observability.md` §2.8).
-fn mask(field: &str) -> String {
-    if field.is_empty() {
-        String::new()
-    } else {
-        MASK.to_string()
-    }
+    POLICY.redact(payload)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_policy_is_the_one_the_specification_fixes() {
+        // spec/04-observability.md §2.6. `hl7-2-redact` lets a caller
+        // choose; this workspace does not, and this is what notices if the
+        // upstream `routing_metadata` policy ever changes shape.
+        for field in [2, 3, 4, 5, 6, 7, 9, 10, 11, 12] {
+            assert!(POLICY.accepts("MSH", field), "MSH-{field} must survive");
+        }
+        assert!(!POLICY.accepts("MSH", 8), "MSH-8 is the security field");
+        assert!(!POLICY.accepts("MSH", 1), "MSH-1 is the separator itself");
+        assert!(!POLICY.accepts("PID", 3), "no segment but MSH survives");
+        assert_eq!(MASK, "***");
+    }
 
     /// A message carrying values distinctive enough that finding any of them
     /// in an output is unambiguous.

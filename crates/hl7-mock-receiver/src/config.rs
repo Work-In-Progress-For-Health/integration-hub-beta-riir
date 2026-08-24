@@ -98,7 +98,7 @@ impl Config {
             max_message_size: reader
                 .optional_positive_integer("MAX_MESSAGE_SIZE_BYTES")
                 .unwrap_or(hl7_2_mllp::DEFAULT_LIMIT),
-            redaction_enabled: reader.bool_or("HL7_LOG_REDACTION_ENABLED", true),
+            redaction_enabled: reader.lenient_bool_or("HL7_LOG_REDACTION_ENABLED", true),
         };
 
         reader.finish()?;

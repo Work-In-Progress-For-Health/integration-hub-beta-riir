@@ -274,15 +274,22 @@ active span they are `"0" * 32` and `"0" * 16` respectively — the zero value
 is emitted, not omitted, because a Log Analytics join on a missing column
 behaves differently from one on a zero value.
 
-§4.5a **Not yet implemented, deliberately.** §4.5 is satisfied only once a
-tracer provider exists to produce a real trace id; until then every record
-would carry the zeros, which is a column of no information rather than a
-partial implementation. The constants are defined
-(`ihb_telemetry::otel::NO_TRACE_ID`, `NO_SPAN_ID`) and the field emission
-lands with the OTLP exporter of §6.3, in the same change. Anything that
-depends on these fields — a Log Analytics query, a dashboard join — MUST NOT
-be built against a Rust container until then. Tracked as a Phase 1 follow-up
-in [`tasks.md`](../tasks.md).
+§4.5a **Implemented.** `ihb_telemetry::otel::current_ids` returns the
+recording span's ids, and `EventLogger::emit` puts them on every record.
+Both are lower-case hex of fixed width — 32 and 16 — so one column parses
+the same way whether or not a trace was in progress.
+
+The all-zero values (`NO_TRACE_ID`, `NO_SPAN_ID`) remain, and now mean
+something specific: **there is no recording span**, because export is off or
+the code is outside a handler span. That is information rather than a
+failure — it says this record cannot be joined to a trace, instead of
+pretending it can.
+
+§4.5b A `traceparent` is produced **only** when there is a real trace to
+name (`current_traceparent`). Propagating a header of zeros would make every
+unrelated message appear to belong to one trace, which is worse than
+propagating nothing: §4.6.3 already covers the receiving side of a message
+that arrives without one.
 
 ### §4.6 Propagation
 
@@ -354,6 +361,29 @@ exporter is logged at error and the process continues with export disabled.
 [`plan.md` §8](../plan.md#8-known-gaps-and-how-they-are-closed).
 `ihb-telemetry` MUST keep the exporter behind a trait so an Azure-native
 exporter can replace it without touching a call site.
+
+§6.3.1 The trait is `ihb_telemetry::otel::TraceExporter` and the
+implementation is `Otlp`. `configure` uses the latter; `configure_with`
+takes any of them, which is how the tests exercise §6.2's failure path
+without a collector.
+
+§6.3.2 **Setting a global tracer provider does not, by itself, export
+anything.** `tracing` spans become OTel spans only through
+`tracing-opentelemetry`'s layer, so the layer is installed in the same call
+that builds the provider. Without it the provider is inert and
+`tracing_installed` would report success while nothing was ever sent — a
+green flag over a dead path, which is the failure mode this specification
+keeps having to name.
+
+§6.3.3 Building the OTLP exporter requires a **Tokio runtime**, because the
+batch pipeline spawns onto it. `configure` must therefore be called from
+inside the runtime, which every service's `main` already does. A test that
+wants the decision without the transport uses `configure_with` and a fake.
+
+§6.3.4 `Outcome` carries `export_enabled` **and** `tracing_installed`. They
+differ exactly when export was asked for and could not be set up — the case
+§6.2 makes non-fatal, and therefore the case an operator would otherwise
+have no way to see.
 
 §6.4 The credential for telemetry ingestion is a user-assigned managed
 identity when `INSIGHTS_UAMI_CLIENT_ID` is set, and the ambient credential

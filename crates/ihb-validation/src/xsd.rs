@@ -49,7 +49,8 @@
 //! // The engines do *not* agree here, and that is the current expected
 //! // state rather than a surprise: `uppsala` 0.9.0 misresolves HL7's own
 //! // `ID` type to the built-in `xs:ID` and rejects every ID-typed element
-//! // (`spec/06-validation.md` §9.4). The disagreement is surfaced and
+//! // (`spec/06-validation.md` §9.4, reported upstream as
+//! // kushaldas/uppsala#39). The disagreement is surfaced and
 //! // attributed rather than averaged away — which is the whole point of
 //! // running two engines, and is how the defect was found.
 //! assert!(!report.engines_agreed());
@@ -617,7 +618,9 @@ mod tests {
         assert_eq!(
             report.secondary,
             Verdict::Invalid,
-            "if uppsala now agrees, its ID-resolution defect is fixed — see §9.4"
+            "if uppsala now agrees, its ID-resolution defect is fixed \
+             (kushaldas/uppsala#39) — promote the cross-check per §9.4.1 \
+             rather than weakening this assertion"
         );
         assert!(!report.engines_agreed());
     }

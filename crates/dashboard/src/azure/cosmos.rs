@@ -13,91 +13,40 @@
 //! So the signature is computed by pure functions with known-answer tests,
 //! and the transport is somebody else's problem.
 
-use base64::Engine as _;
-use hmac::{Hmac, Mac};
 use ihb_config::Secret;
-use sha2::Sha256;
 use time::OffsetDateTime;
-use time::format_description::well_known::Rfc2822;
+
+pub use cosmos_signature::{ResourceType, document_link, document_url, string_to_sign};
 
 /// The `x-ms-version` every request carries.
 ///
 /// Pinned for the reason the ARM versions in `arm` are: this workspace owns
 /// it now, and a wrong one is a rejection with no useful message.
-pub const COSMOS_API_VERSION: &str = "2018-12-31";
-
-/// Which kind of resource a request addresses.
-///
-/// Lowercased in the signature (§5.7.2), which is why this is an enum
-/// rather than a `&str` a caller might capitalise.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResourceType {
-    /// A database.
-    Dbs,
-    /// A container.
-    Colls,
-    /// A document.
-    Docs,
-}
-
-impl ResourceType {
-    /// As it appears in the string to sign — always lowercase.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Dbs => "dbs",
-            Self::Colls => "colls",
-            Self::Docs => "docs",
-        }
-    }
-}
+pub const COSMOS_API_VERSION: &str = cosmos_signature::DEFAULT_API_VERSION;
 
 /// The date format Cosmos wants (§5.7.2).
 ///
-/// RFC 1123 in GMT, lowercased. `time` spells RFC 2822 rather than 1123 and
-/// the two agree for this purpose, except that 2822 writes `+0000` where
-/// 1123 writes `GMT` — so that substitution is made explicitly rather than
-/// hoped for.
+/// Lowercase RFC 1123 in GMT. See [`cosmos_signature::date`] for why the
+/// `+0000` substitution is made explicitly rather than hoped for.
 #[must_use]
 pub fn cosmos_date(at: OffsetDateTime) -> String {
-    let formatted = at
-        .to_offset(time::UtcOffset::UTC)
-        .format(&Rfc2822)
-        .unwrap_or_default();
-
-    formatted.replace("+0000", "GMT").to_lowercase()
+    cosmos_signature::date(at)
 }
 
-/// The five-line string a Cosmos signature covers (§5.7.1).
+/// The resource link for a container's document collection.
 ///
-/// # Examples
-///
-/// ```
-/// use dashboard::azure::cosmos::{string_to_sign, ResourceType};
-///
-/// let signed = string_to_sign("GET", ResourceType::Docs, "dbs/MyDb/colls/MyColl", "sat, 22 aug 2026 09:15:00 gmt");
-///
-/// // The verb and the resource type are lowercased; the link keeps its case.
-/// assert!(signed.starts_with("get\ndocs\ndbs/MyDb/colls/MyColl\n"));
-/// // And it ends with an empty fifth line (§5.7.2).
-/// assert!(signed.ends_with("\n\n"));
-/// ```
+/// Cosmos calls this the "resource link" and it is the path **without** a
+/// leading or trailing slash — `dbs/{db}/colls/{coll}`. Note that a create
+/// signs *this*, not the `/docs` URL [`documents_url`] builds.
 #[must_use]
-pub fn string_to_sign(
-    verb: &str,
-    resource_type: ResourceType,
-    resource_link: &str,
-    date: &str,
-) -> String {
-    // §5.7.2 — verb and type lowercased, the link **not**, the date already
-    // lowercased by `cosmos_date`, and a trailing empty line.
-    format!(
-        "{}\n{}\n{}\n{}\n\n",
-        verb.to_lowercase(),
-        resource_type.as_str(),
-        resource_link,
-        date,
-    )
+pub fn documents_link(database: &str, container: &str) -> String {
+    cosmos_signature::container_link(database, container)
+}
+
+/// The URL for a container's document collection.
+#[must_use]
+pub fn documents_url(endpoint: &str, database: &str, container: &str) -> String {
+    cosmos_signature::documents_url(endpoint, database, container)
 }
 
 /// The `Authorization` header value for key authentication (§5.7.1).
@@ -108,6 +57,10 @@ pub fn string_to_sign(
 /// configuration error rather than a transport failure, and signing with
 /// the base64 *text* would produce a header that looks right and is always
 /// rejected.
+///
+/// The message names `COSMOS_KEY` — the variable an operator actually sets
+/// — rather than the upstream crate's more general wording, and never the
+/// key itself (§5.7.5).
 pub fn authorization(
     key: &Secret,
     verb: &str,
@@ -115,77 +68,18 @@ pub fn authorization(
     resource_link: &str,
     date: &str,
 ) -> Result<String, String> {
-    // §5.7.3 — the key is base64 and is decoded before use.
-    let decoded = base64::engine::general_purpose::STANDARD
-        .decode(key.expose())
-        .map_err(|_| {
-            // The key itself never appears (§5.7.5).
+    let signer = cosmos_signature::MasterKey::new(key.expose()).map_err(|error| match error {
+        cosmos_signature::KeyError::NotBase64 => {
             "COSMOS_KEY is not valid base64; it is the account key as Azure \
              prints it (spec/15-dashboard.md §5.7.3)"
                 .to_string()
-        })?;
-
-    let mut mac = <Hmac<Sha256>>::new_from_slice(&decoded)
-        .map_err(|_| "COSMOS_KEY is not a usable signing key".to_string())?;
-    mac.update(string_to_sign(verb, resource_type, resource_link, date).as_bytes());
-
-    let signature = base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
-
-    Ok(percent_encode(&format!(
-        "type=master&ver=1.0&sig={signature}"
-    )))
-}
-
-/// Percent-encode a header value.
-///
-/// A base64 signature contains `+`, `/` and `=`, all of which change
-/// meaning in a header Cosmos parses as a query string.
-fn percent_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
         }
-    }
-    out
-}
+        cosmos_signature::KeyError::Unusable => {
+            "COSMOS_KEY is not a usable signing key".to_string()
+        }
+    })?;
 
-/// The resource link for one document (§5.7.1).
-///
-/// Cosmos calls this the "resource link" and it is the path **without** a
-/// leading or trailing slash — `dbs/{db}/colls/{coll}/docs/{id}`.
-#[must_use]
-pub fn document_link(database: &str, container: &str, id: &str) -> String {
-    format!("dbs/{database}/colls/{container}/docs/{id}")
-}
-
-/// The resource link for a container's document collection.
-#[must_use]
-pub fn documents_link(database: &str, container: &str) -> String {
-    format!("dbs/{database}/colls/{container}")
-}
-
-/// The URL for one document.
-#[must_use]
-pub fn document_url(endpoint: &str, database: &str, container: &str, id: &str) -> String {
-    format!(
-        "{}/{}",
-        endpoint.trim_end_matches('/'),
-        document_link(database, container, id)
-    )
-}
-
-/// The URL for a container's document collection.
-#[must_use]
-pub fn documents_url(endpoint: &str, database: &str, container: &str) -> String {
-    format!(
-        "{}/{}/docs",
-        endpoint.trim_end_matches('/'),
-        documents_link(database, container)
-    )
+    Ok(signer.authorization(verb, resource_type, resource_link, date))
 }
 
 #[cfg(test)]

@@ -367,3 +367,49 @@ async fn every_api_route_answers_json() {
         assert!(body.is_object(), "{path} did not answer an object: {body}");
     }
 }
+
+/// The keys `dashboard.js` reads off a flow, from the Python's own output.
+///
+/// `spec/15-dashboard.md` §2.3.1a. `dashboard.js` computes a flow card's
+/// totals as `pre_queue.active + post_queue.active + subscriptions[]`, and
+/// reads each with a `|| {}` fallback. A missing pair therefore does not
+/// raise — it renders **zero for every flow**, which is a wrong number
+/// that looks like a right one.
+///
+/// This is pinned against `tests/golden/status.json`, captured from the
+/// Python dashboard running with no Azure configuration.
+#[tokio::test]
+async fn a_flow_carries_the_queue_pair_dashboard_js_reads() {
+    let golden: serde_json::Value =
+        serde_json::from_str(include_str!("golden/status.json")).expect("the golden parses");
+    let flow = &golden["flows"][0];
+
+    for key in ["pre_queue", "post_queue", "subscriptions"] {
+        assert!(
+            !flow[key].is_null(),
+            "the golden should carry {key}; the capture is stale"
+        );
+    }
+
+    let ours = json_of(Unconfigured, "/api/status").await;
+    let mine = &ours["flows"][0];
+
+    for key in ["pre_queue", "post_queue"] {
+        let queue = &mine[key];
+        assert!(queue.is_object(), "{key} must be an object, got {queue}");
+        for field in ["active", "dlq", "name", "health", "exists"] {
+            assert!(
+                queue.get(field).is_some(),
+                "{key}.{field} is read by dashboard.js and is absent"
+            );
+        }
+        assert!(
+            queue["active"].is_u64() && queue["dlq"].is_u64(),
+            "{key}.active and .dlq are summed by the script, so neither may be null"
+        );
+    }
+    assert!(
+        mine["subscriptions"].is_array(),
+        "the script reduces over subscriptions"
+    );
+}

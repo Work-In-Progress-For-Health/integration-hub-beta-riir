@@ -57,10 +57,7 @@ use std::fmt::Write as _;
 /// ```
 #[must_use]
 pub fn identifier(value: &str) -> String {
-    value
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-        .collect()
+    kql_sanitize::identifier(value)
 }
 
 /// A KQL list literal of sanitised identifiers: `"a", "b"`.
@@ -89,19 +86,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let mut out = String::new();
-    for value in values {
-        let safe = identifier(value.as_ref());
-        if safe.is_empty() {
-            continue;
-        }
-        if !out.is_empty() {
-            out.push_str(", ");
-        }
-        // Cannot fail: writing into a String.
-        let _ = write!(out, "\"{safe}\"");
-    }
-    out
+    kql_sanitize::identifier_list(values)
 }
 
 /// The optional resource filter of §4.3.3.
@@ -124,11 +109,10 @@ pub fn resource_filter(resource_id: Option<&str>) -> String {
     // strict for it. It is sanitised for the characters that could end the
     // literal or start a clause instead: quotes, pipes and newlines.
     resource_id.map_or_else(String::new, |id| {
-        let safe: String = id
-            .chars()
-            .filter(|c| !matches!(c, '\'' | '"' | '|' | '\n' | '\r' | '\\'))
-            .collect();
-        format!("\n    | where _ResourceId =~ '{safe}'")
+        // An ARM resource id is a path, so §4.4's identifier filter is too
+        // strict for it. `kql_sanitize::path` is the looser rule: keep what
+        // a path needs, drop what could end the literal or start a clause.
+        format!("\n    | where _ResourceId =~ '{}'", kql_sanitize::path(id))
     })
 }
 

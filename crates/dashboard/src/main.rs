@@ -98,8 +98,22 @@ async fn run() -> ExitCode {
         );
     }
 
+    // `spec/18-deployment.md` §4.3 — before binding a port. A service
+    // that answers its health check while unable to complete a TLS
+    // handshake is worse than one that refused to start, because the
+    // failure then surfaces as somebody else's timeout.
+    if !ihb_tls::startup_check() {
+        return ExitCode::FAILURE;
+    }
+
     let listen = config.listen;
-    let azure = LiveObservatory::new(&config);
+    let azure = match LiveObservatory::new(&config) {
+        Ok(azure) => azure,
+        Err(error) => {
+            tracing::error!(%error, "could not build the HTTPS client");
+            return ExitCode::FAILURE;
+        }
+    };
     let state = Arc::new(AppState::new(azure, config));
 
     let shutdown = Shutdown::new();

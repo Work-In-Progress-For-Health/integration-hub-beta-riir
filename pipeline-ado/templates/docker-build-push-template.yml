@@ -1,0 +1,273 @@
+# Build one Rust service image and push it to ACR.
+#
+# This mirrors the Python repository's template of the same name, and the
+# mirroring is load-bearing. spec/18-deployment.md §6.3 requires the
+# release definitions to be UNCHANGED, and a release consumes three things
+# from a build:
+#
+#   1. the ACR repository name  — `appName` here, `appImageName` there
+#   2. the tag                  — read from the `imageTag` artifact
+#   3. the artifact name        — literally `imageTag`, holding `imageTag.txt`
+#
+# All three are kept identical to the Python. What changes is only which
+# git repository the pipeline is pointed at. See §6.4.
+#
+# The one addition is `buildArgs`. Python has a Dockerfile per app; this
+# workspace has ONE `docker/Dockerfile` parameterised by `--build-arg BIN`,
+# because twenty near-identical Dockerfiles is twenty places for them to
+# drift apart.
+
+parameters:
+  jobName: ''
+  displayName: ''
+  appName: ''
+  acrName: ''
+  azureServiceConnection: ''
+  POOL_NAME: ''
+  dockerfilePath: 'docker/Dockerfile'
+  buildContext: '.'
+  buildArgs: '' # e.g. "BIN=hl7-server"
+  enableVulnerabilityScanning: true
+  enableImageSigning: false
+  retainImageCount: 50
+  SEMANTIC_VERSION: ''
+
+jobs:
+  - job: ${{ parameters.jobName }}
+    displayName: ${{ parameters.displayName }}
+    pool:
+      ${{ if eq(parameters.POOL_NAME, 'Azure Pipelines') }}:
+        vmImage: 'ubuntu-latest'
+      ${{ else }}:
+        name: ${{ parameters.POOL_NAME }}
+
+    variables:
+      DOCKER_REGISTRY: ${{ parameters.acrName }}.azurecr.io
+      IMAGE_NAME: ${{ parameters.appName }}
+      FULL_SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}.$(Build.BuildId)
+
+    steps:
+      - checkout: self
+        displayName: 'Checkout Repository'
+        fetchDepth: 1
+
+      - script: |
+          echo "##[group]Validate Parameters"
+          if [[ ! "${{ parameters.appName }}" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+            echo "##[error]Invalid app name format"
+            exit 1
+          fi
+          if [[ ! "${{ parameters.acrName }}" =~ ^[a-zA-Z0-9]*$ ]]; then
+            echo "##[error]Invalid ACR name format"
+            exit 1
+          fi
+          # The Rust addition: a build arg naming a binary that does not
+          # exist produces an image that starts and immediately exits 127.
+          # Catch it here, where the message can say so.
+          if [ -n "${{ parameters.buildArgs }}" ]; then
+            BIN_NAME="$(echo "${{ parameters.buildArgs }}" | sed -n 's/^BIN=//p')"
+            if [ -n "$BIN_NAME" ] && ! cargo metadata --no-deps --format-version 1 \
+                 | grep -q "\"name\":\"$BIN_NAME\""; then
+              echo "##[error]No binary named '$BIN_NAME' in this workspace"
+              exit 1
+            fi
+          fi
+          echo "##[endgroup]"
+        displayName: 'Validate Input Parameters'
+
+      - script: |
+          echo "##[group]Generate Image Metadata"
+          BUILD_DATE=$(date -u +"%Y%m%d")
+          SHORT_COMMIT=$(echo "$(Build.SourceVersion)" | cut -c1-8)
+          echo "##vso[task.setvariable variable=SHORT_SHA]$SHORT_COMMIT"
+          echo "Build date: ${BUILD_DATE}"
+          echo "Short commit: ${SHORT_COMMIT}"
+          echo "buildId: $(Build.BuildId)"
+          echo "##[endgroup]"
+        displayName: 'Generate Image Metadata'
+
+      - script: |
+          echo "##[group]Setup Docker Buildx"
+          docker buildx create --name mybuilder --use --bootstrap
+          docker buildx inspect --bootstrap
+          echo "##[endgroup]"
+        displayName: 'Setup Docker Buildx'
+
+      - ${{ if eq(parameters.enableVulnerabilityScanning, true) }}:
+        - script: |
+            echo "##[group]Install Container Security Tools"
+            sudo apt-get update
+            sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+            wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+            echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+            sudo apt-get update
+            sudo apt-get install -y trivy
+            trivy --version
+            echo "##[endgroup]"
+          displayName: 'Install Container Security Tools'
+
+      - task: AzureCLI@2
+        displayName: 'Authenticate with Azure Container Registry'
+        inputs:
+          azureSubscription: ${{ parameters.azureServiceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          addSpnToEnvironment: true
+          inlineScript: |
+            echo "##[group]ACR Authentication"
+            set -e
+            az acr show --name ${{ parameters.acrName }} --query "name" -o tsv
+            az acr login --name ${{ parameters.acrName }}
+            echo "##[endgroup]"
+
+      - script: |
+          echo "##[group]Build Docker Image"
+          set -e
+
+          BUILD_CMD="docker buildx build"
+          BUILD_CMD="$BUILD_CMD --tag $(DOCKER_REGISTRY)/$(IMAGE_NAME):latest"
+          BUILD_CMD="$BUILD_CMD --tag $(DOCKER_REGISTRY)/$(IMAGE_NAME):$(Build.BuildId)-$(SHORT_SHA)"
+          BUILD_CMD="$BUILD_CMD --tag $(DOCKER_REGISTRY)/$(IMAGE_NAME):$(FULL_SEMANTIC_VERSION)"
+          BUILD_CMD="$BUILD_CMD --label \"org.opencontainers.image.title=$(IMAGE_NAME)\""
+          BUILD_CMD="$BUILD_CMD --label \"org.opencontainers.image.description=Built by Azure DevOps\""
+          BUILD_CMD="$BUILD_CMD --label \"org.opencontainers.image.version=${SEMANTIC_VERSION:-v1.0.$(Build.BuildId)}\""
+          BUILD_CMD="$BUILD_CMD --label \"org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
+          BUILD_CMD="$BUILD_CMD --label \"org.opencontainers.image.revision=$(Build.SourceVersion)\""
+          BUILD_CMD="$BUILD_CMD --label \"org.opencontainers.image.source=$(Build.Repository.Uri)\""
+          BUILD_CMD="$BUILD_CMD --file ${{ parameters.dockerfilePath }}"
+
+          # Registry-based layer caching — avoids recompiling the whole
+          # dependency graph, which is the expensive half of a Rust build.
+          BUILD_CMD="$BUILD_CMD --cache-from type=registry,ref=$(DOCKER_REGISTRY)/$(IMAGE_NAME):buildcache"
+          BUILD_CMD="$BUILD_CMD --cache-to type=registry,ref=$(DOCKER_REGISTRY)/$(IMAGE_NAME):buildcache,mode=max"
+
+          if [ -n "${{ parameters.buildArgs }}" ]; then
+            IFS=',' read -ra ARGS <<< "${{ parameters.buildArgs }}"
+            for arg in "${ARGS[@]}"; do
+              BUILD_CMD="$BUILD_CMD --build-arg $arg"
+            done
+          fi
+
+          BUILD_CMD="$BUILD_CMD --push"
+          BUILD_CMD="$BUILD_CMD ${{ parameters.buildContext }}"
+
+          echo "Executing build command:"
+          echo "$BUILD_CMD"
+          eval $BUILD_CMD
+
+          echo "##[section]Image built and pushed successfully"
+          echo "##[endgroup]"
+        displayName: 'Build and Push Docker Image'
+        env:
+          DOCKER_CLI_EXPERIMENTAL: enabled
+
+      - ${{ if eq(parameters.enableVulnerabilityScanning, true) }}:
+        - task: AzureCLI@2
+          displayName: 'Container Vulnerability Scanning'
+          continueOnError: true
+          inputs:
+            azureSubscription: ${{ parameters.azureServiceConnection }}
+            scriptType: 'bash'
+            scriptLocation: 'inlineScript'
+            inlineScript: |
+              echo "##[group]Container Vulnerability Scanning"
+              IMAGE_TAG="$(DOCKER_REGISTRY)/$(IMAGE_NAME):$(Build.BuildId)-$(SHORT_SHA)"
+              SCAN_RESULT=$(az acr repository show-tags \
+                --name ${{ parameters.acrName }} \
+                --repository ${{ parameters.appName }} \
+                --query "[?contains(name, '$(Build.BuildId)')].name | [0]" -o tsv)
+              if [ -n "$SCAN_RESULT" ]; then
+                echo "✅ Image successfully pushed: $SCAN_RESULT"
+                if command -v trivy &> /dev/null; then
+                  trivy image --exit-code 0 \
+                    --severity HIGH,CRITICAL \
+                    --format table \
+                    $IMAGE_TAG || {
+                    echo "##[warning]Vulnerabilities found in container image"
+                  }
+                else
+                  echo "##[warning]Trivy not available - skipping container vulnerability scan"
+                fi
+              else
+                echo "##[warning]Image not found in registry - skipping vulnerability scan"
+              fi
+              echo "##[endgroup]"
+
+      - ${{ if eq(parameters.enableImageSigning, true) }}:
+        - script: |
+            echo "##[group]Sign Container Image"
+            echo "##[warning]Image signing requires Notation CLI and certificate setup"
+            echo "##[endgroup]"
+          displayName: 'Sign Container Image'
+          continueOnError: true
+
+      - task: AzureCLI@2
+        displayName: 'Cleanup Old Images'
+        continueOnError: true
+        inputs:
+          azureSubscription: ${{ parameters.azureServiceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            echo "##[group]Image Cleanup"
+            TAGS_TO_DELETE=$(az acr repository show-tags \
+              --name ${{ parameters.acrName }} \
+              --repository ${{ parameters.appName }} \
+              --orderby time_desc \
+              --query "[$(( ${{ parameters.retainImageCount }} )):].name" \
+              -o tsv)
+            if [ -n "$TAGS_TO_DELETE" ]; then
+              for tag in $TAGS_TO_DELETE; do
+                echo "Deleting tag: $tag"
+                az acr repository delete \
+                  --name ${{ parameters.acrName }} \
+                  --image ${{ parameters.appName }}:$tag \
+                  --yes || echo "Failed to delete $tag"
+              done
+            else
+              echo "No old images to cleanup"
+            fi
+            echo "##[endgroup]"
+
+      - script: |
+          echo "##[group]Generate Build Report"
+          cat > build-summary.json << EOF
+          {
+            "appName": "${{ parameters.appName }}",
+            "buildId": "$(Build.BuildId)",
+            "sourceVersion": "$(Build.SourceVersion)",
+            "buildDate": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "registry": "$(DOCKER_REGISTRY)",
+            "language": "rust",
+            "tags": [
+              "latest",
+              "$(Build.BuildId)-$(SHORT_SHA)",
+              "$(FULL_SEMANTIC_VERSION)"
+            ],
+            "ImageSemanticVersion": "$(FULL_SEMANTIC_VERSION)"
+          }
+          EOF
+          cat build-summary.json
+          echo "##[endgroup]"
+        displayName: 'Generate Build Summary'
+
+      - script: |
+          echo "##[group]Generate Image Tag Artefact"
+          cat > imageTag.txt << EOF
+          $(FULL_SEMANTIC_VERSION)
+          EOF
+          cat imageTag.txt
+          echo "##[endgroup]"
+        displayName: 'Generate Image Tag Artefact'
+
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish Report Artifacts'
+        inputs:
+          pathToPublish: 'build-summary.json'
+          artifactName: 'build-metadata'
+
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish Image Tag Artefact'
+        inputs:
+          pathToPublish: 'imageTag.txt'
+          artifactName: 'imageTag'

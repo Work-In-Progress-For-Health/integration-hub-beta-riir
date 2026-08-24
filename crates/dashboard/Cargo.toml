@@ -18,6 +18,10 @@ name = "dashboard"
 path = "src/main.rs"
 
 [dependencies]
+azure-token-lite.workspace = true
+acs-signature.workspace = true
+cosmos-signature.workspace = true
+kql-sanitize.workspace = true
 askama.workspace = true
 base64.workspace = true
 axum.workspace = true
@@ -30,6 +34,7 @@ ihb-config.workspace = true
 ihb-health.workspace = true
 ihb-runtime.workspace = true
 ihb-telemetry.workspace = true
+ihb-tls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -39,7 +44,6 @@ time-tz.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
 tokio-rustls.workspace = true
 tracing.workspace = true
-webpki-roots.workspace = true
 
 [dev-dependencies]
 tokio-test.workspace = true

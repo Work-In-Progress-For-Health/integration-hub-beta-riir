@@ -43,9 +43,78 @@ pub struct FlowRow {
     #[serde(serialize_with = "health_string")]
     pub health: Health,
     /// Messages waiting, or `None` when that could not be read.
+    ///
+    /// Server-rendered by `overview.html` and `flows.html`. The JSON API
+    /// also carries [`FlowRow::pre_queue`] and [`FlowRow::post_queue`],
+    /// which is what `dashboard.js` reads — see those fields.
     pub active: Option<u64>,
     /// Dead-lettered messages, or `None`.
     pub dlq: Option<u64>,
+    /// The queue **before** the transformer, as `dashboard.js` reads it.
+    ///
+    /// §2.2 makes the JSON shapes a contract with the browser, and
+    /// `dashboard.js` sums `pre_queue.active + post_queue.active` for the
+    /// flow card's total. It reads them with a `|| {}` fallback, so a
+    /// missing pair does not raise — it silently renders **zero for every
+    /// flow**, which is a wrong number that looks like a right one. See
+    /// §2.3.1a.
+    pub pre_queue: FlowQueue,
+    /// The queue **after** the transformer.
+    pub post_queue: FlowQueue,
+    /// Subscription queues, which `dashboard.js` also folds into the total.
+    ///
+    /// Always empty here: no flow in `FLOWS` is subscription-fed. Present
+    /// because the script reduces over it, and an absent array and an empty
+    /// one are the same to `|| []` only by luck.
+    pub subscriptions: Vec<FlowQueue>,
+}
+
+/// One of a flow's two queues, in the shape `dashboard.js` expects
+/// (§2.3.1a).
+///
+/// Distinct from [`QueueRow`], which is the estate-wide queue table and
+/// uses the broker's own longer key names. The two are different shapes
+/// because the script reads them differently, not by accident.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct FlowQueue {
+    /// The queue name, or `None` when it is not known.
+    ///
+    /// `updateQueueNode` returns early on a falsy `name`, so `None` means
+    /// "draw nothing" rather than "draw an empty node".
+    pub name: Option<String>,
+    /// Messages waiting. `0` rather than `None`: the script does arithmetic
+    /// on this and `null` would poison the sum.
+    pub active: u64,
+    /// Dead-lettered messages.
+    pub dlq: u64,
+    /// Whether the queue was found at all.
+    pub exists: bool,
+    /// The health class the script puts on the node box.
+    pub health: &'static str,
+}
+
+impl FlowQueue {
+    /// A queue that was not found.
+    fn absent() -> Self {
+        Self {
+            name: None,
+            active: 0,
+            dlq: 0,
+            exists: false,
+            health: "healthy",
+        }
+    }
+
+    /// A queue that was read.
+    fn found(name: &str, depths: QueueDepths, thresholds: Thresholds) -> Self {
+        Self {
+            name: Some(name.to_owned()),
+            active: depths.active.unwrap_or(0),
+            dlq: depths.dead_letter.unwrap_or(0),
+            exists: true,
+            health: crate::health::assess(depths, &[], thresholds).css_class(),
+        }
+    }
 }
 
 /// Serialise [`Health`] as the lowercase string `dashboard.js` expects.
@@ -260,15 +329,15 @@ fn flow_row(
     // A flow's queues are whichever ones name it. Queue names come from the
     // environment (`spec/01-architecture.md` §2.1.1), so this matches on the
     // workflow id appearing in the name rather than constructing one.
-    let mine: Vec<QueueDepths> = depths
+    let mine: Vec<(&String, QueueDepths)> = depths
         .iter()
         .filter(|(name, _)| name.contains(flow.workflow_id))
-        .map(|(_, depths)| *depths)
+        .map(|(name, depths)| (name, *depths))
         .collect();
 
     let combined = QueueDepths {
-        active: total(mine.iter().map(|d| d.active)),
-        dead_letter: total(mine.iter().map(|d| d.dead_letter)),
+        active: total(mine.iter().map(|(_, d)| d.active)),
+        dead_letter: total(mine.iter().map(|(_, d)| d.dead_letter)),
     };
 
     // A flow with no queues in the map at all knows nothing, rather than
@@ -290,6 +359,22 @@ fn flow_row(
         })
         .collect();
 
+    // §2.3.1a — `dashboard.js` reads a queue *pair*, not a combined total.
+    // A transformer ingress queue is the "pre" side and a sender ingress
+    // queue the "post" side; the names carry which is which
+    // (`spec/01-architecture.md` §2.1.1), so this reads them rather than
+    // discovering container environment variables the way the Python does.
+    // §3.1 rejected that discovery deliberately.
+    let pick = |needle: &str| {
+        mine.iter()
+            .find(|(name, _)| name.contains(needle))
+            .map_or_else(FlowQueue::absent, |(name, depths)| {
+                FlowQueue::found(name, *depths, thresholds)
+            })
+    };
+    let pre_queue = pick("transformer-ingress");
+    let post_queue = pick("sender-ingress");
+
     FlowRow {
         id: flow.workflow_id,
         label: flow.label,
@@ -298,6 +383,9 @@ fn flow_row(
         source_port: flow.port,
         transformer: flow.transformer,
         health: crate::health::assess(combined, &states, thresholds),
+        pre_queue,
+        post_queue,
+        subscriptions: Vec::new(),
         active: combined.active,
         dlq: combined.dead_letter,
     }

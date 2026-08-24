@@ -18,6 +18,10 @@ default = []
 # Tests that need the local Service Bus emulator running.
 # See spec/03-message-bus.md §7.3.
 emulator = []
+# Tests that drive the *containers* of `local/docker-compose.yml` rather
+# than in-process services. Needs the images of spec/18 §2 built, and
+# Podman. See `tests/in_compose.rs`.
+compose = []
 
 [dependencies]
 ihb-bus.workspace = true

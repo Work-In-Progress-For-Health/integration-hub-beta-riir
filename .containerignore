@@ -1,0 +1,18 @@
+# Keep the build context to what the build actually reads. `target/` alone
+# is several gigabytes, and sending it to the daemon dominates the build.
+
+target/
+.git/
+.github/
+docs/
+*.log
+
+# The specifications are the source of truth for humans, not for `rustc`.
+spec/
+
+# Test corpora: `cargo build --bin` never reads them, and two are large.
+crates/*/tests/corpus/
+
+# Note: `local/` is NOT excluded. Two binaries compile files from it into
+# themselves — see the `COPY` lines in docker/Dockerfile. Excluding the
+# directory builds fourteen of the sixteen images and fails on those two.

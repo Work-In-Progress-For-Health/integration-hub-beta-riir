@@ -79,6 +79,13 @@ async fn run(local_offset_found: bool) -> ExitCode {
 
     // Step 3.
     let telemetry = ihb_telemetry::otel::configure(&telemetry_config());
+
+    // `spec/18-deployment.md` §4.3 — a configured CA bundle that cannot be
+    // used stops the service here, rather than becoming a TLS failure in
+    // whichever component happens to need it first.
+    if !ihb_tls::startup_check() {
+        return ExitCode::FAILURE;
+    }
     tracing::info!(
         workflow_id = %config.workflow_id,
         microservice_id = %config.microservice_id,

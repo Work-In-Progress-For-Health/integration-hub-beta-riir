@@ -55,11 +55,19 @@ pub struct LiveObservatory {
 impl LiveObservatory {
     /// Build one from the configuration.
     ///
-    /// Never fails: §1.2 means an incompletely configured dashboard runs,
-    /// with the panels it cannot serve reporting unavailable.
-    #[must_use]
-    pub fn new(config: &Config) -> Self {
-        let client = HttpsClient::new();
+    /// Absent Azure configuration is not a failure: §1.2 means an
+    /// incompletely configured dashboard runs, with the panels it cannot
+    /// serve reporting unavailable. That is about configuration being
+    /// *missing*.
+    ///
+    /// # Errors
+    ///
+    /// [`ihb_tls::TrustError`] if a CA bundle is configured and unusable —
+    /// configuration being *present and wrong*, which
+    /// `spec/18-deployment.md` §4.3 makes fatal. The two cases are
+    /// deliberately not treated alike.
+    pub fn new(config: &Config) -> Result<Self, ihb_tls::TrustError> {
+        let client = HttpsClient::new()?;
 
         let scope = match (
             config.azure.subscription_id.clone(),
@@ -72,14 +80,14 @@ impl LiveObservatory {
             _ => None,
         };
 
-        Self {
+        Ok(Self {
             tokens: TokenSource::new(config.auth.clone(), client.clone()),
             client,
             scope,
             namespace: config.azure.service_bus_namespace.clone(),
             workspace_id: config.azure.log_analytics_workspace_id.clone(),
             resource_id: config.azure.app_insights_resource_id.clone(),
-        }
+        })
     }
 
     /// Run a Log Analytics query, or return nothing.
@@ -492,7 +500,8 @@ mod tests {
     fn an_unconfigured_observatory_reports_itself_unconfigured() {
         // §1.2 and §2.2.2 — this must be constructible with nothing set,
         // because `main` builds it before it knows whether Azure answers.
-        let azure = LiveObservatory::new(&config(&[]));
+        let azure =
+            LiveObservatory::new(&config(&[])).expect("no CA bundle is configured in tests");
 
         assert!(!azure.is_configured());
     }
@@ -502,14 +511,16 @@ mod tests {
         // §4 — each integration is gated on its own settings. A dashboard
         // with a workspace and no subscription shows exceptions, and that
         // is not an unconfigured dashboard.
-        let logs_only = LiveObservatory::new(&config(&[("AZURE_LOG_ANALYTICS_WORKSPACE_ID", "w")]));
+        let logs_only = LiveObservatory::new(&config(&[("AZURE_LOG_ANALYTICS_WORKSPACE_ID", "w")]))
+            .expect("no CA bundle is configured in tests");
         assert!(logs_only.is_configured());
 
         let arm_only = LiveObservatory::new(&config(&[
             ("AZURE_SUBSCRIPTION_ID", "s"),
             ("AZURE_RESOURCE_GROUP", "g"),
             ("AZURE_SERVICE_BUS_NAMESPACE", "n"),
-        ]));
+        ]))
+        .expect("no CA bundle is configured in tests");
         assert!(arm_only.is_configured());
     }
 
@@ -520,7 +531,8 @@ mod tests {
         let partial = LiveObservatory::new(&config(&[
             ("AZURE_SUBSCRIPTION_ID", "s"),
             ("AZURE_RESOURCE_GROUP", "g"),
-        ]));
+        ]))
+        .expect("no CA bundle is configured in tests");
 
         assert!(!partial.is_configured());
     }
@@ -529,7 +541,8 @@ mod tests {
     async fn an_unconfigured_observatory_answers_everything_with_nothing() {
         // §4.2 — and without reaching the network, which is what makes
         // §1.2 hold on a laptop.
-        let azure = LiveObservatory::new(&config(&[]));
+        let azure =
+            LiveObservatory::new(&config(&[])).expect("no CA bundle is configured in tests");
 
         assert!(azure.exceptions(1).await.is_empty());
         assert!(azure.containers().await.is_empty());
@@ -546,7 +559,8 @@ mod tests {
         // §3.3 and §2.2.3 — the caller must get every queue it asked about,
         // each saying it could not be read. An absent entry lets a caller
         // default it to zero.
-        let azure = LiveObservatory::new(&config(&[]));
+        let azure =
+            LiveObservatory::new(&config(&[])).expect("no CA bundle is configured in tests");
 
         let queues = vec!["a".to_string(), "b".to_string()];
         let depths = azure.queue_depths(&queues).await;
@@ -560,7 +574,8 @@ mod tests {
     #[tokio::test]
     async fn a_trace_id_that_sanitises_away_runs_no_query() {
         // §4.4 — the operation id comes straight off the URL path.
-        let azure = LiveObservatory::new(&config(&[("AZURE_LOG_ANALYTICS_WORKSPACE_ID", "w")]));
+        let azure = LiveObservatory::new(&config(&[("AZURE_LOG_ANALYTICS_WORKSPACE_ID", "w")]))
+            .expect("no CA bundle is configured in tests");
 
         assert!(azure.trace("🏥").await.is_empty());
         assert!(azure.trace("\"; drop").await.is_empty());

@@ -85,7 +85,7 @@ fn config() -> Result<Config, ihb_config::ConfigErrors> {
         ),
         connection_string: reader.optional_secret("SERVICE_BUS_CONNECTION_STRING"),
         namespace: reader.optional_string("SERVICE_BUS_NAMESPACE"),
-        redaction_enabled: reader.bool_or("HL7_LOG_REDACTION_ENABLED", true),
+        redaction_enabled: reader.lenient_bool_or("HL7_LOG_REDACTION_ENABLED", true),
         sql,
     };
 
@@ -104,6 +104,13 @@ async fn run() -> ExitCode {
     };
 
     let telemetry = ihb_telemetry::otel::configure(&telemetry_config(&config.microservice_id));
+
+    // `spec/18-deployment.md` §4.3 — a configured CA bundle that cannot be
+    // used stops the service here, rather than becoming a TLS failure in
+    // whichever component happens to need it first.
+    if !ihb_tls::startup_check() {
+        return ExitCode::FAILURE;
+    }
     tracing::info!(
         queue = %config.ingress_queue_name,
         batch = config.max_batch_size,

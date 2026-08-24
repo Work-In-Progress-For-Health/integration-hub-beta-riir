@@ -29,6 +29,40 @@ use time::OffsetDateTime;
 /// The schema, applied by the harness.
 const SCHEMA: &str = include_str!("../../../local/sql/schema.sql");
 
+/// The database the services use.
+///
+/// `spec/18-deployment.md` §5.2 keeps the Python's `.env` files unchanged,
+/// and they say `SQL_DATABASE=IntegrationHub`. These tests used `master`,
+/// so the schema they applied was in a different database from the one the
+/// containers read — and nothing created `IntegrationHub` at all.
+const DATABASE: &str = "IntegrationHub";
+
+/// The database the schema is applied *from*.
+///
+/// `CREATE DATABASE` cannot run inside the database it creates.
+const BOOTSTRAP_DATABASE: &str = "master";
+
+/// A connection to `master`, for applying the schema.
+///
+/// The schema's first statement is `CREATE DATABASE IntegrationHub`, which
+/// cannot run inside the database it creates.
+fn bootstrap_connection() -> SqlConnection {
+    let password = std::env::var("MSSQL_SA_PASSWORD")
+        .expect("MSSQL_SA_PASSWORD; see this file's documentation");
+
+    SqlConnection::new(
+        SqlConfig::from_pairs([
+            ("SQL_SERVER", "127.0.0.1"),
+            ("SQL_DATABASE", BOOTSTRAP_DATABASE),
+            ("SQL_USERNAME", "sa"),
+            ("MSSQL_SA_PASSWORD", password.as_str()),
+            ("SQL_ENCRYPT", "No"),
+            ("SQL_TRUST_SERVER_CERTIFICATE", "Yes"),
+        ])
+        .expect("the test configuration is complete"),
+    )
+}
+
 fn connection() -> SqlConnection {
     let password = std::env::var("MSSQL_SA_PASSWORD")
         .expect("MSSQL_SA_PASSWORD; see this file's documentation");
@@ -36,7 +70,7 @@ fn connection() -> SqlConnection {
     SqlConnection::new(
         SqlConfig::from_pairs([
             ("SQL_SERVER", "127.0.0.1"),
-            ("SQL_DATABASE", "master"),
+            ("SQL_DATABASE", DATABASE),
             ("SQL_USERNAME", "sa"),
             ("MSSQL_SA_PASSWORD", password.as_str()),
             ("SQL_ENCRYPT", "No"),
@@ -52,7 +86,7 @@ static SCHEMA_APPLIED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_
 async fn prepared() -> SqlConnection {
     SCHEMA_APPLIED
         .get_or_init(|| async {
-            let mut sql = connection();
+            let mut sql = bootstrap_connection();
             let mut client = sql.take().await.expect("the database is reachable");
             for statement in SCHEMA.split("\nGO") {
                 let statement = statement.trim();
@@ -246,6 +280,19 @@ async fn a_whole_batch_commits_together() {
 async fn a_batch_shares_one_stored_at() {
     // §2.2 — computed once per batch, which is what lets an operator group
     // a batch in the table afterwards. Read back and compared.
+    //
+    // The three ids are matched **exactly**, not by a shared prefix. They
+    // do not have one: `unique` stamps each with its own nanosecond
+    // timestamp, so `store-test-stamp-0-…` and `store-test-stamp-1-…`
+    // differ from the fourth segment on.
+    //
+    // An earlier version took the prefix of `ids[0]` up to its last `-`,
+    // which matched exactly one row of the batch — so it asserted "one
+    // StoredAt across the batch" while looking at one row, and was
+    // vacuously true. It also matched every *previous* run's `stamp-0`
+    // row, so it failed on the second run against a persistent database
+    // for a reason unrelated to what it was testing. See
+    // spec/17-testing-and-quality.md §9.2.1b.
     let mut sql = prepared().await;
     let ids: Vec<String> = (0..3).map(|n| unique(&format!("stamp-{n}"))).collect();
 
@@ -259,12 +306,12 @@ async fn a_batch_shares_one_stored_at() {
     );
 
     let mut client = sql.take().await.unwrap();
-    let pattern = format!("{}%", ids[0].rsplit_once('-').map_or("", |(head, _)| head));
-    let parameters: Vec<&dyn tiberius::ToSql> = vec![&pattern];
+    let parameters: Vec<&dyn tiberius::ToSql> = vec![&ids[0], &ids[1], &ids[2]];
     let rows = client
         .query(
-            "SELECT COUNT(DISTINCT StoredAt) AS n FROM monitoring.Message
-             WHERE CorrelationId LIKE @P1",
+            "SELECT COUNT(*) AS rows_found, COUNT(DISTINCT StoredAt) AS stamps
+             FROM monitoring.Message
+             WHERE CorrelationId IN (@P1, @P2, @P3)",
             &parameters,
         )
         .await
@@ -272,10 +319,14 @@ async fn a_batch_shares_one_stored_at() {
         .into_first_result()
         .await
         .unwrap();
-    let distinct: i32 = rows[0].get("n").unwrap_or_default();
+    let rows_found: i32 = rows[0].get("rows_found").unwrap_or_default();
+    let stamps: i32 = rows[0].get("stamps").unwrap_or_default();
     sql.restore(client);
 
-    assert_eq!(distinct, 1, "one StoredAt across the batch");
+    // Without this the next assertion passes on nothing at all, which is
+    // how the previous version came to be vacuous.
+    assert_eq!(rows_found, 3, "all three rows of the batch were found");
+    assert_eq!(stamps, 1, "one StoredAt across the batch");
 }
 
 #[tokio::test]

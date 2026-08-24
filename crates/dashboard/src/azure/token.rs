@@ -115,53 +115,63 @@ impl TokenSource {
     }
 
     /// Fetch a token, by whichever route §4.1 selected.
+    ///
+    /// The request shapes, the scope-to-resource conversion and the two
+    /// spellings of `expires_in` all live in [`azure_token_lite`]; what
+    /// stays here is the transport, because this workspace has exactly one
+    /// HTTPS client and §4.6's whole point is not acquiring a second one.
     async fn fetch(&self, scope: &str) -> Result<Held, HttpError> {
-        let document = match &self.auth {
+        let credential = match &self.auth {
             AzureAuth::ServicePrincipal {
                 tenant_id,
                 client_id,
                 client_secret,
-            } => {
-                let url =
-                    format!("https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token");
-                let body = format!(
-                    "grant_type=client_credentials&client_id={}&client_secret={}&scope={}",
-                    form_encode(client_id),
-                    form_encode(client_secret.expose()),
-                    form_encode(scope),
-                );
-                self.client.post_form(&url, body).await?
-            }
-            AzureAuth::Ambient { client_id } => {
-                // §4.6.2 — Container Apps, not IMDS.
-                let endpoint = std::env::var("IDENTITY_ENDPOINT").map_err(|_| {
-                    HttpError::Url(
-                        "IDENTITY_ENDPOINT is not set, so there is no ambient credential \
-                         (spec/15-dashboard.md §4.6.2)"
-                            .to_string(),
-                    )
-                })?;
-                let header = std::env::var("IDENTITY_HEADER").map_err(|_| {
-                    HttpError::Url("IDENTITY_ENDPOINT is set without IDENTITY_HEADER".to_string())
-                })?;
+            } => azure_token_lite::Credential::client_secret(
+                tenant_id,
+                client_id,
+                client_secret.expose(),
+            ),
+            // §4.6.2 — Container Apps, not IMDS. `azure-token-lite` leaves
+            // IMDS out for the same reason: a request to 169.254.169.254
+            // from a machine that is not in Azure hangs rather than fails.
+            AzureAuth::Ambient { client_id } => azure_token_lite::Credential::ManagedIdentity {
+                client_id: client_id.clone(),
+            },
+        };
 
-                let mut url = format!(
-                    "{endpoint}?api-version={IDENTITY_API_VERSION}&resource={}",
-                    form_encode(resource_of(scope)),
-                );
-                if let Some(client_id) = client_id {
-                    // A user-assigned identity.
-                    url.push_str(&format!("&client_id={}", form_encode(client_id)));
-                }
+        let request = credential
+            .request(scope)
+            .map_err(|error| HttpError::Url(format!("{error} (spec/15-dashboard.md §4.6.2)")))?;
 
-                self.client
-                    .get_json_with(&url, &[("X-IDENTITY-HEADER", header.as_str())])
-                    .await?
-            }
+        let headers: Vec<(&str, &str)> = request
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+
+        let document = match request.body {
+            Some(body) => self.client.post_form(&request.url, body).await?,
+            None => self.client.get_json_with(&request.url, &headers).await?,
         };
 
         parse(&document)
     }
+}
+
+/// Read a token response (§4.6.3).
+///
+/// Delegates to [`azure_token_lite::parse_response`], which accepts
+/// `expires_in` as a number (AAD) and as a **string** (the identity
+/// endpoint), and treats a response with neither as already needing a
+/// refresh rather than as valid forever.
+fn parse(document: &serde_json::Value) -> Result<Held, HttpError> {
+    let token = azure_token_lite::parse_response(&document.to_string())
+        .map_err(|error| HttpError::Body(error.to_string()))?;
+
+    Ok(Held {
+        value: token.access_token,
+        usable_until: Instant::now() + token.expires_in.saturating_sub(EXPIRY_MARGIN),
+    })
 }
 
 /// The `resource` an identity endpoint wants, from a `.default` scope.
@@ -181,57 +191,16 @@ impl TokenSource {
 /// ```
 #[must_use]
 pub fn resource_of(scope: &str) -> &str {
-    scope.strip_suffix(".default").unwrap_or(scope)
-}
-
-/// Read a token response (§4.6.3).
-fn parse(document: &serde_json::Value) -> Result<Held, HttpError> {
-    let value = document
-        .get("access_token")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| HttpError::Body("the response carries no access_token".to_string()))?;
-
-    // `expires_in` is seconds, and arrives as a number from AAD and as a
-    // *string* from the identity endpoint. Accepting both is one line here
-    // and an hour of confusion otherwise.
-    let expires_in = document
-        .get("expires_in")
-        .and_then(|v| {
-            v.as_u64()
-                .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
-        })
-        // A response with no expiry is treated as already needing a
-        // refresh next time rather than as valid forever.
-        .unwrap_or(0);
-
-    let lifetime = Duration::from_secs(expires_in);
-    // §4.6.3 — never used in the last moments of its life. `saturating_sub`
-    // because a token shorter than the margin is simply not cached.
-    let usable_for = lifetime.saturating_sub(EXPIRY_MARGIN);
-
-    Ok(Held {
-        value: value.to_string(),
-        usable_until: Instant::now() + usable_for,
-    })
+    azure_token_lite::resource_of(scope)
 }
 
 /// Percent-encode a form value.
 ///
 /// A client secret can contain any of `+ / = &`, and every one of them
-/// changes what the token endpoint reads if it goes through unencoded — a
-/// secret ending in `=` silently becomes the wrong secret, and the error is
-/// an ordinary `invalid_client`.
-fn form_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+/// changes the meaning of a form body.
+#[must_use]
+pub fn form_encode(value: &str) -> String {
+    azure_token_lite::form_encode(value)
 }
 
 #[cfg(test)]
@@ -343,7 +312,10 @@ mod tests {
             return;
         }
 
-        let source = TokenSource::new(AzureAuth::Ambient { client_id: None }, HttpsClient::new());
+        let source = TokenSource::new(
+            AzureAuth::Ambient { client_id: None },
+            HttpsClient::new().expect("no CA bundle is configured in tests"),
+        );
 
         let started = Instant::now();
         let error = source.token(ARM_SCOPE).await.unwrap_err();
@@ -360,7 +332,10 @@ mod tests {
     fn a_secret_never_reaches_a_debug_line() {
         // `spec/04-observability.md` §2 and §5.7's rule, applied to the
         // credential rather than to a payload.
-        let source = TokenSource::new(principal(), HttpsClient::new());
+        let source = TokenSource::new(
+            principal(),
+            HttpsClient::new().expect("no CA bundle is configured in tests"),
+        );
 
         let rendered = format!("{source:?}");
         assert!(!rendered.contains("s3cr3t"), "{rendered}");

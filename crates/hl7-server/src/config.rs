@@ -204,7 +204,7 @@ impl Config {
             validation_standard: reader
                 .optional_one_of("HL7_VALIDATION_STANDARD", SUPPORTED_STANDARDS),
             max_message_size: read_max_message_size(&mut reader),
-            redaction_enabled: reader.bool_or("HL7_LOG_REDACTION_ENABLED", true),
+            redaction_enabled: reader.lenient_bool_or("HL7_LOG_REDACTION_ENABLED", true),
         };
 
         reader.finish()?;

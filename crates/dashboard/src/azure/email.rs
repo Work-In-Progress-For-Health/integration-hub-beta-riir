@@ -11,13 +11,8 @@
 
 use std::time::Duration;
 
-use base64::Engine as _;
-use hmac::{Hmac, Mac};
 use ihb_config::Secret;
-use sha2::{Digest, Sha256};
-use time::OffsetDateTime;
 
-use crate::azure::cosmos::cosmos_date;
 use crate::azure::http::{HttpError, HttpsClient};
 
 /// The ACS e-mail API version (§5.8.1).
@@ -188,48 +183,31 @@ impl Mailer {
 
     /// One send attempt.
     async fn attempt(&self, url: &str, body: &str) -> Result<(), HttpError> {
-        let date = cosmos_date(OffsetDateTime::now_utc());
+        // §5.8.1 — the date, the host, the path *with* its query string and
+        // a hash of the body are all signed, and the two extra headers are
+        // sent because the service recomputes the signature from them. See
+        // `acs_signature` for what each of those gets wrong on its own.
         let host = url
             .split_once("://")
             .and_then(|(_, rest)| rest.split('/').next())
             .unwrap_or_default()
             .to_string();
-
-        // §5.8.1 — the body hash is part of what is signed, so a modified
-        // body is rejected rather than sent.
-        let content_hash = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(body));
-
         let path = url.split_once(&host).map_or("/", |(_, rest)| rest);
 
-        let to_sign = format!("POST\n{path}\n{date};{host};{content_hash}");
+        let signer = acs_signature::Signer::new(self.acs.access_key.expose()).map_err(|error| {
+            // §5.8.6 — the key never appears.
+            HttpError::Url(match error {
+                acs_signature::KeyError::NotBase64 => {
+                    "the ACS access key is not valid base64".to_string()
+                }
+                acs_signature::KeyError::Unusable => "the ACS access key is not usable".to_string(),
+            })
+        })?;
 
-        let key = base64::engine::general_purpose::STANDARD
-            .decode(self.acs.access_key.expose())
-            .map_err(|_| {
-                // §5.8.6 — the key never appears.
-                HttpError::Url("the ACS access key is not valid base64".to_string())
-            })?;
-
-        let mut mac = <Hmac<Sha256>>::new_from_slice(&key)
-            .map_err(|_| HttpError::Url("the ACS access key is not usable".to_string()))?;
-        mac.update(to_sign.as_bytes());
-        let signature =
-            base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
-
-        let authorization = format!(
-            "HMAC-SHA256 SignedHeaders=x-ms-date;host;x-ms-content-sha256&Signature={signature}"
-        );
+        let signed = signer.sign("POST", path, &host, &acs_signature::now(), body.as_bytes());
 
         self.client
-            .post_json_with(
-                url,
-                &[
-                    ("x-ms-date", date.as_str()),
-                    ("x-ms-content-sha256", content_hash.as_str()),
-                    ("Authorization", authorization.as_str()),
-                ],
-                body.to_string(),
-            )
+            .post_json_with(url, &signed.headers(), body.to_string())
             .await
             .map(|_| ())
     }
@@ -240,7 +218,7 @@ mod tests {
     use super::*;
 
     fn client() -> HttpsClient {
-        HttpsClient::new()
+        HttpsClient::new().expect("no CA bundle is configured in tests")
     }
 
     fn mailer() -> Mailer {

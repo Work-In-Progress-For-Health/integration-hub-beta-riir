@@ -38,6 +38,17 @@ pub enum TransformError {
     /// arises.
     #[error("could not re-parse the message: {0}")]
     Parse(String),
+
+    /// The payload was not the shape this transformer's runtime expects.
+    ///
+    /// `spec/09-transformers.md` §1.6's **second** row rather than its
+    /// first, and the two are logged differently: a transformer receives
+    /// what an ingress server already parsed and forwarded, so a payload
+    /// it cannot even read means the two disagree. That is worth the
+    /// "unexpected" wording it gets, and worth keeping distinct from an
+    /// ordinary mapping failure.
+    #[error("{0}")]
+    Unexpected(String),
 }
 
 impl TransformError {

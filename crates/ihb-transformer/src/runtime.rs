@@ -9,7 +9,7 @@ use ihb_telemetry::events::EventLogger;
 use ihb_telemetry::metrics::Metrics;
 
 use crate::config::Config;
-use crate::{TransformError, Transformer};
+use crate::{PayloadTransformer, TransformError};
 
 /// What became of one message.
 ///
@@ -65,7 +65,7 @@ pub async fn process_one<T, E>(
     events: &EventLogger,
 ) -> Outcome
 where
-    T: Transformer,
+    T: PayloadTransformer,
     E: MessageSink,
 {
     // ---- Step 1: decode. -------------------------------------------
@@ -107,15 +107,19 @@ where
         correlation_id,
     );
 
-    // ---- Step 5: parse. --------------------------------------------
-    let parsed = match ihb_validation::parse(body) {
-        Ok(parsed) => parsed,
-        Err(error) => {
-            // §1.6's second row. A transformer receives what an ingress
-            // server already parsed and forwarded, so this means the two
-            // disagree — worth the "unexpected" wording it gets.
-            let reason = format!("Unexpected error during message processing: {error}");
-            tracing::error!(%error, "Unexpected error during message processing");
+    // ---- Steps 5 and 6: parse and transform. -----------------------
+    //
+    // Both live behind `PayloadTransformer` so the PROMs transformer, whose
+    // payload is XML rather than ER7, runs this same loop
+    // (`spec/16-proms-transformer.md` §1.1). For an ER7 transformer the
+    // blanket implementation does the parse, and reports a failure as
+    // `Unexpected` so §1.6's second row keeps its own wording.
+    let mapped = match transformer.transform_payload(body) {
+        Ok(mapped) => mapped,
+        Err(TransformError::Unexpected(reason)) => {
+            // §1.6's second row.
+            let reason = format!("Unexpected error during message processing: {reason}");
+            tracing::error!(%reason, "Unexpected error during message processing");
             events.log_message_failed(
                 body,
                 &reason,
@@ -124,18 +128,14 @@ where
             );
             return Outcome::not_handled(reason);
         }
-    };
-
-    // ---- Step 6: transform. ----------------------------------------
-    let mapped = match transformer.transform(&parsed) {
-        Ok(mapped) => mapped,
         Err(error) => {
+            // §1.6's first row.
             return failed_to_transform(transformer, body, &error, events, correlation_id);
         }
     };
 
     // ---- Step 7: forward, with the properties as received. ---------
-    let outgoing = Outgoing::new(mapped.to_er7())
+    let outgoing = Outgoing::new(mapped.clone())
         // §1.3.2 — no message id. Only ingress sets one.
         .with_optional_session(egress_session_id)
         .with_properties(message.properties.clone());
@@ -155,7 +155,7 @@ where
     // ---- Step 8. ---------------------------------------------------
     events.log_message_processed(
         body,
-        Some(&transformer.processed_audit_text(&parsed)),
+        Some(&transformer.processed_audit_text_for(&mapped)),
         correlation_id,
     );
 
@@ -164,7 +164,7 @@ where
 }
 
 /// §1.6's first row, in one place so the two strings cannot drift apart.
-fn failed_to_transform<T: Transformer>(
+fn failed_to_transform<T: PayloadTransformer>(
     transformer: &T,
     body: &str,
     error: &TransformError,
@@ -201,7 +201,7 @@ pub struct Runtime<T, E> {
     pub metrics: Metrics,
 }
 
-impl<T: Transformer, E: MessageSink> Runtime<T, E> {
+impl<T: PayloadTransformer, E: MessageSink> Runtime<T, E> {
     /// Assemble a runtime.
     #[must_use]
     pub fn new(config: Config, transformer: T, egress: E) -> Self {

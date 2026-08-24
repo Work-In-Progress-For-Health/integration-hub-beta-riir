@@ -4,6 +4,29 @@
 version = 2
 yanked = "deny"
 
+# Each entry below states the exposure, not just the identifier. An ignore
+# with no reasoning is indistinguishable from not having run the tool.
+ignore = [
+  # RUSTSEC-2024-0384 — `instant` is unmaintained.
+  #
+  # Not in the build graph for any target this workspace ships. It is
+  # reached only as azservicebus -> fluvio-wasm-timer -> parking_lot 0.11
+  # -> instant, and `fluvio-wasm-timer` is a wasm shim:
+  # `cargo tree -i instant --workspace` prints nothing, and it resolves only
+  # under `--target all`. It is a line in Cargo.lock, not a compiled
+  # dependency.
+  #
+  # Clears when azservicebus drops the wasm timer path. Nothing to do here.
+  "RUSTSEC-2024-0384",
+
+  # RUSTSEC-2026-0194 and -0195 (quick-xml) were here until 2026-08-22.
+  # `xsd-schema` 0.1.4 brings `quick-xml` 0.41.0, which carries both fixes,
+  # so the ignores are **removed** rather than kept "just in case": an
+  # ignore that no longer describes anything is one a reader has to
+  # re-derive, and it would hide a regression. See
+  # spec/06-validation.md §9.7.
+]
+
 [licenses]
 version = 2
 allow = [
@@ -15,7 +38,19 @@ allow = [
   "ISC",
   "Unicode-3.0",
   "Zlib",
-  "MPL-2.0",
+  # `webpki-roots`, which is the Mozilla CA certificate store bundled as
+  # data. It reaches this workspace two ways: through `rustls-extra-roots`
+  # under `ihb-tls`, which is the deliberate use, and transitively through
+  # the rustls stack under `azservicebus`. That second route brings both
+  # 0.26 (via `fe2o3-amqp-ws`) and 1.0 (via `fe2o3-amqp`), which is why two
+  # majors appear in the lockfile and why no direct declaration here can
+  # collapse them.
+  #
+  # CDLA is a permissive licence written for data sets rather than code; it
+  # carries no copyleft and no attribution requirement beyond the notice
+  # already shipped in the crate. Allowed for that crate's kind of content,
+  # not as a general-purpose addition.
+  "CDLA-Permissive-2.0",
 ]
 
 [bans]

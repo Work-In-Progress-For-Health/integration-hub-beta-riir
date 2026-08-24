@@ -98,8 +98,37 @@ fn message_id(label: &str) -> String {
 /// unaffected and still run in parallel.
 static PLAIN_QUEUE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// The emulator's AMQP port, checked before anything tries to speak AMQP.
+const EMULATOR_PORT: u16 = 5672;
+
+/// Fail immediately, and legibly, when the emulator is not running.
+///
+/// Without this the AMQP client retries a connection nobody is listening
+/// for, and the suite spends **minutes** timing out before reporting a
+/// failure that names a test rather than the missing container. The first
+/// time that happened the run took eight minutes and blamed
+/// `abandoning_redelivers_with_a_raised_delivery_count`, which was
+/// entirely healthy — the emulator had been torn down underneath it.
+///
+/// A TCP connect is the cheapest question that distinguishes the two, so
+/// it is asked first. See `spec/17-testing-and-quality.md` §9.2.1e.
+fn require_emulator() {
+    use std::net::{Ipv4Addr, SocketAddr, TcpStream};
+
+    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, EMULATOR_PORT));
+    assert!(
+        TcpStream::connect_timeout(&address, Duration::from_secs(2)).is_ok(),
+        "nothing is listening on {address}, so the Service Bus emulator is \
+         not running. Start it with:\n\n    \
+         podman compose -f local/docker-compose.yml --profile bus up -d\n\n\
+         This is not a defect in the code under test."
+    );
+}
+
 /// Connect to the emulator.
 async fn bus() -> LiveBus {
+    require_emulator();
+
     let endpoint = Endpoint::from_config(Some(EMULATOR), None).expect("the endpoint parses");
     assert!(
         endpoint.is_plaintext(),

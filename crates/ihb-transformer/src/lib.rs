@@ -121,3 +121,82 @@ pub trait Transformer: Send {
         )
     }
 }
+
+/// A transformer at the **payload** level.
+///
+/// [`Transformer`] is the usual shape: ER7 in, ER7 out, with the parse and
+/// the serialise done once by the runtime so three implementations cannot
+/// disagree about them. Every `Transformer` is a `PayloadTransformer`
+/// through the blanket implementation below.
+///
+/// This trait exists for the one transformer whose payload is not ER7.
+/// `spec/16-proms-transformer.md` §1.1 puts the PROMs transformer on the
+/// **same runtime, the same configuration and the same receive loop** as
+/// the others — only its `transform` differs, taking WPAS XML and
+/// returning FHIR JSON. Duplicating the loop for it would mean two copies
+/// of `spec/09-transformers.md` §1.3's ordering, which is exactly what
+/// having one runtime avoids.
+pub trait PayloadTransformer: Send {
+    /// The name used in audit text and span names.
+    fn name(&self) -> &'static str;
+
+    /// Transform one payload. Returns the body to forward.
+    ///
+    /// # Errors
+    ///
+    /// [`TransformError`] when the payload cannot be mapped. The runtime
+    /// turns that into §1.6's first row: logged, a `MESSAGE_FAILED` event,
+    /// and the message abandoned rather than completed.
+    fn transform_payload(&mut self, body: &str) -> Result<String, TransformError>;
+
+    /// Audit text for `MESSAGE_RECEIVED` (§1.4).
+    fn received_audit_text(&self) -> String {
+        format!("Message received for {} transformation", self.name())
+    }
+
+    /// Audit text for `MESSAGE_PROCESSED` (§1.5).
+    ///
+    /// Takes the **outgoing** body, because a payload-level transformer
+    /// has no parsed intermediate to describe.
+    fn processed_audit_text_for(&self, _outgoing: &str) -> String {
+        format!("Message processed for {} transformation", self.name())
+    }
+}
+
+/// Every ER7 transformer is a payload transformer.
+///
+/// The parse of `spec/09-transformers.md` §1.3 step 5 and the serialise of
+/// step 7 live here, so they happen once however many transformers there
+/// are — and so a parse failure keeps the "unexpected" wording §1.6's
+/// second row gives it.
+impl<T: Transformer> PayloadTransformer for T {
+    fn name(&self) -> &'static str {
+        Transformer::name(self)
+    }
+
+    fn transform_payload(&mut self, body: &str) -> Result<String, TransformError> {
+        let parsed = ihb_validation::parse(body).map_err(|error| {
+            // §1.6's second row. A transformer receives what an ingress
+            // server already parsed and forwarded, so this means the two
+            // disagree — worth the "unexpected" wording it gets.
+            TransformError::Unexpected(error.to_string())
+        })?;
+
+        Ok(Transformer::transform(self, &parsed)?.to_er7())
+    }
+
+    fn received_audit_text(&self) -> String {
+        Transformer::received_audit_text(self)
+    }
+
+    fn processed_audit_text_for(&self, _outgoing: &str) -> String {
+        // The ER7 form takes the *parsed incoming* message, which this
+        // signature does not carry. Re-parsing the outgoing body to
+        // describe it would be work for a log line, so the default text is
+        // used; no current transformer overrides it.
+        format!(
+            "Message processed for {} transformation",
+            Transformer::name(self)
+        )
+    }
+}

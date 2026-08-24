@@ -99,6 +99,65 @@ impl BusError {
             Self::Connect { .. } | Self::Receive { .. } | Self::Disposition { .. } => true,
         }
     }
+
+    /// Whether the session behind this receiver is gone for good.
+    ///
+    /// A session lock is held for a bounded time and renewed. If renewal
+    /// gives up — a long batch, a broker hiccup, a container paused by its
+    /// host — the broker drops the session, and **every subsequent receive
+    /// on that receiver fails forever**. Backing off and retrying the same
+    /// receiver is then an infinite loop that processes nothing while the
+    /// health check stays green.
+    ///
+    /// The remedy is not a retry, it is a **new receiver**: accept the
+    /// session again. This predicate distinguishes the two.
+    ///
+    /// Observed in a container idle for five minutes:
+    ///
+    /// ```text
+    /// WARN  a batch has held its session for 300s; giving up renewal
+    /// ERROR receive failed: Session has dropped
+    /// ERROR receive failed: Local error: IllegalSessionState   (forever)
+    /// ```
+    ///
+    /// Matching on the message text is unpleasant, and is done anyway: the
+    /// AMQP layer surfaces these as opaque strings, and the alternative —
+    /// treating them as ordinary transient failures — is the defect above.
+    /// See `spec/03-message-bus.md` §5.1.5.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ihb_bus::error::BusError;
+    ///
+    /// let dropped = BusError::Receive {
+    ///     entity: "q".into(),
+    ///     reason: "Session has dropped".into(),
+    /// };
+    /// assert!(dropped.is_session_lost());
+    ///
+    /// let illegal = BusError::Receive {
+    ///     entity: "q".into(),
+    ///     reason: "Local error: IllegalSessionState".into(),
+    /// };
+    /// assert!(illegal.is_session_lost());
+    ///
+    /// // An ordinary timeout is not a lost session, and must not cost a
+    /// // reconnection.
+    /// let timeout = BusError::Receive { entity: "q".into(), reason: "timeout".into() };
+    /// assert!(!timeout.is_session_lost());
+    /// ```
+    #[must_use]
+    pub fn is_session_lost(&self) -> bool {
+        let Self::Receive { reason, .. } = self else {
+            return false;
+        };
+        let reason = reason.to_ascii_lowercase();
+        reason.contains("session has dropped")
+            || reason.contains("illegalsessionstate")
+            || reason.contains("sessionlocklost")
+            || reason.contains("session lock was lost")
+    }
 }
 
 #[cfg(test)]

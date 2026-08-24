@@ -42,6 +42,40 @@ const SCHEMA: &str = include_str!("../../../local/sql/schema.sql");
 /// The queue replayed messages go to.
 const QUEUE: &str = "priority";
 
+/// The database the services use.
+///
+/// `spec/18-deployment.md` §5.2 keeps the Python's `.env` files unchanged,
+/// and they say `SQL_DATABASE=IntegrationHub`. These tests used `master`,
+/// so the schema they applied was in a different database from the one the
+/// containers read — and nothing created `IntegrationHub` at all.
+const DATABASE: &str = "IntegrationHub";
+
+/// The database the schema is applied *from*.
+///
+/// `CREATE DATABASE` cannot run inside the database it creates.
+const BOOTSTRAP_DATABASE: &str = "master";
+
+/// A connection to `master`, for applying the schema.
+///
+/// The schema's first statement is `CREATE DATABASE IntegrationHub`, which
+/// cannot run inside the database it creates.
+fn bootstrap_connection() -> SqlConnection {
+    let password = std::env::var("MSSQL_SA_PASSWORD")
+        .expect("MSSQL_SA_PASSWORD; see this file's documentation");
+
+    SqlConnection::new(
+        SqlConfig::from_pairs([
+            ("SQL_SERVER", "127.0.0.1"),
+            ("SQL_DATABASE", BOOTSTRAP_DATABASE),
+            ("SQL_USERNAME", "sa"),
+            ("MSSQL_SA_PASSWORD", password.as_str()),
+            ("SQL_ENCRYPT", "No"),
+            ("SQL_TRUST_SERVER_CERTIFICATE", "Yes"),
+        ])
+        .expect("the test configuration is complete"),
+    )
+}
+
 /// A connection to the local container.
 fn connection() -> SqlConnection {
     let password = std::env::var("MSSQL_SA_PASSWORD")
@@ -50,7 +84,7 @@ fn connection() -> SqlConnection {
     SqlConnection::new(
         SqlConfig::from_pairs([
             ("SQL_SERVER", "127.0.0.1"),
-            ("SQL_DATABASE", "master"),
+            ("SQL_DATABASE", DATABASE),
             ("SQL_USERNAME", "sa"),
             ("MSSQL_SA_PASSWORD", password.as_str()),
             ("SQL_ENCRYPT", "No"),
@@ -72,7 +106,7 @@ static SCHEMA_APPLIED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_
 async fn seeded(count: usize) -> (SqlConnection, Uuid) {
     SCHEMA_APPLIED
         .get_or_init(|| async {
-            let mut sql = connection();
+            let mut sql = bootstrap_connection();
             let mut client = sql.take().await.expect("the database is reachable");
             for statement in SCHEMA.split("\nGO") {
                 let statement = statement.trim();

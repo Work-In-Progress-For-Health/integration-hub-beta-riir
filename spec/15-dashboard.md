@@ -96,6 +96,35 @@ it.
 | `alarm1_summary`, `alarm2_summary`, `alarm3_summary` | one per alarm |
 | `retry_delays`, `retry_delay_kpis` | the retry panel |
 
+§2.3.1a **A flow carries a queue *pair*, not a combined total.**
+`dashboard.js` computes a card's numbers as
+
+```js
+const pre = flow.pre_queue || {};
+const post = flow.post_queue || {};
+const total = (pre.active || 0) + (post.active || 0) + subActive;
+```
+
+so `flows[]` MUST carry `pre_queue`, `post_queue` and `subscriptions`.
+Each queue carries `name`, `active`, `dlq`, `exists` and `health`;
+`updateQueueNode` returns early on a falsy `name`, so a queue that was not
+found is `name: null` rather than absent.
+
+`active` and `dlq` are numbers, never `null` — the script adds them, and a
+`null` poisons the sum.
+
+**This was got wrong.** An earlier build emitted a flat `active` and `dlq`
+per flow. The `|| {}` fallback meant nothing raised: every flow card
+rendered **zero**, on the page an operator reads first, with no error in the
+console. A wrong number that looks like a right one. Found by capturing the
+Python's own `/api/status` and diffing it, which is what §8.5 is for.
+
+The Rust derives the pair from the queue **names** it already matched
+(`spec/01-architecture.md` §2.1.1). The Python instead discovers each
+container app's `INGRESS_QUEUE_NAME` and `EGRESS_QUEUE_NAME` through ARM;
+§3.1 rejects that discovery deliberately, so the two arrive at the same
+shape by different routes.
+
 §2.3.2 `/api/servicebus-metrics` and `/api/hl7-throughput` return **two
 named series**, not a flat list:
 
@@ -545,7 +574,22 @@ empty.
 §8.4 §5.2's out-of-hours guard, on both sides of the boundary.
 
 §8.5 Each `/api/*` shape asserted against a golden JSON file captured from
-the Python, so `dashboard.js` needs no change.
+the Python, so `dashboard.js` needs no change. The goldens live in
+`crates/dashboard/tests/golden/`, captured from the Python dashboard run
+locally with **no** Azure configuration — which §1.2 makes a valid way to
+run it.
+
+§8.5.1 §8.5 and §2.3 pull in opposite directions, and §2.3 wins. §2.3 takes
+the contract from the **scripts**, on the grounds that a field the handler
+emits and nothing reads is not part of it; §8.5 says to assert against the
+Python's **output**. Read literally, §8.5 would require the Rust to emit
+`colour`, `icon` and `topic`, which no script reads.
+
+The goldens are therefore used as a **source of candidate keys, not as an
+equality assertion**: every key in a golden is checked against the scripts,
+and the ones a script reads become requirements. That is how §2.3.1a was
+found — the diff surfaced `pre_queue`, and `dashboard.js` proved it
+mattered.
 
 §8.6 §1.3's redaction: a message containing a known marker is rendered and
 the marker is absent from the HTML.

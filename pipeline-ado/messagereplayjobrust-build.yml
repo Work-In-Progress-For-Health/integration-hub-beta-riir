@@ -1,0 +1,69 @@
+# Message Replay Job Build Pipeline (Rust)
+#
+# Replaces the Python `messagereplayjob-build.yml`. The ACR repository
+# (`message-replay-job`) and the `imageTag` artefact are identical to the Python's, so
+# the release definition is unchanged — spec/18-deployment.md §6.3. Cutover
+# is repointing the ADO pipeline named
+#
+#     Message Replay Job - Build
+#
+# at this repository and this file. See §6.4.
+
+trigger:
+  branches:
+    include:
+      - main
+      - release-*
+  paths:
+    include:
+      - crates/*
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - deny.toml
+      - docker/*
+      - local/*
+      - pipeline-ado/*
+    exclude:
+      - spec/*
+      - docs/*
+
+pr: none
+
+parameters:
+  - name: SEMANTIC_VERSION
+    displayName: 'Semantic Version'
+    type: string
+    default: 'v0.1.0'
+
+variables:
+  acrName: 'uksdhcwihsharedcr'
+  azureServiceConnection: 'Azure - NHSWales-DHCW-IntegrationHub-Subscription'
+  POOL_NAME: 'UKS-DHCW-IH-DEV-ADOManagedPool'
+
+stages:
+  - stage: CodeQuality
+    displayName: 'Code Quality & Tests'
+    jobs:
+      - template: templates/code-quality-template.yml
+        parameters:
+          jobName: 'CodeQualityMessageReplayJob'
+          appDisplayName: 'Message Replay Job'
+          poolName: ${{ variables.POOL_NAME }}
+
+  - stage: BuildAndPushMessageReplayJob
+    displayName: 'Build and Push Message Replay Job'
+    dependsOn: CodeQuality
+    jobs:
+      - template: templates/docker-build-push-template.yml
+        parameters:
+          jobName: 'BuildPushMessageReplayJob'
+          displayName: 'Build and Push Message Replay Job'
+          appName: 'message-replay-job'
+          dockerfilePath: 'docker/Dockerfile'
+          buildContext: '.'
+          buildArgs: 'BIN=message-replay-job'
+          acrName: $(acrName)
+          azureServiceConnection: $(azureServiceConnection)
+          POOL_NAME: ${{ variables.POOL_NAME }}
+          SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}

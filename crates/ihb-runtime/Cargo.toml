@@ -1,21 +1,17 @@
 [package]
 name = "ihb-runtime"
+description = "Signals, graceful shutdown, and the retry schedule every worker shares."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-authors.workspace = true
-publish = false
-description = "Signals, graceful shutdown, and the message-processing loop shared by every Integration Hub worker."
 
 [dependencies]
-tokio = { workspace = true, features = ["rt", "macros", "signal", "sync", "time"] }
-tokio-util = { workspace = true, features = ["rt"] }
-tracing.workspace = true
+graceful-worker.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util", "time"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "test-util"] }
 
 [lints]
 workspace = true

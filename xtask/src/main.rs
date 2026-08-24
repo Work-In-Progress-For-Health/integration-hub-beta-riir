@@ -40,12 +40,31 @@ use anyhow::{Context, Result, anyhow, bail};
 const MEMBERS: &[&str] = &[
     "xtask",
     "ihb-config",
+    "ihb-tls",
     "ihb-health",
     "ihb-telemetry",
     "ihb-runtime",
     "ihb-fields",
     "ihb-validation",
     "ihb-bus",
+    "hl7-server",
+    "hl7-soap-server",
+    "ihb-transformer",
+    "ihb-sender",
+    "ihb-sql",
+    "buswatch",
+    "message-store-service",
+    "message-replay-job",
+    "hl7-phw-transformer",
+    "hl7-chemo-transformer",
+    "hl7-pims-transformer",
+    "hl7-sender",
+    "soap-sender",
+    "hl7-mock-receiver",
+    "http-mock-receiver",
+    "dashboard",
+    "xml-fhir-proms-transformer",
+    "ihb-e2e",
 ];
 
 /// The schema groups, and the trigger events that arrive carried by another
@@ -122,6 +141,7 @@ fn main() -> ExitCode {
         Some("fmt") => fmt(false),
         Some("fmt-check") => fmt(true),
         Some("msrv") => msrv(),
+        Some("verify-pipelines") => verify_pipelines(),
         Some(other) => {
             eprintln!("xtask: unknown task {other:?}");
             usage();
@@ -144,7 +164,137 @@ fn main() -> ExitCode {
 
 /// Print the task list.
 fn usage() {
-    eprintln!("usage: cargo xtask <build-dictionaries|verify-dictionaries|fmt|fmt-check|msrv>");
+    eprintln!(
+        "usage: cargo xtask \
+         <build-dictionaries|verify-dictionaries|fmt|fmt-check|msrv|verify-pipelines>"
+    );
+}
+
+/// Check that the ADO build definitions and the workspace agree.
+///
+/// Implements `spec/18-deployment.md` §6.6. Two failures are possible and
+/// both are silent without this:
+///
+/// 1. A definition names `BIN=something-that-does-not-exist`. The image
+///    builds — the Dockerfile's `cargo build --bin` fails, so in fact it
+///    does not, but only after a full dependency compile on a build agent.
+///    Catching it here costs milliseconds.
+/// 2. A new deployable binary gains no build definition. Nothing fails.
+///    The service simply never ships, and the omission is invisible until
+///    somebody goes looking for an image that was never pushed.
+///
+/// The second is the reason this task exists. The first is a bonus.
+fn verify_pipelines() -> Result<()> {
+    // Binaries that are tooling, not services: `xtask` is this program,
+    // `health-probe` ships *inside* every image rather than as one of its
+    // own (`spec/18-deployment.md` §2.1).
+    const NOT_SERVICES: &[&str] = &["xtask", "health-probe"];
+
+    let root = workspace_root()?;
+    let directory = root.join("pipeline-ado");
+
+    let mut binaries = Vec::new();
+    for member in MEMBERS {
+        let manifest = root.join("crates").join(member).join("Cargo.toml");
+        let manifest = if manifest.exists() {
+            manifest
+        } else {
+            root.join(member).join("Cargo.toml")
+        };
+        let Ok(text) = std::fs::read_to_string(&manifest) else {
+            continue;
+        };
+        // An explicit `[[bin]]` table, or the implicit `src/main.rs`.
+        let mut in_bin = false;
+        let mut found_explicit = false;
+        for line in text.lines().map(str::trim) {
+            if line.starts_with('[') {
+                in_bin = line == "[[bin]]";
+                continue;
+            }
+            if in_bin
+                && let Some(rest) = line.strip_prefix("name")
+                && let Some(name) = rest.trim_start().strip_prefix('=')
+            {
+                binaries.push(name.trim().trim_matches('"').to_owned());
+                found_explicit = true;
+            }
+        }
+        if !found_explicit && manifest.with_file_name("src").join("main.rs").exists() {
+            binaries.push((*member).to_owned());
+        }
+    }
+    binaries.retain(|binary| !NOT_SERVICES.contains(&binary.as_str()));
+    binaries.sort();
+    binaries.dedup();
+
+    let mut declared = Vec::new();
+    let mut problems = Vec::new();
+
+    let mut entries: Vec<_> = std::fs::read_dir(&directory)
+        .with_context(|| format!("reading {}", directory.display()))?
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with("rust-build.yml"))
+        })
+        .collect();
+    entries.sort();
+
+    for path in &entries {
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+
+        let Some(binary) = text
+            .lines()
+            .map(str::trim)
+            .find_map(|line| line.strip_prefix("buildArgs: 'BIN="))
+            .and_then(|rest| rest.strip_suffix('\''))
+        else {
+            problems.push(format!("{name}: no `buildArgs: 'BIN=…'`"));
+            continue;
+        };
+
+        if binaries.iter().all(|known| known != binary) {
+            problems.push(format!(
+                "{name}: BIN={binary} is not a binary in this workspace"
+            ));
+        }
+        declared.push(binary.to_owned());
+    }
+
+    for binary in &binaries {
+        if !declared.contains(binary) {
+            problems.push(format!(
+                "no build definition in pipeline-ado/ produces `{binary}`. \
+                 Add one, or add the binary to NOT_SERVICES if it does not ship."
+            ));
+        }
+    }
+
+    if problems.is_empty() {
+        println!(
+            "pipeline-ado: {} definitions, {} service binaries, in agreement",
+            entries.len(),
+            binaries.len()
+        );
+        return Ok(());
+    }
+    for problem in &problems {
+        eprintln!("  {problem}");
+    }
+    Err(anyhow!(
+        "{} {} the workspace (spec/18 §6.6)",
+        problems.len(),
+        if problems.len() == 1 {
+            "problem disagrees with"
+        } else {
+            "problems disagree with"
+        }
+    ))
 }
 
 /// Print the declared minimum supported Rust version.

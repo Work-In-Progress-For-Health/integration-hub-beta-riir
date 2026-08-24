@@ -297,11 +297,14 @@ the renamed `hl7-2-mllp`.
 
 ### The HL7 crates, which are the point
 
-The user's `~/git/hl7-rust` and `~/git/er7-rust` workspaces are the reason
-this rewrite is tractable. They are consumed as **path dependencies** so a
-fix in either is picked up here immediately, with a `[patch]`-free
-`version = "..."` alongside each path so publishing later is a one-line
-change.
+The `hl7-rust` and `er7-rust` workspaces are the reason this rewrite is
+tractable. They are consumed from **crates.io, by exact version**.
+
+They began as path dependencies, which made an upstream fix appear here
+immediately. Phase 9 moved them: a Docker build context cannot reach three
+levels above the repository, so the container builds could not resolve them
+(`spec/18-deployment.md` §2.4). The cost is explicit — a local edit upstream
+now needs a publish, or a `[patch.crates-io]` entry that is not committed.
 
 | Crate | Used for |
 | --- | --- |
@@ -458,7 +461,7 @@ and each is specified in the relevant `spec/` section.
    treated as one message and answered once. `hl7-2-mllp::Framer` handles
    them properly. (Already true of `hl7_mock_receiver_rust`.)
 2. **The last-resort NACK is framed.** The Python's fallback in
-   `hl7_mock_receiver/error_handler.py` returns a bare string while every
+   `hl7_mock_receiver/hl7_mock_receiver/error_handler.py` returns a bare string while every
    other path returns `to_mllp()`, so a peer waiting for `<FS><CR>` hangs.
 3. **An oversized frame closes the connection rather than being buffered.**
    Bounded by `MAX_MESSAGE_SIZE_BYTES`.
@@ -487,6 +490,56 @@ and each is specified in the relevant `spec/` section.
    fields: [`spec/06-validation.md`](spec/06-validation.md) §5.9. This one
    needs the Hub team's attention regardless of the rewrite, because it is
    happening in production now.
+
+9. **Shutdown stops listening before it closes the sender.**
+   `spec/07-hl7-server.md` §8.2 records the Python's order — Service Bus
+   sender, message store client, health check, MLLP listener, then join —
+   and taken literally it contradicts §8.3. Closing the sender while the
+   listener is still accepting opens a window in which a message can be
+   received and cannot be forwarded, and the only honest response to that
+   is to refuse it: exactly the "accepted but not forwarded" outcome §5.3
+   calls the one failure this system must never produce. `hl7-server`
+   therefore stops accepting first, drains in-flight messages, and closes
+   the sender and health check afterwards. The order of the last two steps
+   is unchanged, and nothing outside the process can observe the
+   difference except by not losing a message.
+
+10. **An unparseable `Content-Length` gets a bare `400`, not a SOAP fault.**
+    `spec/08-hl7-soap-server.md` §2 pairs that condition with a `400` and
+    the fault string `Invalid Content-Length header.` `hyper` rejects the
+    request as a protocol violation and answers `400` with an empty body
+    before any handler runs, so the status matches and the envelope does
+    not. Serving HTTP through a hardened implementation is worth more than
+    the fault body here — RFC 9112 §6.3 requires such a message to be
+    rejected, and doing it at the protocol layer is where it belongs. The
+    application-level check remains for any value `hyper` admits. Recorded
+    at `spec/08-hl7-soap-server.md` §2.2.
+11. **BusWatch reports the messages it peeked as the queue count.**
+    `spec/14-buswatch.md` §4.3 called for the Service Bus management API.
+    There is no Rust client for it here — and there is none in the Python
+    either: `servicebus_reader.py :: get_queue_runtime` returns `None` for
+    every count in emulator mode, so the reference page shows no counts at
+    all. A lower bound answers "is anything on this queue"; `None` does not.
+    Dead-letter counts stay absent, because reaching a dead-letter
+    sub-queue costs a second receiver per queue against §6.1's connection
+    quota. Recorded at `spec/14-buswatch.md` §4.3.1–§4.3.2.
+12. **BusWatch's broker timeouts are seconds, not the estate's minute.**
+    `MAX_WAIT` is 60 seconds, which costs a receive loop nothing and costs
+    a page everything: an *empty* queue is BusWatch's normal case, since
+    clearing an already-clear queue and asking an idle queue for its next
+    session are what the buttons do. The shorter wait is passed to the
+    operation rather than imposed by wrapping it in `tokio::time::timeout`
+    — cancelling a receive loses messages the broker has already handed
+    over (`spec/03-message-bus.md` §5.5), and cancelling a session
+    acceptance can leave the session locked, which would let a read-only
+    developer tool block the service it is watching. Recorded at
+    `spec/03-message-bus.md` §5.1.2a–b and `spec/14-buswatch.md` §3.3.1–2.
+13. **BusWatch uses the brand's blue, not the Python's.**
+    `spec/14-buswatch.md` §7.2 gives NHS Wales Blue as `#325083`; the
+    Python's stylesheet sets `--nhs-blue: #2C3E72`. The specification's
+    value is normative here, so the two pages will not match. Flagged
+    rather than silently reconciled. Recorded at
+    `spec/14-buswatch.md` §7.2.1.
 
 ---
 

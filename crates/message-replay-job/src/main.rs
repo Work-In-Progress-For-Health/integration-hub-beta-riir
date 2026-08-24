@@ -82,7 +82,16 @@ async fn run() -> ExitCode {
         }
     };
 
-    ihb_telemetry::otel::configure(&telemetry_config());
+    // The outcome is not inspected here: this is a batch job, and §6.2
+    // makes a telemetry failure non-fatal, so there is nothing to branch on.
+    let _telemetry = ihb_telemetry::otel::configure(&telemetry_config());
+
+    // `spec/18-deployment.md` §4.3 — a configured CA bundle that cannot be
+    // used stops the service here, rather than becoming a TLS failure in
+    // whichever component happens to need it first.
+    if !ihb_tls::startup_check() {
+        return ExitCode::FAILURE;
+    }
     tracing::info!(
         batch_id = %config.batch_id,
         batch_size = config.batch_size,

@@ -11,12 +11,31 @@ resolver = "3"
 members = [
   "xtask",
   "crates/ihb-config",
+  "crates/ihb-tls",
   "crates/ihb-health",
   "crates/ihb-telemetry",
   "crates/ihb-runtime",
   "crates/ihb-fields",
   "crates/ihb-validation",
   "crates/ihb-bus",
+  "crates/hl7-server",
+  "crates/hl7-soap-server",
+  "crates/ihb-transformer",
+  "crates/ihb-sender",
+  "crates/ihb-sql",
+  "crates/buswatch",
+  "crates/message-store-service",
+  "crates/message-replay-job",
+  "crates/hl7-phw-transformer",
+  "crates/hl7-chemo-transformer",
+  "crates/hl7-pims-transformer",
+  "crates/hl7-sender",
+  "crates/soap-sender",
+  "crates/hl7-mock-receiver",
+  "crates/http-mock-receiver",
+  "crates/dashboard",
+  "crates/xml-fhir-proms-transformer",
+  "crates/ihb-e2e",
 ]
 
 [workspace.package]
@@ -36,38 +55,33 @@ publish = false
 # framing, SOAP envelopes, the v2 dictionary, and ER7 <-> v2.xml conversion
 # are all solved problems here rather than things to reimplement.
 #
-# They are path dependencies so a fix upstream is picked up immediately, with
-# a version alongside so publishing later is a one-line change per crate.
-# See plan.md §6.
+# They come from crates.io by exact version. They were path dependencies
+# until the container builds needed a build context that could reach them
+# (spec/18-deployment.md §2.4): a Dockerfile cannot copy from three levels
+# above the repository. The trade is that a local edit upstream now needs a
+# publish, or an uncommitted [patch.crates-io]. See plan.md §6.
 # ---------------------------------------------------------------------------
 
 [workspace.dependencies.er7]
-version = "0.1"
-path = "../../../git/er7-rust/er7-rust/er7"
+version = "0.1.2"
 
 [workspace.dependencies.hl7-2]
-version = "0.2"
-path = "../../../git/hl7-rust/hl7-rust/hl7-2"
+version = "0.2.3"
 
 [workspace.dependencies.hl7-2-mllp]
-version = "0.1"
-path = "../../../git/hl7-rust/hl7-rust/hl7-2-mllp"
+version = "0.1.3"
 
 [workspace.dependencies.hl7-2-soap]
-version = "0.1"
-path = "../../../git/hl7-rust/hl7-rust/hl7-2-soap"
+version = "0.1.1"
 
 [workspace.dependencies.hl7-2-from-er7-into-xml]
-version = "0.5"
-path = "../../../git/hl7-rust/hl7-rust/hl7-2-from-er7-into-xml"
+version = "0.6.0"
 
 [workspace.dependencies.hl7-2-from-xml-into-er7]
-version = "0.5"
-path = "../../../git/hl7-rust/hl7-rust/hl7-2-from-xml-into-er7"
+version = "0.6.0"
 
 [workspace.dependencies.hl7-2-from-xsd-into-json-dictionary]
-version = "0.1"
-path = "../../../git/hl7-rust/hl7-rust/hl7-2-from-xsd-into-json-dictionary"
+version = "0.1.1"
 
 # ---------------------------------------------------------------------------
 # Our own crates.
@@ -75,16 +89,26 @@ path = "../../../git/hl7-rust/hl7-rust/hl7-2-from-xsd-into-json-dictionary"
 
 [workspace.dependencies]
 ihb-config = { version = "0.1", path = "crates/ihb-config" }
+ihb-tls = { version = "0.1", path = "crates/ihb-tls" }
 ihb-health = { version = "0.1", path = "crates/ihb-health" }
 ihb-telemetry = { version = "0.1", path = "crates/ihb-telemetry" }
 ihb-runtime = { version = "0.1", path = "crates/ihb-runtime" }
 ihb-fields = { version = "0.1", path = "crates/ihb-fields" }
 ihb-validation = { version = "0.1", path = "crates/ihb-validation" }
 ihb-bus = { version = "0.1", path = "crates/ihb-bus" }
+ihb-transformer = { version = "0.1", path = "crates/ihb-transformer" }
+ihb-sender = { version = "0.1", path = "crates/ihb-sender" }
+ihb-sql = { version = "0.1", path = "crates/ihb-sql" }
+hl7-mock-receiver = { version = "0.1", path = "crates/hl7-mock-receiver" }
+hl7-sender = { version = "0.1", path = "crates/hl7-sender" }
+hl7-phw-transformer = { version = "0.1", path = "crates/hl7-phw-transformer" }
+hl7-server = { version = "0.1", path = "crates/hl7-server" }
 
 # --- runtime ---------------------------------------------------------------
 tokio = { version = "1", default-features = false }
-tokio-util = { version = "0.7", default-features = false }
+# `compat` bridges `tokio`'s IO traits to the `futures` ones `tiberius`
+# expects.
+tokio-util = { version = "0.7", default-features = false, features = ["compat"] }
 futures-util = { version = "0.3", default-features = false }
 
 # --- errors ----------------------------------------------------------------
@@ -97,6 +121,9 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["s
 opentelemetry = { version = "0.27", default-features = false, features = ["trace", "metrics"] }
 opentelemetry_sdk = { version = "0.27", default-features = false, features = ["trace", "metrics", "rt-tokio"] }
 opentelemetry-otlp = { version = "0.27", default-features = false, features = ["trace", "metrics", "grpc-tonic"] }
+# Bridges `tracing` spans into the OTel tracer, so `spec/04` §4.5 ids are
+# the real ones. 0.28 is the release that targets opentelemetry 0.27.
+tracing-opentelemetry = { version = "0.28", default-features = false }
 
 # --- Azure -----------------------------------------------------------------
 # `rustls` because spec/17 §8.2 forbids openssl; `unsecured` because the
@@ -104,16 +131,132 @@ opentelemetry-otlp = { version = "0.27", default-features = false, features = ["
 # `UseDevelopmentEmulator`. See spec/03-message-bus.md §8.1.1.
 azservicebus = { version = "0.25", default-features = false, features = ["rustls", "unsecured"] }
 
+# --- HTTP -----------------------------------------------------------------
+# The SOAP ingress is a public HTTP endpoint. Hand-rolling HTTP/1.1 parsing
+# in front of one is how request-smuggling bugs happen, so this is hyper,
+# with only the server half of it enabled.
+# `client` for the outbound Azure calls of spec/15-dashboard.md §4.6.
+hyper = { version = "1", default-features = false, features = ["server", "client", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio", "server", "client"] }
+http-body-util = "0.1"
+# TLS termination for `spec/08-hl7-soap-server.md` §7. `rustls` because
+# spec/17 §8.2 forbids openssl.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+# PEM parsing comes from  rather than :
+# the latter is archived and unmaintained (RUSTSEC-2025-0134), and its own
+# advisory says it is now a thin wrapper around this code.
+rustls-pki-types = { version = "1", features = ["std"] }
+
+# The Mozilla roots plus the `SSL_CERT_FILE` bundle of
+# spec/18-deployment.md §4, extracted from this workspace and published so
+# the rule -- additional, not replacing -- is stated once for everyone.
+# `ihb-tls` is now a facade over it that keeps the spec citations.
+rustls-extra-roots = "0.1"
+
+# The configuration reader of spec/02-configuration.md §1 and §10,
+# extracted from this workspace and published: blank-is-absent,
+# accumulate-every-problem and a secret that never prints are general
+# rules, not Integration Hub ones. `ihb-config` is now a facade over it.
+#
+# NOTE the one deliberate divergence: `env-reader`'s `bool_or` is strict,
+# where §1.5 wants the lopsided union of the Python's two readers. That is
+# `lenient_bool_or` upstream, and every call site here says so.
+env-reader = { version = "0.1", features = ["uuid"] }
+
+# The TCP liveness listener of spec/05-health-check.md and the cooperative
+# shutdown and retry schedule of spec/01 §1.3 and spec/03 §5.4, both
+# extracted from this workspace and published. `ihb-health` and
+# `ihb-runtime` are facades over them that keep the spec citations.
+tcp-health-check = "0.1"
+graceful-worker = "0.1"
+
+# The deny-by-default HL7 redaction of spec/04-observability.md §2,
+# extracted from this workspace and published. Its `routing_metadata`
+# policy is exactly §2.6's ten MSH fields, and reproduces the Python
+# capture in ihb-telemetry/tests/corpus byte for byte.
+hl7-2-redact = "0.1"
+
+# The Cosmos DB master-key signature of spec/15-dashboard.md §5.7 and the
+# KQL injection defence of §4.4, both extracted from this workspace and
+# published. The dashboard modules are now facades that keep the spec
+# citations and the operator-facing wording.
+cosmos-signature = "0.1"
+kql-sanitize = "0.1"
+
+# The Azure Communication Services access-key signature of
+# spec/15-dashboard.md §5.8.1, extracted and published. The same scheme
+# serves every ACS data-plane API, not just e-mail.
+acs-signature = "0.1"
+
+# The Entra ID token acquisition of spec/15-dashboard.md §4.1 and §4.6,
+# extracted and published. It performs no I/O -- the transport stays here,
+# because §4.6 exists precisely so this workspace has one HTTPS client.
+azure-token-lite = "0.1"
+
+# Cosmos DB key authentication signs each request with HMAC-SHA256 over a
+# canonical string (spec/15-dashboard.md §5.7). All three are already in the
+# tree through the rustls and `azservicebus` stacks; named here so the
+# dashboard's use of them is deliberate rather than incidental.
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+
+# --- Operations surfaces ---------------------------------------------------
+# `axum` for routing and `askama` for templates, per spec/14 §7.1 and
+# spec/15 §1. `askama` compiles its templates, so a broken one is a build
+# failure rather than a 500 an operator finds — which is why spec/14 §8.5
+# says there is no runtime template test to write.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query", "form", "json"] }
+askama = { version = "0.14", default-features = false, features = ["std", "derive", "urlencode"] }
+tower = { version = "0.5", default-features = false }
+
+# --- SQL -------------------------------------------------------------------
+# `tiberius` is a pure-Rust TDS client.
+#
+# **No TLS backend**, deliberately. `native-tls` is out because spec/17 §8.2
+# forbids openssl and spec/18 §2.3 depends on there being no system TLS
+# library to link against. `rustls` is out because `tiberius` 0.12.3 pins
+# `tokio-rustls` 0.24 -> `rustls` 0.21 -> `rustls-webpki` 0.101, which
+# carries three unfixed advisories (RUSTSEC-2026-0098, -0099, -0104) with no
+# patched release on that line — on the one connection in this estate that
+# carries full unredacted patient records.
+#
+# So this build cannot encrypt to SQL at all, and `SQL_ENCRYPT=Yes` is a
+# startup failure rather than a silent plaintext connection. See
+# spec/12-message-store.md §5.8 and tasks.md P6.6.
+#
+# `time` rather than `chrono`, so the workspace has one date library.
+tiberius = { version = "0.12", default-features = false, features = ["tds73", "time"] }
+
 # --- XSD validation --------------------------------------------------------
 # Two independent XML Schema validators, run side by side and compared. See
 # spec/06-validation.md §9 for why there are two rather than one.
 uppsala = "0.9"
-xsd-schema = "0.1"
+# A read-only XML reader for the WPAS payload of spec/16 §2.5. Already in
+# the tree through `xsd-schema`, and read-only by construction — the PROMs
+# transformer only ever walks a document it was handed.
+roxmltree = "0.19"
+xsd-schema = "0.1.4"
 
 # --- data ------------------------------------------------------------------
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-time = { version = "0.3", default-features = false, features = ["std", "formatting", "parsing", "macros"] }
+# `float_roundtrip` and `arbitrary_precision` per
+# spec/serde-json-float-roundtrip-arbitrary-precision/index.md:
+# `float_roundtrip` makes f64 -> JSON -> f64 identical to the input, and
+# `arbitrary_precision` makes JSON -> Number -> JSON identical to the input.
+#
+# Both matter here. `spec/03-message-bus.md` §6's store document is parsed,
+# held and re-emitted by `message-store-service`, and `spec/14-buswatch.md`
+# §5.4 re-renders one for a developer to read: a number that changed on the
+# way through would be a message that does not match what was sent.
+serde_json = { version = "1", features = ["float_roundtrip", "arbitrary_precision"] }
+# `Europe/London` for spec/15-dashboard.md §5.1.1. The alarm periods are a
+# wall-clock rule -- "Friday 17:00", "Monday 09:00" -- so BST and GMT have to
+# come from the zone rather than from a fixed offset, which would be an hour
+# wrong for half the year. `time-tz` carries an IANA snapshot and keeps
+# `time` as the one date library in this workspace.
+time-tz = { version = "2", features = ["db"] }
+time = { version = "0.3", default-features = false, features = ["std", "formatting", "parsing", "macros", "local-offset"] }
 uuid = { version = "1", default-features = false, features = ["v4", "std"] }
 
 # --- test support ----------------------------------------------------------
@@ -145,8 +288,10 @@ dbg_macro = "deny"
 # This workspace is not published; a missing `repository` key on a member is
 # not worth a build failure.
 cargo_common_metadata = "allow"
-# Path dependencies to the HL7 crates carry a version alongside, which this
-# lint reads as a publish hazard. It is not: see the note above.
+# Transitive dependencies legitimately resolve to two major versions of the
+# same crate in places this workspace does not control. Failing the build on
+# somebody else's dependency graph is not useful; `cargo deny` is where
+# duplicate and advisory policy actually lives.
 multiple_crate_versions = "allow"
 
 [profile.release]

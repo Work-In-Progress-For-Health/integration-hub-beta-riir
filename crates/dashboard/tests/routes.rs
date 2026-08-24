@@ -234,7 +234,8 @@ async fn every_route_answers_with_the_real_observatory_and_no_azure() {
     let config = Config::from_pairs::<[(&str, &str); 0], _, _>([]).unwrap();
     let app = App {
         state: Arc::new(AppState::new(
-            dashboard::azure::live::LiveObservatory::new(&config),
+            dashboard::azure::live::LiveObservatory::new(&config)
+                .expect("no CA bundle is configured in tests"),
             config,
         )),
     };

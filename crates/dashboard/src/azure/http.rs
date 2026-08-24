@@ -27,8 +27,8 @@ use hyper::{Request, Uri};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
+use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::rustls::pki_types::ServerName;
-use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 
 /// How long any single request may take.
 ///
@@ -96,30 +96,32 @@ impl std::fmt::Debug for HttpsClient {
     }
 }
 
-impl Default for HttpsClient {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl HttpsClient {
-    /// A client trusting the Mozilla root store (§4.7).
+    /// A client trusting the Mozilla root store, plus the corporate CA
+    /// bundle if one is configured (§4.7, `spec/18-deployment.md` §4.1).
     ///
     /// Certificate verification is not configurable here, deliberately.
     /// The one place this specification allows it to be turned off is the
     /// local Cosmos emulator (§5.6.1), and that is a separate decision made
     /// in the configuration rather than a knob on the transport.
-    #[must_use]
-    pub fn new() -> Self {
-        let roots = RootCertStore {
-            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-        };
-
+    ///
+    /// # Errors
+    ///
+    /// [`ihb_tls::TrustError`] if `SSL_CERT_FILE` names a bundle that
+    /// cannot be read or contains no usable certificate. This is fallible
+    /// rather than falling back to the default roots, because
+    /// `spec/18-deployment.md` §4.3 says exactly that: continuing with the
+    /// defaults turns a certificate problem into a handshake failure
+    /// somewhere else entirely.
+    ///
+    /// With no bundle configured — the laptop case of §1.2 — this cannot
+    /// fail.
+    pub fn new() -> Result<Self, ihb_tls::TrustError> {
         let tls = ClientConfig::builder()
-            .with_root_certificates(roots)
+            .with_root_certificates(ihb_tls::root_store()?)
             .with_no_client_auth();
 
-        Self { tls: Arc::new(tls) }
+        Ok(Self { tls: Arc::new(tls) })
     }
 
     /// `GET url` with a bearer token, parsed as JSON.
@@ -359,7 +361,7 @@ mod tests {
         // subscription. Sending one over plaintext because a URL said
         // `http://` would put it on the network in the clear, so a
         // misconfiguration has to fail rather than proceed.
-        let client = HttpsClient::new();
+        let client = HttpsClient::new().expect("no CA bundle is configured in tests");
 
         let error = client
             .get_json("http://management.azure.com/x", Some("a-token"))
@@ -372,7 +374,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_url_with_no_host_is_refused() {
-        let client = HttpsClient::new();
+        let client = HttpsClient::new().expect("no CA bundle is configured in tests");
 
         let error = client.get_json("not a url", None).await.unwrap_err();
 
@@ -384,7 +386,7 @@ mod tests {
         // §2.2.2 — a page that hangs is worse than one reporting unknown,
         // because nobody can tell it is broken. `.invalid` is reserved by
         // RFC 2606 and never resolves.
-        let client = HttpsClient::new();
+        let client = HttpsClient::new().expect("no CA bundle is configured in tests");
 
         let error = client
             .get_json("https://dashboard-test.invalid/x", None)

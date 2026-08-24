@@ -40,11 +40,14 @@ baseline to compare against. Both belong in CI on a schedule rather than on
 every push, and a crash found by either becomes a unit test in the gate.
 
 §1.0 The first line is `cargo xtask fmt-check`, **not** `cargo fmt --all`.
-`--all` reaches through this workspace's path dependencies and rewrites
-files in the `hl7-rust` and `er7-rust` checkouts beside it — separate
-repositories with their own formatting, which this workspace has no business
-editing. The task runs `cargo fmt -p <member>` once per member instead, and
-fails if its member list has drifted from the root manifest's.
+`--all` reaches beyond this workspace. When the HL7 crates were path
+dependencies it rewrote files in the `hl7-rust` and `er7-rust` checkouts
+beside it — separate repositories with their own formatting, which this
+workspace has no business editing. They now come from crates.io, so that
+particular damage is no longer possible, and the task is kept for the
+second reason: it runs `cargo fmt -p <member>` once per member and **fails
+if its member list has drifted from the root manifest's**. That is how a
+newly added crate gets noticed instead of sitting silently unformatted.
 
 §1.1 `cargo test` includes doc tests. A rustdoc example that does not
 compile is a failing test, which is the point of writing them.
@@ -363,6 +366,36 @@ asserting something about first delivery, with a number and no explanation.
 This is not hypothetical: it is what a cancelled CI run leaves behind, and
 `gate.yml` sets `cancel-in-progress` deliberately. Ids carry a per-run
 suffix, as correlation ids in the SQL-backed tests already do.
+
+§9.2.1d **A query that scopes a database assertion by prefix must scope it
+to *this* run.** `message-store-service`'s `a_batch_shares_one_stored_at`
+matched correlation ids with `LIKE 'store-test-stamp-0%'`, which matched
+every previous run's rows as well — so it failed on the second run against
+a container that had not been recreated.
+
+The same expression was also wrong in a way that made it **vacuous**: each
+id carries its own nanosecond stamp, so the prefix of `ids[0]` matched one
+row of a three-row batch. It asserted "one `StoredAt` across the batch"
+while looking at one row, and would have passed however the batch was
+stamped. Match the exact keys, and assert the **row count** as well as the
+property, so the second assertion cannot pass on an empty set.
+
+§9.2.1e A test that needs a container MUST check the container is there
+**before** it starts, and say so in the failure. The emulator suite had no
+such check: with the emulator stopped, the AMQP client retried a
+connection nobody was listening for and the run took **eight minutes**
+before failing — naming a test that was entirely healthy rather than the
+missing container.
+
+`require_emulator` in `crates/ihb-bus/tests/emulator.rs` does a two-second
+TCP connect first and fails with the `podman compose` line that fixes it.
+The suite now reports the real problem in about a second.
+
+A TCP connect proves the port is *open*, not that the broker is *ready* —
+the emulator accepts TCP roughly ten seconds before it will complete a
+SASL exchange, because it waits on SQL first. The guard deliberately does
+not try to cover that gap: it separates "not running" from "not ready", and
+those two need different messages.
 
 §9.2.1c These three rules exist because a test binary's own lock does
 **not** isolate across binaries — `cargo test` runs them concurrently, so

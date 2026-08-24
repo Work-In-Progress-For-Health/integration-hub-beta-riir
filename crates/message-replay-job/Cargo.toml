@@ -27,6 +27,7 @@ ihb-bus.workspace = true
 ihb-config.workspace = true
 ihb-sql.workspace = true
 ihb-telemetry.workspace = true
+ihb-tls.workspace = true
 thiserror.workspace = true
 tiberius.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "sync", "time"] }

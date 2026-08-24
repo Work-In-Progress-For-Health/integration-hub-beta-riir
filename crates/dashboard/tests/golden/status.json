@@ -1,0 +1,231 @@
+{
+  "alarm1_summary": {
+    "critical": 0,
+    "healthy": 0,
+    "suppressed": 0,
+    "total": 0,
+    "unknown": 0
+  },
+  "alarm2_summary": {
+    "critical": 0,
+    "healthy": 0,
+    "suppressed": 0,
+    "total": 0,
+    "unknown": 0
+  },
+  "alarm3_summary": {
+    "critical": 0,
+    "healthy": 0,
+    "suppressed": 0,
+    "total": 0,
+    "unknown": 0
+  },
+  "flows": [
+    {
+      "colour": "#3b82f6",
+      "destination": "MPI",
+      "health": "unknown",
+      "icon": "bi-heart-pulse",
+      "id": "phw-to-mpi",
+      "label": "PHW \u2192 MPI",
+      "post_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "pre_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "source": "PHW",
+      "source_port": 2575,
+      "subscriptions": [],
+      "topic": null,
+      "transformer": "PHW Transformer"
+    },
+    {
+      "colour": "#a855f7",
+      "destination": "MPI",
+      "health": "unknown",
+      "icon": "bi-activity",
+      "id": "paris-to-mpi",
+      "label": "Paris \u2192 MPI",
+      "post_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "pre_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "source": "Paris",
+      "source_port": 2577,
+      "subscriptions": [],
+      "topic": null,
+      "transformer": null
+    },
+    {
+      "colour": "#ec4899",
+      "destination": "MPI",
+      "health": "unknown",
+      "icon": "bi-radioactive",
+      "id": "mosaiq-to-mpi",
+      "label": "Mosaiq \u2192 MPI",
+      "post_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "pre_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "source": "Mosaiq",
+      "source_port": 2583,
+      "subscriptions": [],
+      "topic": null,
+      "transformer": null
+    },
+    {
+      "colour": "#06b6d4",
+      "destination": "MPI",
+      "health": "unknown",
+      "icon": "bi-capsule",
+      "id": "chemocare-to-mpi",
+      "label": "ChemoCare \u2192 MPI",
+      "post_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "pre_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "source": "ChemoCare",
+      "source_port": 2578,
+      "subscriptions": [],
+      "topic": null,
+      "transformer": "Chemo Transformer"
+    },
+    {
+      "colour": "#22c55e",
+      "destination": "MPI",
+      "health": "unknown",
+      "icon": "bi-clipboard2-pulse",
+      "id": "pims-to-mpi",
+      "label": "PIMS \u2192 MPI",
+      "post_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "pre_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "source": "PIMS",
+      "source_port": 2579,
+      "subscriptions": [],
+      "topic": null,
+      "transformer": "PIMS Transformer"
+    },
+    {
+      "colour": "#f97316",
+      "destination": "MPI",
+      "health": "unknown",
+      "icon": "bi-hospital",
+      "id": "wds-to-mpi",
+      "label": "WDS \u2192 MPI",
+      "post_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "pre_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "source": "WDS",
+      "source_port": 2582,
+      "subscriptions": [],
+      "topic": null,
+      "transformer": null
+    },
+    {
+      "colour": "#f59e0b",
+      "destination": "Downstream Systems",
+      "health": "unknown",
+      "icon": "bi-broadcast",
+      "id": "mpi-outbound",
+      "label": "MPI Outbound",
+      "post_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "pre_queue": {
+        "active": 0,
+        "dlq": 0,
+        "exists": false,
+        "health": "healthy",
+        "name": null
+      },
+      "source": "MPI",
+      "source_port": 2580,
+      "subscriptions": [],
+      "topic": null,
+      "transformer": null
+    }
+  ],
+  "kpis": {
+    "exception_count_1h": 0,
+    "flows_critical": 0,
+    "flows_healthy": 0,
+    "flows_warning": 0,
+    "total_active_messages": 0,
+    "total_dlq_messages": 0
+  },
+  "queues": [],
+  "recent_exceptions": [],
+  "refreshed_at": "2026-08-23T14:34:49.128984+01:00",
+  "retry_delay_kpis": {
+    "flows_over_1m": 0,
+    "flows_reporting": 0
+  },
+  "retry_delays": [],
+  "system_health": "unknown"
+}
