@@ -45,10 +45,6 @@ publish = false
 version = "0.1"
 path = "../../../git/er7-rust/er7-rust/er7"
 
-[workspace.dependencies.er7-redact]
-version = "0.1"
-path = "../../../git/er7-rust/er7-rust/er7-redact"
-
 [workspace.dependencies.hl7-2]
 version = "0.2"
 path = "../../../git/hl7-rust/hl7-rust/hl7-2"
