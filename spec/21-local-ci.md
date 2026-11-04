@@ -145,6 +145,23 @@ therefore had no hosted coverage. The fix is to start the user socket
 that ships on the runner; either MUST be proven by a hosted run before this
 clause is closed.
 
+§8.1.1 **Getting past the socket exposed two more faults**, found by pushing
+and reading the next failure rather than by guessing, on 2026-11-04:
+
+1. The job then died with `No space left on device`: the stack's images and
+   an all-features build of the workspace outgrow a standard runner's disk.
+   The job now removes the large preinstalled toolchains it does not use.
+2. `cargo test --workspace --all-features` also enables `ihb-e2e`'s `compose`
+   feature, whose tests each tear down and bring up a whole Compose profile.
+   Run in parallel, or beside the stack the job already started, they race
+   each other's `compose down`. They are tier 3 (§2.2) and are excluded from
+   the parallel emulator tier; the in-process chain
+   (`cargo test -p ihb-e2e --features emulator`) runs on its own.
+
+Every other suite ran green on the runner in that run: the `ihb-bus`
+emulator tests (70 s), the SQL Server tests and the rest. That is the first
+time the emulator tier has had a hosted record.
+
 §8.2 The three gate lists of §1.2 disagree. Closed when `gate.yml` and
 `AGENTS.md` call `cargo xtask gate` and `17-testing-and-quality.md` §1 points
 here.

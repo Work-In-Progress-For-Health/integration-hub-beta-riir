@@ -200,10 +200,26 @@ jobs:
       # a lock on the shared non-session queue), so `--test-threads=1` is
       # deliberately NOT passed here: it would hide exactly the contention
       # that rule exists to prevent.
+      #
+      # `ihb-e2e` is excluded here, and run separately below. Its `compose`
+      # feature (switched on by --all-features) makes each test tear down and
+      # bring up a whole Compose profile on the one project, so two of them
+      # in parallel, or one beside the stack this job already started, race
+      # each other's `compose down` and fail (the first run that got this far
+      # failed exactly so). They are one-at-a-time by design (CLAUDE.md;
+      # spec/21 §2.2) and belong to tier 3, not to this parallel tier.
       - name: Emulator-backed tests
         env:
           MSSQL_SA_PASSWORD: ${{ secrets.MSSQL_SA_PASSWORD || 'CI-only-Passw0rd!' }}
-        run: cargo test --workspace --all-features
+        run: cargo test --workspace --all-features --exclude ihb-e2e
+
+      # The in-process chain: real services in this process against the
+      # emulator, no Compose profile of its own, so it is safe beside the
+      # stack above.
+      - name: In-process end-to-end chain
+        env:
+          MSSQL_SA_PASSWORD: ${{ secrets.MSSQL_SA_PASSWORD || 'CI-only-Passw0rd!' }}
+        run: cargo test -p ihb-e2e --features emulator
 
       - name: Stack logs on failure
         if: failure()
