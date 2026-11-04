@@ -43,7 +43,14 @@ pub const DEFAULT_DLQ_WARNING: u64 = 1;
 pub const DEFAULT_COSMOS_DATABASE: &str = "integration-hub";
 
 /// `COSMOS_CONTAINER` (§9.2).
-pub const DEFAULT_COSMOS_CONTAINER: &str = "alarms";
+///
+/// **`dashboard`** since upstream `78f2d23` (`spec/15-dashboard.md` §10.1.1):
+/// the container holds everything the dashboard owns, not only alarms.
+/// It was `alarms`.
+pub const DEFAULT_COSMOS_CONTAINER: &str = "dashboard";
+
+/// `CONTACT_RETENTION_DAYS` (`spec/15-dashboard.md` §10.3.4).
+pub const DEFAULT_CONTACT_RETENTION_DAYS: u32 = 90;
 
 /// How long `/api/status` is cached by default, in seconds (§2.2.1).
 pub const DEFAULT_API_CACHE_TTL: u64 = 30;
@@ -249,6 +256,9 @@ pub struct Config {
     pub api_cache_ttl: std::time::Duration,
     /// `DEFAULT_LANGUAGE` (§6).
     pub default_language: String,
+    /// `CONTACT_RETENTION_DAYS` — how long a soft-deleted contact is kept
+    /// before it is purged (§10.3.4).
+    pub contact_retention_days: u32,
     /// `FLASK_SECRET_KEY`, kept under its Python name so a deployment's
     /// existing secret keeps working (§9.2).
     ///
@@ -383,6 +393,8 @@ impl Config {
                 reader.integer_or("API_CACHE_TTL", DEFAULT_API_CACHE_TTL),
             ),
             default_language: reader.string_or("DEFAULT_LANGUAGE", "en"),
+            contact_retention_days: reader
+                .integer_or("CONTACT_RETENTION_DAYS", DEFAULT_CONTACT_RETENTION_DAYS),
             session_key: reader.optional_secret("FLASK_SECRET_KEY"),
             // §1.3 — on by default, and the deviation from the Python is
             // that the Python has no setting because it never redacts.
@@ -498,7 +510,9 @@ mod tests {
         let config = with(&[]).unwrap();
 
         assert_eq!(config.cosmos_database, "integration-hub");
-        assert_eq!(config.cosmos_container, "alarms");
+        // §10.1.1 — renamed from `alarms` upstream (78f2d23). Reading the
+        // old name against a renamed container is a 404 on every request.
+        assert_eq!(config.cosmos_container, "dashboard");
     }
 
     #[test]
@@ -515,6 +529,15 @@ mod tests {
     fn the_cache_ttl_is_configurable_and_defaults_to_thirty_seconds() {
         // §2.2.1 and §9.2's `API_CACHE_TTL`.
         assert_eq!(with(&[]).unwrap().api_cache_ttl.as_secs(), 30);
+
+        // §10.3.4 -- the retention of a soft-deleted contact.
+        assert_eq!(with(&[]).unwrap().contact_retention_days, 90);
+        assert_eq!(
+            with(&[("CONTACT_RETENTION_DAYS", "7")])
+                .unwrap()
+                .contact_retention_days,
+            7
+        );
         assert_eq!(
             with(&[("API_CACHE_TTL", "5")])
                 .unwrap()

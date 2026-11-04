@@ -5,8 +5,8 @@
 //! # This is the test that matters
 //!
 //! Everything else in this crate checks a piece. This checks the whole
-//! thing against the output of the service being replaced, for all eleven
-//! fixtures, with the deterministic UUID factory of §4.4.
+//! thing against the output of the service being replaced, for every
+//! fixture (nineteen since upstream #346, #370 and #423 — `§10`), with the deterministic UUID factory of §4.4.
 //!
 //! The comparison is **canonical**: object key order is not significant in
 //! JSON and the corpus was captured with sorted keys, so `serde_json::Value`
@@ -31,7 +31,14 @@ fn goldens() -> BTreeMap<String, serde_json::Value> {
 
 /// Transform a fixture the way the corpus was captured.
 fn run(xml: &str) -> Result<serde_json::Value, String> {
-    transform(xml, &SequentialUuids::new(), &StaticResolver, &|_| None).map_err(|e| e.to_string())
+    transform(
+        xml,
+        &SequentialUuids::new(),
+        &StaticResolver,
+        &|_| None,
+        None,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[test]
@@ -53,7 +60,7 @@ fn every_fixture_matches_the_pythons_bundle() {
         compared += 1;
     }
 
-    assert_eq!(compared, 10, "ten routable fixtures");
+    assert_eq!(compared, 18, "eighteen routable fixtures");
 }
 
 #[test]
@@ -70,7 +77,13 @@ fn the_unroutable_fixture_fails_the_way_the_python_failed() {
     for code in [
         "REFERRAL",
         "SURGERY",
+        "SURGERY-PROC",
+        "SURGERY-PERF",
+        "SURGERY-DN",
         "PREOP",
+        "PREOP-AS",
+        "PREOP-VIS",
+        "PREOP-AR",
         "INPATIENT",
         "CANCELLED",
         "PREREAD",

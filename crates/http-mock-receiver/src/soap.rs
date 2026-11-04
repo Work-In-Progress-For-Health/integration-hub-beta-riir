@@ -13,10 +13,12 @@
 /// SOAP 1.1's envelope namespace.
 pub const SOAP_11: &str = "http://schemas.xmlsoap.org/soap/envelope/";
 
-/// SOAP 1.2's.
+/// SOAP 1.2's envelope namespace; its presence anywhere in a body selects
+/// [`Version::OneTwo`].
 pub const SOAP_12: &str = "http://www.w3.org/2003/05/soap-envelope";
 
-/// The element names §3.4 looks for first.
+/// The element names §3.4 looks for first, in priority order: the first
+/// one with non-blank text wins, whichever appears earlier in the body.
 pub const PAYLOAD_ELEMENTS: [&str; 6] = [
     "hl7Message",
     "HL7Message",
@@ -29,7 +31,8 @@ pub const PAYLOAD_ELEMENTS: [&str; 6] = [
 /// When no control id can be read (§3.5).
 pub const UNKNOWN_CONTROL_ID: &str = "UNKNOWN";
 
-/// Which SOAP version a request is in.
+/// Which SOAP version a request is in, and so which namespace, content
+/// type and fault shape the reply uses (§3.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Version {
     /// SOAP 1.1.
@@ -135,7 +138,11 @@ pub fn extract_payload(body: &str) -> Option<String> {
     None
 }
 
-/// The text of the first element with this local name.
+/// The text of the first element with this local name, up to the next `<`.
+///
+/// Returns only text before any child element, which is all an HL7 payload
+/// element holds. Hand-rolled because the mock must work on bodies that are
+/// not well-formed (§3.2).
 fn element_text<'a>(body: &'a str, name: &str) -> Option<&'a str> {
     let mut rest = body;
 
@@ -209,6 +216,9 @@ pub fn control_id(er7: &str) -> String {
 }
 
 /// The success envelope (§3.6).
+///
+/// `control_id` is XML-escaped here; the caller passes it raw, since it came
+/// from an untrusted message.
 #[must_use]
 pub fn success(version: Version, control_id: &str) -> String {
     format!(
@@ -227,7 +237,8 @@ pub fn success(version: Version, control_id: &str) -> String {
     )
 }
 
-/// The fault envelope (§3.7).
+/// The fault envelope (§3.7). `reason` is XML-escaped and must not include
+/// message content, which would put patient data in a response body.
 ///
 /// In the detected version's namespace, so `soap-sender`'s evaluation
 /// (`spec/10-senders.md` §4.4, row 2) rejects it — which is what a test

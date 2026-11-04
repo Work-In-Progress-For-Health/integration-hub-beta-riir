@@ -3,7 +3,8 @@
 //! Implements `spec/11-mock-receivers.md` §2.
 //!
 //! A stand-in for a downstream system: it answers MLLP, forwards what it is
-//! given, and rejects anything containing the word `fail` (§1.1).
+//! given, and answers `AE` to anything containing `fail` and `AR` to anything
+//! containing `reject`, so a test can drive either unhappy path (§1.1).
 //!
 //! # It runs with no broker
 //!

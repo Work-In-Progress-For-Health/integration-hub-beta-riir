@@ -9,6 +9,13 @@
 //! at a message that has already gone wrong somewhere, so the body is the
 //! *least* likely thing in the estate to be well formed. Every function
 //! here falls back to [`Body::Raw`] rather than returning an error.
+//!
+//! # Escaping is the template's job
+//!
+//! §7.4: a body is attacker-influenced text from an upstream clinical
+//! system. Nothing here escapes it, and nothing here marks it safe; the
+//! askama templates autoescape every value they print, and none uses a
+//! `safe` filter.
 
 /// How a body is shown.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,6 +166,9 @@ pub fn render(body: &str) -> Body {
 }
 
 /// A body as the message-store document, if it is one.
+///
+/// `None` (so the caller falls through to ER7 or raw) for invalid JSON, a
+/// non-object, or an object missing either key.
 fn as_store_event(body: &str) -> Option<Body> {
     let document: serde_json::Value = serde_json::from_str(body).ok()?;
 
@@ -210,7 +220,9 @@ fn as_er7(body: &str) -> Option<Vec<Segment>> {
     (!segments.is_empty()).then_some(segments)
 }
 
-/// Whether text opens with something shaped like a segment header.
+/// Whether text opens with something shaped like a segment header: three
+/// ASCII alphanumerics (local segments such as `Z01` are not all letters)
+/// then `|`.
 fn looks_like_a_segment(text: &str) -> bool {
     let mut characters = text.chars();
     let name: String = characters.by_ref().take(3).collect();

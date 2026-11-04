@@ -36,6 +36,8 @@ like it belongs in all three, it belongs in the runtime.
 | --- | --- |
 | `hl7-server` | MLLP ingress, one deployment per flow |
 | `hl7-soap-server` | SOAP/HTTP ingress, for the LIMS flow |
+| `hl7-rest-server` | REST ingress: JSON carrying ER7 or v2.xml, answered with an HL7 ACK; RISP fan-out. Also the library `rest-server` runs for `PIPELINE=hl7` |
+| `rest-server` | One image, `PIPELINE=generic` (SOAP or plain XML) or `hl7` |
 | `hl7-phw-transformer`, `hl7-chemo-transformer`, `hl7-pims-transformer` | PHW, ChemoCare, PIMS → MPI |
 | `xml-fhir-proms-transformer` | WPAS XML → FHIR R4B PROMs bundles |
 | `hl7-sender` | MLLP egress; also builds `hl7-subscription-sender` |
@@ -44,7 +46,10 @@ like it belongs in all three, it belongs in the runtime.
 | `message-replay-job` | Replays stored messages onto the bus |
 | `hl7-mock-receiver`, `http-mock-receiver` | Test doubles |
 | `buswatch` | Developer tool: browse queues and messages |
+| `ultra7` | Developer tool: send synthetic HL7/XML/JSON test messages over MLLP, REST or SOAP, repeating with one field changing. Terminal port of the Tk GUI (`spec/ultra7-test-message-sender.md`); in no image |
+| `integration-hub-tester` | Developer tool: run one message through one component's real library code (transformers, servers, senders) with no Service Bus, and show the result. Terminal port of the Tk "Component Tester" (`spec/integration-hub-tester-component-preview.md`); in no image |
 | `dashboard` | Operations dashboard: flow health, alarms, e-mail |
+| `lookup-service` | Reference-data lookup service for transformers: keyed tables over HTTP, CSV upload, GUI. Phase 1, not production ready; read-only seed store only (`spec/20-lookup-service.md`) |
 | `ihb-e2e` | Tests only — the whole chain, in process and in Compose |
 
 ---

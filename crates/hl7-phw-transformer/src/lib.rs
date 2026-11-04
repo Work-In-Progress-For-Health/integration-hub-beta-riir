@@ -4,6 +4,9 @@
 //!
 //! Implements `spec/09-transformers.md` §3.
 //!
+//! Where it fits: one hop between the `hl7-server` ingress queue and the MPI
+//! egress queue, run by [`ihb_transformer::main_loop::run`].
+//!
 //! The lightest of the three: it copies the message and normalises two
 //! timestamps. Both normalisations are reported in the audit text, which is
 //! the only way an operator can tell that a message reaching MPI is not
@@ -19,14 +22,19 @@ use crate::datetime::{date_of_death, normalise};
 
 /// Segments this transformer maps by name; everything else is copied in
 /// source order (`spec/09-transformers.md` §3).
+///
+/// Also the order of the output's first three segments (see `skeleton`).
 const HANDLED: [&str; 3] = ["MSH", "EVN", "PID"];
 
 /// A timestamp that was rewritten, for the audit text of §3.5.
+///
+/// Holds timestamps only (message time, date of death), never a name or
+/// identifier, so the audit text built from it is safe to log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rewritten {
-    /// As it arrived.
+    /// The value as it arrived, kept verbatim for the audit text.
     pub from: String,
-    /// As it was forwarded.
+    /// The value as it was forwarded to MPI.
     pub to: String,
 }
 
@@ -39,20 +47,24 @@ pub struct Rewritten {
 /// moment two messages are ever in flight together.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Applied {
-    /// `MSH-7.1`, per §3.4.
+    /// `MSH-7.1`, per §3.4; `None` when it was absent in the source.
     pub datetime: Option<Rewritten>,
-    /// `PID-29.1`, per §3.6.
+    /// `PID-29.1`, per §3.6; `None` when the source was blank.
     pub date_of_death: Option<Rewritten>,
 }
 
 impl Applied {
-    /// Whether either transformation ran.
+    /// Whether either transformation ran; the audit text switches to the
+    /// §3.5 form when it did.
     #[must_use]
     pub const fn any(&self) -> bool {
         self.datetime.is_some() || self.date_of_death.is_some()
     }
 
     /// The audit text of §3.5, or `None` when neither ran.
+    ///
+    /// Details are joined by `"; "`, message time first, then date of death.
+    /// Operators match on this wording.
     #[must_use]
     pub fn audit_text(&self) -> Option<String> {
         if !self.any() {
@@ -261,7 +273,7 @@ fn skeleton(source: &Message) -> String {
         .join("\r")
 }
 
-/// Whether the message carries a segment with this name.
+/// Whether the message carries a segment with this name (any position).
 fn has_segment(message: &Message, name: &str) -> bool {
     message.segments().any(|segment| segment.name == name)
 }
@@ -289,7 +301,8 @@ fn copy_segment(source: &Message, target: &mut Message, name: &str) -> Result<()
 }
 
 /// Copy every segment this transformer does not map by name, in source
-/// order.
+/// order. Never fails: a copy error is logged as a warning (§4.6.1) and the
+/// segment is skipped, because the required mapping has already completed.
 fn copy_other_segments(source: &Message, target: &mut Message) {
     for segment in source.segments() {
         let name = segment.name.clone();

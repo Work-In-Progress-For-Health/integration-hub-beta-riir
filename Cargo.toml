@@ -35,7 +35,17 @@ members = [
   "crates/http-mock-receiver",
   "crates/dashboard",
   "crates/xml-fhir-proms-transformer",
+  "crates/hl7-wds-transformer",
+  "crates/hl7-lims-wrrs-transformer",
+  "crates/db-sender",
+  "crates/wrds-service",
+  "crates/hl7-core-reference-transformer",
+  "crates/hl7-rest-server",
+  "crates/rest-server",
+  "crates/lookup-service",
+  "crates/ultra7",
   "crates/ihb-e2e",
+  "crates/integration-hub-tester",
 ]
 
 [workspace.package]
@@ -98,11 +108,13 @@ ihb-validation = { version = "0.1", path = "crates/ihb-validation" }
 ihb-bus = { version = "0.1", path = "crates/ihb-bus" }
 ihb-transformer = { version = "0.1", path = "crates/ihb-transformer" }
 ihb-sender = { version = "0.1", path = "crates/ihb-sender" }
+wrds-service = { version = "0.1", path = "crates/wrds-service" }
 ihb-sql = { version = "0.1", path = "crates/ihb-sql" }
 hl7-mock-receiver = { version = "0.1", path = "crates/hl7-mock-receiver" }
 hl7-sender = { version = "0.1", path = "crates/hl7-sender" }
 hl7-phw-transformer = { version = "0.1", path = "crates/hl7-phw-transformer" }
 hl7-server = { version = "0.1", path = "crates/hl7-server" }
+hl7-rest-server = { version = "0.1", path = "crates/hl7-rest-server" }
 
 # --- runtime ---------------------------------------------------------------
 tokio = { version = "1", default-features = false }
@@ -200,6 +212,11 @@ azure-token-lite = "0.1"
 hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
+# RS256 verification of the lookup service's Entra bearer tokens
+# (spec/20-lookup-service.md §12.2) and its CSRF token entropy. Already in the
+# tree: it is the crypto provider `tokio-rustls` is built with, so naming it
+# adds no new code to the build.
+ring = "0.17"
 
 # --- Operations surfaces ---------------------------------------------------
 # `axum` for routing and `askama` for templates, per spec/14 §7.1 and

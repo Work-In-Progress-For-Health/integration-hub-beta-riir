@@ -13,8 +13,17 @@
 
 use std::process::ExitCode;
 
-use hl7_pims_transformer::Pims;
+use std::sync::Arc;
 
+use hl7_pims_transformer::PimsTransformer;
+use hl7_pims_transformer::reference_data::{LookupClient, ReferenceDataConfig};
+
+/// Build the reference-data client from the environment (§5.10.4), then run
+/// the shared receive loop around [`PimsTransformer`].
+///
+/// A missing `REFERENCE_DATA_API_BASE_URL` does not stop start-up: it fails
+/// the first lookup instead, so a flow whose messages never carry the coded
+/// fields still runs (see `ReferenceDataConfig::base_url`).
 fn main() -> ExitCode {
     // Before Tokio spawns any thread; see `ihb_fields::timestamp`.
     ihb_fields::timestamp::capture_local_offset();
@@ -27,8 +36,26 @@ fn main() -> ExitCode {
         }
     };
 
+    // §5.10.5. Read before the loop starts so a bad setting stops the
+    // service with every problem listed, like the loop's own configuration.
+    let config = match ReferenceDataConfig::from_env() {
+        Ok(config) => config,
+        Err(errors) => {
+            eprintln!("hl7-pims-transformer: configuration is not usable:\n{errors}");
+            return ExitCode::FAILURE;
+        }
+    };
+    // `spec/18-deployment.md` §4.3: an unusable CA bundle is fatal here too.
+    let client = match LookupClient::new(config) {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("hl7-pims-transformer: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     runtime.block_on(ihb_transformer::main_loop::run(
-        Pims,
+        PimsTransformer::new(Arc::new(client)),
         "hl7-pims-transformer",
     ))
 }

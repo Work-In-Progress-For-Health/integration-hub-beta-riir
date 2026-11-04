@@ -17,6 +17,10 @@ path = "src/lib.rs"
 name = "hl7-mock-receiver"
 path = "src/main.rs"
 
+[[bin]]
+name = "hl7-topic-mock-receiver"
+path = "src/bin/hl7-topic-mock-receiver.rs"
+
 [dependencies]
 hl7-2.workspace = true
 hl7-2-mllp.workspace = true

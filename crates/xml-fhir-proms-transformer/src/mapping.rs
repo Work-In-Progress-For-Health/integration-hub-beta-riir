@@ -27,6 +27,9 @@ const DATE_ONLY: [&[BorrowedFormatItem<'_>]; 4] = [
 ];
 
 /// Date-and-time formats, tried in order (§6.1.2).
+///
+/// The first format that parses wins. No zone is parsed: a value is taken as
+/// UTC (see `render`).
 const DATE_TIME: [&[BorrowedFormatItem<'_>]; 7] = [
     format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]"),
     format_description!("[year]-[month]-[day] [hour]:[minute]:[second]"),
@@ -140,7 +143,7 @@ pub fn to_fhir_date(raw: &str) -> Option<String> {
     None
 }
 
-/// A date as FHIR spells it.
+/// A date as FHIR spells it: zero-padded `YYYY-MM-DD`.
 fn iso_date(date: Date) -> String {
     format!(
         "{:04}-{:02}-{:02}",
@@ -150,7 +153,8 @@ fn iso_date(date: Date) -> String {
     )
 }
 
-/// A datetime as FHIR spells it, always UTC.
+/// A datetime as FHIR spells it: `YYYY-MM-DDThh:mm:ssZ`. The `Z` is asserted,
+/// not converted, because the source carries no zone (§6.1.2).
 fn render(at: OffsetDateTime) -> String {
     format!(
         "{}T{:02}:{:02}:{:02}Z",
@@ -164,7 +168,7 @@ fn render(at: OffsetDateTime) -> String {
 /// A person's name, split for FHIR (§6.1.3).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PersonName {
-    /// Recognised titles.
+    /// Recognised titles, in source order (§6.1.3's list).
     pub prefixes: Vec<String>,
     /// Given names.
     pub given: Vec<String>,
@@ -173,7 +177,8 @@ pub struct PersonName {
 }
 
 impl PersonName {
-    /// Whether anything usable was found.
+    /// Whether anything usable was found; an empty name is omitted from the
+    /// resource rather than emitted as `{}` (§6.0.1).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.prefixes.is_empty() && self.given.is_empty() && self.family.is_empty()

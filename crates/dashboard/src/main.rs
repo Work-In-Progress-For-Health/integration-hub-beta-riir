@@ -15,7 +15,10 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use dashboard::alarm::cosmos_store::{CosmosStore, Credential};
+use dashboard::azure::http::HttpsClient;
 use dashboard::azure::live::LiveObservatory;
+use dashboard::azure::token::TokenSource;
 use dashboard::config::{Config, CosmosMode};
 use dashboard::web::{AppState, router};
 use ihb_runtime::shutdown::Shutdown;
@@ -114,8 +117,49 @@ async fn run() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let state = Arc::new(AppState::new(azure, config));
+    // §10.1: the store holds alarm state, pauses, contacts, sources and
+    // network test history. Until this was wired, every one of them was
+    // `Disabled` in a real deployment whatever `COSMOS_ENDPOINT` said.
+    match config.cosmos.clone() {
+        CosmosMode::Disabled => serve(Arc::new(AppState::new(azure, config)), listen).await,
+        mode => {
+            let client = match HttpsClient::new() {
+                Ok(client) => client,
+                Err(error) => {
+                    tracing::error!(%error, "could not build the HTTPS client for Cosmos");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let (endpoint, credential) = match mode {
+                CosmosMode::Key { endpoint, key } => (endpoint, Credential::Key(key)),
+                CosmosMode::Rbac { endpoint } => (
+                    endpoint,
+                    Credential::Rbac(TokenSource::new(config.auth.clone(), client.clone())),
+                ),
+                CosmosMode::Disabled => return ExitCode::FAILURE,
+            };
+            let store = CosmosStore::new(
+                endpoint,
+                config.cosmos_database.clone(),
+                config.cosmos_container.clone(),
+                credential,
+                client,
+            );
+            serve(
+                Arc::new(AppState::with_alarms(azure, store, config)),
+                listen,
+            )
+            .await
+        }
+    }
+}
 
+/// Bind, serve and shut down.
+async fn serve<O, S>(state: Arc<AppState<O, S>>, listen: std::net::SocketAddr) -> ExitCode
+where
+    O: dashboard::observe::Observatory,
+    S: dashboard::alarm::store::AlarmStore,
+{
     let shutdown = Shutdown::new();
     shutdown.listen_for_signals();
 

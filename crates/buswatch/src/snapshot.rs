@@ -215,7 +215,10 @@ mod tests {
             cache.insert(Snapshot::failed(queue, "now", "x"));
         }
 
-        assert!(cache.needing_refresh(&queues(), None, false).is_empty());
+        assert_eq!(
+            cache.needing_refresh(&queues(), None, false),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -239,7 +242,7 @@ mod tests {
         let snapshot = Snapshot::failed("q", "now", "ConnectionsQuotaExceeded");
 
         assert!(!snapshot.is_ok());
-        assert!(snapshot.messages.is_empty());
+        assert_eq!(snapshot.messages, Vec::new());
         assert!(
             snapshot.error.as_ref().unwrap().hint.is_some(),
             "and the quota hint came with it"

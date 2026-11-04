@@ -1,11 +1,10 @@
-//! Routing properties for the MPI outbound flow.
+//! Routing properties: the MPI table, the standard set, and each flow's mix.
 //!
-//! Implements `spec/03-message-bus.md` §4 (the MPI table) and
-//! `spec/07-hl7-server.md` §6.2.
+//! Implements `spec/03-message-bus.md` §4 and `spec/07-hl7-server.md` §6.2.
 //!
-//! These five properties ride on the Service Bus message so that a
-//! subscription can filter on them without opening the payload. They are
-//! added by this server, for the `mpi` flow only, and by nothing else.
+//! These properties ride on the Service Bus message so that a subscription
+//! can filter on them without opening the payload. [`flow_properties`] says
+//! which flow gets which; [`mpi_properties`] is the five-key MPI table.
 //!
 //! # Why a failure here is not fatal
 //!
@@ -36,6 +35,82 @@ pub const DATE_DEATH: &str = "DateDeath";
 
 /// `PID-30`, the death indicator.
 pub const REASON_DEATH: &str = "ReasonDeath";
+
+/// `MSH-3`, the sending application.
+pub const SENDING_APPLICATION: &str = "SendingApplication";
+
+/// `MSH-9.2` again, under the name Mosaiq's subscription filters use.
+pub const TRIGGER_EVENT: &str = "TriggerEvent";
+
+/// The standard routing set (`spec/03-message-bus.md` §4, `d9cc216`).
+///
+/// Every key is always present, empty when the message cannot supply it, for
+/// the same reason as [`mpi_properties`].
+#[must_use]
+pub fn standard_properties(message: &Message) -> Properties {
+    let mut properties = Properties::new();
+
+    properties.insert(SENDING_APPLICATION.to_string(), read(message, "MSH-3"));
+    properties.insert(TRIGGER_EVENT.to_string(), read(message, "MSH-9.2"));
+    properties.insert(MESSAGE_TYPE.to_string(), read(message, "MSH-9.2"));
+    properties.insert(
+        UPDATE_SOURCES.to_string(),
+        pipe_wrap(&authority_codes(message, 2)),
+    );
+    properties.insert(
+        ASSIGNING_AUTHORITIES.to_string(),
+        pipe_wrap(&authority_codes(message, 3)),
+    );
+
+    properties
+}
+
+/// Mosaiq's two properties and nothing else (`spec/07-hl7-server.md` §6.2
+/// item 3).
+#[must_use]
+pub fn mosaiq_properties(message: &Message) -> Properties {
+    let mut properties = Properties::new();
+
+    properties.insert(SENDING_APPLICATION.to_string(), read(message, "MSH-3"));
+    properties.insert(TRIGGER_EVENT.to_string(), read(message, "MSH-9.2"));
+
+    properties
+}
+
+/// The routing properties a flow adds to the tracking ones
+/// (`spec/07-hl7-server.md` §6.2).
+///
+/// `flow` is the raw `HL7_VALIDATION_FLOW`: `None` is a server with no flow
+/// configured, which still gets the standard set, as it does upstream.
+///
+/// # Examples
+///
+/// ```
+/// use hl7_server::routing::{flow_properties, TRIGGER_EVENT};
+///
+/// let message = ihb_validation::parse(
+///     "MSH|^~\\&|285|285|100|100|20250505232332||ADT^A28^ADT_A05|M1|P|2.5",
+/// )?;
+///
+/// let mosaiq = flow_properties(Some("mosaiq"), &message);
+/// assert_eq!(mosaiq.len(), 2);
+/// assert_eq!(mosaiq[TRIGGER_EVENT], "A28");
+/// # Ok::<(), ihb_validation::ValidationError>(())
+/// ```
+#[must_use]
+pub fn flow_properties(flow: Option<&str>, message: &Message) -> Properties {
+    // Mosaiq skips the standard set rather than overriding it: the extra
+    // keys would reach a subscription filter that was written without them.
+    if flow == Some("mosaiq") {
+        return mosaiq_properties(message);
+    }
+
+    let mut properties = standard_properties(message);
+    if matches!(flow, Some("mpi" | "wds")) {
+        properties.extend(mpi_properties(message));
+    }
+    properties
+}
 
 /// Build the MPI routing properties.
 ///
@@ -104,6 +179,58 @@ mod tests {
 
     fn parse(er7: &str) -> Message {
         ihb_validation::parse(er7).expect("the test message parses")
+    }
+
+    const A28: &str = "MSH|^~\\&|169|169|100|100|20250505232332||ADT^A28^ADT_A05|M1|P|2.5\r\
+                       PID|1|8888888^^^169^PI|4444444444^^^NHS^NH";
+
+    #[test]
+    fn mosaiq_gets_its_two_and_nothing_else() {
+        // spec/07-hl7-server.md §6.2 item 3: no MessageType, no UpdateSources.
+        let properties = flow_properties(Some("mosaiq"), &parse(A28));
+
+        assert_eq!(properties.len(), 2);
+        assert_eq!(properties[SENDING_APPLICATION], "169");
+        assert_eq!(properties[TRIGGER_EVENT], "A28");
+    }
+
+    #[test]
+    fn paris_and_unconfigured_flows_get_the_standard_set() {
+        // spec/07-hl7-server.md §6.2 items 1 and 4.
+        for flow in [Some("paris"), Some("chemo"), None] {
+            let properties = flow_properties(flow, &parse(A28));
+
+            assert_eq!(properties.len(), 5, "{flow:?}");
+            assert_eq!(properties[MESSAGE_TYPE], "A28");
+            assert_eq!(properties[UPDATE_SOURCES], "|169|");
+            assert_eq!(properties[ASSIGNING_AUTHORITIES], "|NHS|");
+            assert!(!properties.contains_key(DATE_DEATH));
+        }
+    }
+
+    #[test]
+    fn mpi_and_wds_add_the_death_fields_to_the_standard_set() {
+        // spec/07-hl7-server.md §6.2 item 2: seven keys, no duplicates.
+        for flow in ["mpi", "wds"] {
+            let properties = flow_properties(Some(flow), &parse(A28));
+
+            assert_eq!(properties.len(), 7, "{flow}");
+            assert!(properties.contains_key(DATE_DEATH));
+            assert!(properties.contains_key(REASON_DEATH));
+            assert_eq!(properties[SENDING_APPLICATION], "169");
+        }
+    }
+
+    #[test]
+    fn pims_gets_the_standard_set_whose_message_type_is_the_source_trigger() {
+        // spec/09-transformers.md §5.12.1; upstream `build_pims_properties`
+        // (04b30e7) returns only `{"MessageType": MSH-9.2}`, which the
+        // standard set already contains, so `pims` needs no branch here.
+        let properties = flow_properties(Some("pims"), &parse(A28));
+
+        assert_eq!(properties[MESSAGE_TYPE], "A28");
+        assert_eq!(properties.len(), 5, "the standard set, no death fields");
+        assert!(!properties.contains_key(DATE_DEATH));
     }
 
     /// A `PID` segment built by field number.

@@ -2,28 +2,27 @@
 //!
 //! Implements `spec/10-senders.md` §3.7.
 //!
-//! # Everything short of `AA` or `CA` is retried
+//! # `AR` is dead-lettered; everything else short of `AA`/`CA` is retried
 //!
-//! §3.7.1, and it is worth understanding before touching this: `AE`
-//! (application error) and `AR` (application reject) are both failures and
-//! both retried. Nothing at this layer can tell a permanent rejection —
-//! "this patient identifier is malformed and always will be" — from a
-//! transient one — "our database is down". Treating `AR` as permanent and
-//! dropping the message would discard a patient record on the receiver's
-//! say-so.
-//!
-//! So the message is abandoned, redelivered, and Service Bus's
-//! `MaxDeliveryCount` eventually dead-letters it, where a person looks at
-//! it. That is slower and it is the right shape.
+//! §3.7.1 (upstream `62b8c34`): `AE`, any unrecognised negative code, and an
+//! unreadable reply are abandoned and redelivered, with
+//! `MaxDeliveryCount` as the backstop. `AR` is the receiver saying it will
+//! never accept the message, so retrying only delays the dead letter; it is
+//! dead-lettered at once, where a person looks at it. The message is kept
+//! either way, never dropped on the receiver's say-so.
 
 use ihb_fields::read;
-use ihb_sender::Verdict;
+use ihb_sender::{NackClass, Verdict};
 
 /// The `MSA-1` codes that mean the receiver took the message.
 ///
 /// `AA` is application accept; `CA` is commit accept, from HL7's enhanced
 /// acknowledgement mode. The Python accepts both and so does this.
 pub const ACCEPTED: [&str; 2] = ["AA", "CA"];
+
+/// The code that is dead-lettered rather than retried (`spec/10-senders.md`
+/// §3.7.1).
+pub const REJECT: &str = "AR";
 
 /// Evaluate a reply.
 ///
@@ -57,7 +56,9 @@ pub fn evaluate(reply: &str) -> Verdict {
         // not logged, because it can echo message content
         // (`spec/index.md` §0.8).
         tracing::error!("the acknowledgement could not be parsed");
-        return Verdict::Rejected {
+        return Verdict::Nack {
+            class: NackClass::Invalid,
+            code: None,
             reason: "the acknowledgement could not be parsed".to_string(),
             acknowledgement: String::new(),
         };
@@ -66,7 +67,9 @@ pub fn evaluate(reply: &str) -> Verdict {
     if !parsed.segments().any(|segment| segment.name == "MSA") {
         // §3.7's first row.
         tracing::error!("Received a non-ACK message");
-        return Verdict::Rejected {
+        return Verdict::Nack {
+            class: NackClass::Invalid,
+            code: None,
             reason: "Received a non-ACK message".to_string(),
             acknowledgement: reply.to_string(),
         };
@@ -87,7 +90,17 @@ pub fn evaluate(reply: &str) -> Verdict {
     let reason = format!("Negative ACK received: {code} for: {control_id}");
     tracing::error!("{reason}");
 
-    Verdict::Rejected {
+    // §3.7.1 — `AR` is the receiver saying it will never accept this
+    // message; every other negative code, recognised or not, is retried.
+    let class = if code == REJECT {
+        NackClass::Reject
+    } else {
+        NackClass::Recoverable
+    };
+
+    Verdict::Nack {
+        class,
+        code: Some(code),
         reason,
         acknowledgement: reply.to_string(),
     }
@@ -122,7 +135,7 @@ mod tests {
         // Row 1: no MSA segment.
         let not_an_ack = evaluate("MSH|^~\\&|100|100|252|252|20250505||ADT^A31|M1|P|2.5");
         assert!(!not_an_ack.is_accepted());
-        let Verdict::Rejected { reason, .. } = &not_an_ack else {
+        let Verdict::Nack { reason, .. } = &not_an_ack else {
             panic!("expected a rejection")
         };
         assert_eq!(reason, "Received a non-ACK message");
@@ -133,10 +146,37 @@ mod tests {
     }
 
     #[test]
+    fn only_ar_is_non_recoverable() {
+        // spec/10-senders.md §3.7.1, upstream `62b8c34`: AR is dead-lettered;
+        // AE and every unrecognised code are retried; a reply that is not an
+        // acknowledgement is retried but carries no code.
+        let class_of = |reply: &str| match evaluate(reply) {
+            Verdict::Nack { class, code, .. } => (class, code),
+            other => panic!("expected a Nack, got {other:?}"),
+        };
+
+        assert_eq!(
+            class_of(&reply("AR")),
+            (NackClass::Reject, Some("AR".into()))
+        );
+        for code in ["AE", "CE", "CR", "XX"] {
+            assert_eq!(
+                class_of(&reply(code)),
+                (NackClass::Recoverable, Some(code.into())),
+                "{code}"
+            );
+        }
+        assert_eq!(
+            class_of("MSH|^~\\&|100|100|252|252|20250505||ADT^A31|M1|P|2.5"),
+            (NackClass::Invalid, None)
+        );
+    }
+
+    #[test]
     fn a_negative_acknowledgement_names_its_code_and_control_id() {
         // §3.7's third row — the exact wording, which the support teams
         // match on.
-        let Verdict::Rejected { reason, .. } = evaluate(&reply("AE")) else {
+        let Verdict::Nack { reason, .. } = evaluate(&reply("AE")) else {
             panic!("expected a rejection")
         };
 

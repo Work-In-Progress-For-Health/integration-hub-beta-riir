@@ -290,8 +290,25 @@ profile for profile:
 phw-to-mpi     paris-to-mpi     chemo-to-mpi     pims-to-mpi     dashboard
 ```
 
+§5.1.1 Beyond that list, the stack carries `mosaiq-to-mpi` and `risp-to-mpi`
+(upstream `7157ee3`, `2b26c7f`). `paris-to-mpi`, `mosaiq-to-mpi` and
+`risp-to-mpi` each run a **dedicated `hl7-sender`** (`paris-mpi-hl7-sender`,
+`mosaiq-mpi-hl7-sender`, `risp-mpi-hl7-sender`) fed by a topic subscription,
+delivering to `mpi-hl7-topic-mock-receiver`; none of them starts the shared
+`mpi-hl7-sender` or the queue `mpi-hl7-mock-receiver`
+(`01-architecture.md` §2.1.3). The Paris server service and env file are
+`cav-paris-hl7-server` (upstream `9e797ac`), and its `MICROSERVICE_ID` is
+`cav_paris_hl7_server`. `risp-to-mpi` holds only its sender here: the REST
+server and the core-reference transformer have no Compose service yet, so
+nothing publishes to it locally.
+
 §5.2 The `.env` files are copied from `Integration-Hub-Beta/local/`
-**unchanged**. If one needs changing, §1.1 has been violated.
+**unchanged**. If one needs changing, §1.1 has been violated. (The queue to
+topic migration is the case that proves the rule: upstream changed its env
+files, and this workspace changed the same keys to the same values —
+`local/*.env` here are flat, without upstream's `env/` subdirectories — and
+kept PHW, ChemoCare, PIMS and WDS on the shared queue, `01-architecture.md`
+§2.1.4.)
 
 §5.2.1 **`compose down` only stops the profiles it is given.** A bare
 `podman compose down` leaves every profile-scoped container running and

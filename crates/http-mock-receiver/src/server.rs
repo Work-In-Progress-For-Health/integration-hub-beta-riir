@@ -19,14 +19,22 @@ use tokio::net::TcpListener;
 use crate::soap::{control_id, detect_version, extract_payload, fault, success};
 
 /// What the receiver forwards to, and how it is configured.
+///
+/// Shared by every connection behind an `Arc`; it is read-only after
+/// startup, so no lock is needed.
 pub struct Receiver<S> {
     /// Where a received message goes, when one is configured (§3.9).
     pub sink: Option<S>,
-    /// `EGRESS_SESSION_ID`.
+    /// `EGRESS_SESSION_ID`, stamped on every forwarded message; a
+    /// session-enabled queue refuses a message that has none.
     pub session_id: Option<String>,
 }
 
 /// Serve until the watcher says stop.
+///
+/// On stop the listener closes first and open connections are then awaited
+/// rather than dropped, so a request already being forwarded still gets its
+/// reply. Connections are HTTP/1.1 only; a SOAP sender here needs no more.
 ///
 /// # Errors
 ///
@@ -101,7 +109,9 @@ async fn handle<S: MessageSink>(
     // still gets the right reply shape.
     let version = detect_version(&body);
 
-    // §3.4.
+    // §3.4. Note this finds the payload by text scan anywhere in the body,
+    // not only as an immediate child of `Body`; broader than §3.4's wording
+    // and deliberately forgiving (§3.2).
     let Some(payload) = extract_payload(&body) else {
         // §3.2 — logged at warn, and still answered.
         tracing::warn!("no HL7 payload found in the request");
@@ -150,6 +160,11 @@ async fn handle<S: MessageSink>(
 }
 
 /// One response, in the detected version's content type (§3.3).
+///
+/// `Content-Length` is set explicitly so a sender that does not handle
+/// chunked replies still reads the whole body. The builder cannot fail for
+/// these inputs; the fallback exists so that `handle` stays infallible
+/// (§1.2) without an `expect`.
 fn respond(
     version: crate::soap::Version,
     status: StatusCode,

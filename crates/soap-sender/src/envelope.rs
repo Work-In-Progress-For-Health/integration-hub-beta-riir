@@ -66,6 +66,96 @@ pub fn wrap(er7: &str) -> String {
     )
 }
 
+/// Which envelope a message is wrapped in (`spec/10-senders.md` §4.6.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Format {
+    /// §4.2: the ER7 as text in `SendHL7Message`.
+    #[default]
+    Default,
+    /// §4.6.2: HL7 v2 XML in WIS's `CaptureFromFiorona`.
+    Wis,
+}
+
+impl Format {
+    /// Read `SOAP_ENVELOPE_FORMAT`.
+    ///
+    /// `wis` after trim and lower-casing; **anything else is the default**
+    /// (§4.6.1), because that is what the Python does and a deployment's
+    /// existing value must keep meaning what it meant.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use soap_sender::envelope::Format;
+    ///
+    /// assert_eq!(Format::parse(" WIS "), Format::Wis);
+    /// assert_eq!(Format::parse("default"), Format::Default);
+    /// assert_eq!(Format::parse("anything else"), Format::Default);
+    /// ```
+    #[must_use]
+    pub fn parse(value: &str) -> Self {
+        if value.trim().eq_ignore_ascii_case("wis") {
+            Self::Wis
+        } else {
+            Self::Default
+        }
+    }
+
+    /// Wrap `er7` in this format's envelope.
+    ///
+    /// # Errors
+    ///
+    /// The structural reason, for [`Format::Wis`] when the message cannot be
+    /// converted to v2 XML (§4.6.3).
+    pub fn wrap(self, er7: &str) -> Result<String, String> {
+        match self {
+            Self::Default => Ok(wrap(er7)),
+            Self::Wis => wrap_wis(er7),
+        }
+    }
+}
+
+/// The WIS namespaces (`spec/10-senders.md` §4.6.2).
+const WIS_ENVELOPE_NS: &str = "http://Cypris.Nhs.Wales.Uk/CaptureFromFiorona/Input";
+/// The namespace of the `CaptureFromFiorona` operation.
+const WIS_SERVICE_NS: &str = "http://Cypris.Nhs.Wales.Uk/";
+
+/// Wrap an ER7 message, converted to v2 XML, in the WIS envelope.
+///
+/// # Errors
+///
+/// A structural reason when the conversion fails (§4.6.3).
+///
+/// # Examples
+///
+/// ```
+/// use soap_sender::envelope::wrap_wis;
+///
+/// let envelope = wrap_wis("MSH|^~\\&|328||100||20260729095037||ADT^A28^ADT_A05|M1|P|2.5\rPID|1")?;
+///
+/// assert!(envelope.contains("<ns3:inputString>"));
+/// assert!(envelope.contains("urn:hl7-org:v2xml"));
+/// # Ok::<(), String>(())
+/// ```
+pub fn wrap_wis(er7: &str) -> Result<String, String> {
+    let xml = ihb_validation::convert::er7_to_xml(er7)
+        .map_err(|error| format!("could not convert the message to HL7 v2 XML for WIS: {error}"))?;
+
+    // §4.6.2 — four characters here, three in §4.2.
+    let escaped = escape(&xml).replace('"', "&quot;");
+
+    Ok(format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <ns1:Envelope xmlns:ns1=\"{WIS_ENVELOPE_NS}\">\n  \
+         <ns1:Body>\n    \
+         <ns3:CaptureFromFiorona xmlns:ns3=\"{WIS_SERVICE_NS}\">\n      \
+         <ns3:inputString>{escaped}</ns3:inputString>\n    \
+         </ns3:CaptureFromFiorona>\n  \
+         </ns1:Body>\n\
+         </ns1:Envelope>"
+    ))
+}
+
 /// The three characters §4.2 escapes, and only those.
 ///
 /// `&` first, or the ampersands introduced by the other two would be
@@ -190,6 +280,80 @@ fn truncated(body: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Python's `_WDS_A28_ER7` fixture shape.
+    const WDS_A28: &str = "MSH|^~\\&|328||100||20260729095037||ADT^A28^ADT_A05|6778031837018553261|P|2.5|||AL|NE||UTF-8\rEVN|A28|20260729095037\rPID|1||B0000010612^^^328^PI|||Testpatient^Test^^^||20010909|M\rPD1|||^UNK|UNK\rPV1||N";
+
+    #[test]
+    fn the_wis_envelope_names_the_operation_and_its_input() {
+        // spec/10-senders.md §4.6.2.
+        let envelope = wrap_wis(WDS_A28).unwrap();
+
+        assert!(envelope.contains("CaptureFromFiorona"));
+        assert!(envelope.contains("<ns3:inputString>"));
+        assert!(envelope.contains("http://Cypris.Nhs.Wales.Uk/CaptureFromFiorona/Input"));
+        assert!(!envelope.contains("SendHL7Message"));
+    }
+
+    #[test]
+    fn the_wis_payload_is_escaped_v2_xml() {
+        // §4.6.2 — the namespace and the structure, escaped, not raw.
+        let envelope = wrap_wis(WDS_A28).unwrap();
+
+        assert!(envelope.contains("urn:hl7-org:v2xml"));
+        assert!(envelope.contains("ADT_A05"));
+        assert!(
+            envelope.contains("&lt;ADT_A05"),
+            "the XML is text, not markup"
+        );
+        assert!(envelope.contains("&quot;"), "attribute quotes are escaped");
+        assert!(!envelope.contains("<ADT_A05"));
+    }
+
+    #[test]
+    fn the_wis_envelope_is_well_formed_xml() {
+        // §4.6.4.
+        let envelope = wrap_wis(WDS_A28).unwrap();
+        assert!(roxmltree::Document::parse(&envelope).is_ok(), "{envelope}");
+    }
+
+    #[test]
+    fn the_wis_envelope_escapes_quotes_unlike_the_default() {
+        // §4.6.2 against §4.2.
+        assert!(!wrap("PID|\"x\"").contains("&quot;"));
+        assert!(wrap_wis(WDS_A28).unwrap().contains("&quot;"));
+    }
+
+    #[test]
+    fn an_unconvertible_message_is_an_error_not_an_envelope() {
+        // §4.6.3.
+        let error = wrap_wis("this is not HL7").unwrap_err();
+        assert!(error.contains("could not convert"), "{error}");
+        assert!(
+            !error.contains("this is not HL7"),
+            "no content in an error: {error}"
+        );
+    }
+
+    #[test]
+    fn the_format_is_wis_only_for_wis() {
+        // §4.6.1.
+        assert_eq!(Format::parse("wis"), Format::Wis);
+        assert_eq!(Format::parse("  WIS\n"), Format::Wis);
+        assert_eq!(Format::parse(""), Format::Default);
+        assert_eq!(Format::parse("wiss"), Format::Default);
+        assert_eq!(Format::default(), Format::Default);
+    }
+
+    #[test]
+    fn the_default_format_is_unchanged() {
+        // §4.6.4.
+        assert_eq!(Format::Default.wrap("MSH|x").unwrap(), wrap("MSH|x"));
+        assert_eq!(
+            Format::Wis.wrap(WDS_A28).unwrap(),
+            wrap_wis(WDS_A28).unwrap()
+        );
+    }
 
     #[test]
     fn the_envelope_is_the_one_section_four_two_specifies() {

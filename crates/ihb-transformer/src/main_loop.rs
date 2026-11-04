@@ -19,7 +19,7 @@ use ihb_bus::message::Outcome as Disposition;
 use ihb_runtime::backoff::Backoff;
 use ihb_runtime::shutdown::Shutdown;
 
-use crate::config::Config;
+use crate::config::{Config, Ingress};
 use crate::runtime::Runtime;
 use crate::{Outcome, PayloadTransformer};
 
@@ -54,8 +54,8 @@ pub async fn run<T: PayloadTransformer + 'static>(
     }
     tracing::info!(
         transformer = transformer.name(),
-        ingress = %config.ingress_queue_name,
-        egress = %config.egress_queue_name,
+        ingress = %config.ingress.entity(),
+        egress = %config.egress.entity(),
         batch = config.max_batch_size,
         export_enabled = telemetry.export_enabled,
         "transformer starting"
@@ -90,7 +90,7 @@ pub async fn run<T: PayloadTransformer + 'static>(
     // `IllegalSessionState`, and the service processes nothing for the
     // rest of its life while its health check stays green.
     let batch_size = config.max_batch_size;
-    let queue = config.ingress_queue_name.clone();
+    let ingress = config.ingress.clone();
     let session = config.ingress_session_id.clone();
     let mut runtime = Runtime::new(config, transformer, egress);
 
@@ -125,15 +125,15 @@ pub async fn run<T: PayloadTransformer + 'static>(
             break;
         }
 
-        let Some(fresh) = reopen(&bus, &queue, session.as_deref()).await else {
+        let Some(fresh) = reopen(&bus, &ingress, session.as_deref()).await else {
             // Nothing else can be done: the queue is unreachable. Exit
             // non-zero so the orchestrator restarts the container, rather
             // than sitting here healthy and idle.
-            tracing::error!(%queue, "could not reopen the receiver after a lost session");
+            tracing::error!(entity = %ingress.entity(), "could not reopen the receiver after a lost session");
             health.stop().await;
             return ExitCode::FAILURE;
         };
-        tracing::info!(%queue, "reopened the receiver after a lost session");
+        tracing::info!(entity = %ingress.entity(), "reopened the receiver after a lost session");
         receiver = fresh;
     }
     health.stop().await;
@@ -142,7 +142,8 @@ pub async fn run<T: PayloadTransformer + 'static>(
     ExitCode::SUCCESS
 }
 
-/// Connect to Service Bus, reporting why not.
+/// Connect to Service Bus. `None` means the cause was already logged
+/// (the connection string is a `Secret` and never appears in it).
 async fn connect(config: &Config) -> Option<LiveBus> {
     let endpoint = Endpoint::from_config(
         config
@@ -160,31 +161,58 @@ async fn connect(config: &Config) -> Option<LiveBus> {
         .ok()
 }
 
-/// Open the egress sender and the ingress receiver.
+/// Open the egress sender and the ingress receiver, egress first.
+///
+/// `None` if either fails, having logged why. Egress is opened first, so a
+/// bad egress name is reported before any ingress session lock is taken.
 async fn open(bus: &LiveBus, config: &Config) -> Option<(LiveSender, LiveReceiver)> {
+    // `sender` opens a queue or a topic alike, by name.
     let egress = bus
-        .sender(&config.egress_queue_name)
+        .sender(config.egress.entity())
         .await
         .inspect_err(|error| {
-            tracing::error!(%error, queue = %config.egress_queue_name, "could not open the egress sender");
+            tracing::error!(%error, entity = %config.egress.entity(), "could not open the egress sender");
         })
         .ok()?;
 
-    // A session receiver when the queue is session-enabled, which every
-    // pipeline queue is (`spec/01-architecture.md` §2.3.1).
-    let receiver = match config.ingress_session_id.as_deref() {
-        Some(session) => {
-            bus.session_receiver(&config.ingress_queue_name, session)
-                .await
-        }
-        None => bus.queue_receiver(&config.ingress_queue_name).await,
-    }
-    .inspect_err(|error| {
-        tracing::error!(%error, queue = %config.ingress_queue_name, "could not open the receiver");
-    })
-    .ok()?;
+    let receiver = receiver_for(bus, &config.ingress, config.ingress_session_id.as_deref())
+        .await
+        .inspect_err(|error| {
+            tracing::error!(%error, entity = %config.ingress.entity(), "could not open the receiver");
+        })
+        .ok()?;
 
     Some((egress, receiver))
+}
+
+/// A session receiver when a session is configured, which every pipeline
+/// queue requires (`spec/01-architecture.md` §2.3.1); a plain one otherwise.
+async fn receiver_for(
+    bus: &LiveBus,
+    ingress: &Ingress,
+    session: Option<&str>,
+) -> Result<LiveReceiver, ihb_bus::BusError> {
+    match (ingress, session) {
+        (Ingress::Queue(queue), Some(session)) => bus.session_receiver(queue, session).await,
+        (Ingress::Queue(queue), None) => bus.queue_receiver(queue).await,
+        (
+            Ingress::Subscription {
+                topic,
+                subscription,
+            },
+            Some(session),
+        ) => {
+            bus.subscription_receiver(topic, subscription, session)
+                .await
+        }
+        (
+            Ingress::Subscription {
+                topic,
+                subscription,
+            },
+            None,
+        ) => bus.plain_subscription_receiver(topic, subscription).await,
+    }
 }
 
 /// Why the receive loop returned.
@@ -206,16 +234,21 @@ enum LoopEnd {
 /// Only the receiver is rebuilt. The egress sender is unaffected by a
 /// receive-side session lock and reopening it would drop messages already
 /// accepted into its batch.
-async fn reopen(bus: &LiveBus, queue: &str, session: Option<&str>) -> Option<LiveReceiver> {
-    match session {
-        Some(session) => bus.session_receiver(queue, session).await,
-        None => bus.queue_receiver(queue).await,
-    }
-    .inspect_err(|error| tracing::error!(%error, %queue, "could not reopen the receiver"))
-    .ok()
+async fn reopen(bus: &LiveBus, ingress: &Ingress, session: Option<&str>) -> Option<LiveReceiver> {
+    receiver_for(bus, ingress, session)
+        .await
+        .inspect_err(|error| {
+            tracing::error!(%error, entity = %ingress.entity(), "could not reopen the receiver");
+        })
+        .ok()
 }
 
-/// Receive and process until shutdown (§1.2), or until the session is lost.
+/// Receive and process until shutdown (`spec/09-transformers.md` §1.2), or
+/// until the session is lost.
+///
+/// [`LoopEnd::SessionLost`] sends the caller back to reopen the receiver;
+/// retrying a dead session processes nothing while health stays green
+/// (`spec/03-message-bus.md` §5.1.5).
 async fn receive_loop<T: PayloadTransformer, E: ihb_bus::sink::MessageSink>(
     runtime: &mut Runtime<T, E>,
     receiver: &LiveReceiver,
@@ -279,7 +312,8 @@ async fn receive_loop<T: PayloadTransformer, E: ihb_bus::sink::MessageSink>(
     LoopEnd::Stopped
 }
 
-/// Telemetry configuration, read straight from the environment.
+/// Telemetry configuration, read straight from the environment, so that
+/// telemetry set-up does not depend on the rest of configuration parsing.
 fn telemetry_config(default_service: &str) -> ihb_telemetry::otel::Config {
     let read = |name: &str| {
         std::env::var(name)
@@ -292,7 +326,7 @@ fn telemetry_config(default_service: &str) -> ihb_telemetry::otel::Config {
         service_name: read("OTEL_SERVICE_NAME")
             .or_else(|| read("MICROSERVICE_ID"))
             .unwrap_or_else(|| default_service.to_string()),
-        // §5 of `spec/02-configuration.md` — the Python's transformers
+        // `spec/02-configuration.md` §5 — the Python's transformers
         // defaulted to ERROR, unlike the servers' INFO.
         log_level: read("LOG_LEVEL").unwrap_or_else(|| "ERROR".to_string()),
         azure_log_level: read("AZURE_LOG_LEVEL").unwrap_or_else(|| "WARN".to_string()),

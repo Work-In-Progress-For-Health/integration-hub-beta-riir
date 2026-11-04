@@ -23,6 +23,9 @@ use crate::identity::{UuidFactory, urn_uuid};
 use crate::message_type::{Clinical, MessageType};
 
 /// A position in a bundle's shape (§3).
+///
+/// Ordered (`Ord`) in §3's canonical order, which is also the order UUIDs are
+/// allocated and entries are emitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Slot {
     /// Always first — FHIR requires it of a `message` bundle (§3.1).
@@ -100,7 +103,11 @@ pub struct Identities {
 }
 
 impl Identities {
-    /// Allocate one UUID per slot, in order.
+    /// Allocate one UUID per slot, in order (§4.1).
+    ///
+    /// Draws exactly `slots_for(message_type).len()` values from `uuids`,
+    /// whether or not each slot is later filled; with a deterministic factory
+    /// the n-th slot always carries the n-th value.
     #[must_use]
     pub fn allocate(message_type: &MessageType, uuids: &dyn UuidFactory) -> Self {
         Self {
@@ -111,7 +118,8 @@ impl Identities {
         }
     }
 
-    /// This slot's UUID.
+    /// This slot's bare hyphenated UUID, or `None` for a slot this bundle
+    /// shape does not have (e.g. `PractitionerRole` outside a Referral).
     #[must_use]
     pub fn get(&self, slot: Slot) -> Option<&str> {
         self.assigned
@@ -120,20 +128,25 @@ impl Identities {
             .map(|(_, uuid)| uuid.as_str())
     }
 
-    /// This slot's `urn:uuid:` reference (§4.3).
+    /// This slot's `urn:uuid:` reference (§4.3), or `None` for a slot this
+    /// bundle shape does not have. Callers must also check the slot is
+    /// *filled* before referencing it, or the bundle carries a dangling
+    /// reference.
     #[must_use]
     pub fn reference(&self, slot: Slot) -> Option<String> {
         self.get(slot).map(urn_uuid)
     }
 
-    /// The slots, in order.
+    /// The slots this bundle shape has, in §3's order (filled or not).
     #[must_use]
     pub fn slots(&self) -> Vec<Slot> {
         self.assigned.iter().map(|(slot, _)| *slot).collect()
     }
 }
 
-/// A bundle being assembled.
+/// A bundle being assembled: identities are allocated up front, resources
+/// are then added slot by slot, and the entries are the filled slots in slot
+/// order (see the module documentation).
 #[derive(Debug)]
 pub struct Builder {
     /// The identities allocated for this bundle.
@@ -143,7 +156,8 @@ pub struct Builder {
 }
 
 impl Builder {
-    /// Start a bundle for this message type.
+    /// Start a bundle for this message type, allocating every slot's UUID
+    /// immediately (§4.1) so later omissions cannot renumber the rest.
     #[must_use]
     pub fn new(message_type: &MessageType, uuids: &dyn UuidFactory) -> Self {
         Self {

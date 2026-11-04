@@ -1,0 +1,112 @@
+{# `spec/15-dashboard.md` §10.2.8's pauses page. Every operator-typed string
+   (reason, requested by) is escaped by askama; nothing here is `|safe`. #}
+{% extends "base.html" %}
+
+{% block title %}Integration Hub — alarm pauses{% endblock %}
+
+{% block content %}
+
+{% if unavailable %}
+{# §10.2.6 — said out loud: an empty list here would read as "nothing is
+   paused" while a pause may well be in force. #}
+<p class="unavailable">
+  The pauses could not be read. Alarms are being evaluated <strong>without</strong>
+  them, so an alarm you paused may still send e-mail.
+</p>
+{% endif %}
+
+{% if !persistence_configured %}
+<p class="unavailable" style="background:#e6f0fa">
+  <code>COSMOS_ENDPOINT</code> is not set, so a pause cannot be stored and
+  creating one is refused.
+</p>
+{% endif %}
+
+<p class="pause-indicator">{{ summary.active }} paused / {{ summary.scheduled }} scheduled
+  &middot; <a href="/alarms">Back to alarms</a></p>
+
+{% for group in groups %}
+<section class="panel">
+  <h2>{{ group.title }}</h2>
+  {% if group.pauses.is_empty() %}
+  <p class="empty">{{ group.empty }}</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Applies to</th><th>From</th><th>Until</th><th>Reason</th><th>Requested by</th><th></th></tr></thead>
+    <tbody>
+      {% for pause in group.pauses %}
+      <tr id="pause-{{ pause.view.pause_id }}">
+        <td>
+          <span class="state {{ pause.view.status }}">{{ pause.view.status }}</span>
+          {% if pause.labels.is_empty() %}<strong>All flows</strong>{% endif %}
+          {% for label in pause.labels %}<div>{{ label }}</div>{% endfor %}
+        </td>
+        <td>{{ pause.start }}</td>
+        <td>{% if pause.view.indefinite %}Until cancelled{% else %}{{ pause.end }}{% endif %}
+          {% if pause.view.cancelled_early %}<br><small class="muted">cancelled {{ pause.cancelled }}</small>{% endif %}</td>
+        <td>{{ pause.view.reason }}</td>
+        <td>{{ pause.view.requested_by }}</td>
+        <td>
+          {% if group.cancellable %}
+          <button class="secondary" data-cancel-pause="{{ pause.view.pause_id }}">
+            {% if pause.view.status == "active" %}End now{% else %}Cancel{% endif %}
+          </button>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endfor %}
+
+<section class="panel">
+  <h2>Pause alarms</h2>
+  <form class="stacked" id="pause-form">
+    <label>Applies to
+      <select name="scope_type">
+        <option value="all">Every alarm of every flow</option>
+        <option value="flows">Every alarm of chosen flows</option>
+        <option value="rule">Chosen alarm rules</option>
+      </select>
+    </label>
+    <label data-for-scope="flows">Flows (hold Ctrl or Cmd for several)
+      <select name="flows" multiple size="6">
+        {% for flow in flow_options %}<option value="{{ flow.id }}">{{ flow.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label data-for-scope="rule">Alarm rules (hold Ctrl or Cmd for several)
+      <select name="rules" multiple size="8">
+        {% for rule in rule_options %}<option value="{{ rule.alarm_type }}|{{ rule.rule_id }}">{{ rule.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Starts (UK time; leave empty for now)
+      <input type="datetime-local" name="start">
+    </label>
+    <label>Ends
+      <select name="end_mode">
+        <option value="duration">After a duration</option>
+        <option value="until">At a set time</option>
+        <option value="indefinite">When cancelled</option>
+      </select>
+    </label>
+    <label data-for-end="duration">Duration (minutes)
+      <input type="number" name="duration_minutes" min="1" value="60">
+    </label>
+    <label data-for-end="until">End (UK time)
+      <input type="datetime-local" name="end">
+    </label>
+    <label>Reason
+      <input type="text" name="reason" maxlength="200" required>
+    </label>
+    <label>Requested by
+      <input type="text" name="requested_by" maxlength="100" required>
+    </label>
+    <div><button type="submit">Pause</button></div>
+    <p class="form-message" id="pause-message" role="status"></p>
+  </form>
+</section>
+
+<script src="/static/alarm-pause.js"></script>
+{% endblock %}

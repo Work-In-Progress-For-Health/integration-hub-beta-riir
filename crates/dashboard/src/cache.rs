@@ -69,6 +69,10 @@ impl<T: Clone> Cached<T> {
     }
 
     /// Rebuild now, whatever the age of what is held (`/api/refresh`).
+    ///
+    /// Takes the same lock as [`Self::get_or_refresh`], so a manual refresh
+    /// arriving during a rebuild waits for it and then rebuilds again,
+    /// instead of racing it; the later write wins and restarts the TTL.
     pub async fn refresh<F, Fut>(&self, build: F) -> T
     where
         F: FnOnce() -> Fut,
@@ -80,7 +84,10 @@ impl<T: Clone> Cached<T> {
         fresh
     }
 
-    /// Whether a fresh value is held.
+    /// Whether a value younger than the TTL is held, without building one.
+    ///
+    /// Waits for the lock, so during a rebuild it answers only once the new
+    /// value is in. Strictly younger: a value exactly `ttl` old is stale.
     pub async fn is_fresh(&self) -> bool {
         self.state
             .lock()

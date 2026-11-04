@@ -114,31 +114,34 @@ where
     // (`spec/16-proms-transformer.md` §1.1). For an ER7 transformer the
     // blanket implementation does the parse, and reports a failure as
     // `Unexpected` so §1.6's second row keeps its own wording.
-    let mapped = match transformer.transform_payload(body) {
-        Ok(mapped) => mapped,
-        Err(TransformError::Unexpected(reason)) => {
-            // §1.6's second row.
-            let reason = format!("Unexpected error during message processing: {reason}");
-            tracing::error!(%reason, "Unexpected error during message processing");
-            events.log_message_failed(
-                body,
-                &reason,
-                Some("Unexpected processing error"),
-                correlation_id,
-            );
-            return Outcome::not_handled(reason);
-        }
-        Err(error) => {
-            // §1.6's first row.
-            return failed_to_transform(transformer, body, &error, events, correlation_id);
-        }
-    };
+    let (mapped, egress_properties) =
+        match transformer.transform_payload_with_properties(body, &message.properties) {
+            Ok(mapped) => mapped,
+            Err(TransformError::Unexpected(reason)) => {
+                // §1.6's second row.
+                let reason = format!("Unexpected error during message processing: {reason}");
+                tracing::error!(%reason, "Unexpected error during message processing");
+                events.log_message_failed(
+                    body,
+                    &reason,
+                    Some("Unexpected processing error"),
+                    correlation_id,
+                );
+                return Outcome::not_handled(reason);
+            }
+            Err(error) => {
+                // §1.6's first row.
+                return failed_to_transform(transformer, body, &error, events, correlation_id);
+            }
+        };
 
     // ---- Step 7: forward, with the properties as received. ---------
     let outgoing = Outgoing::new(mapped.clone())
         // §1.3.2 — no message id. Only ingress sets one.
         .with_optional_session(egress_session_id)
-        .with_properties(message.properties.clone());
+        // §1.3.3 -- the incoming properties unless the transformer corrected
+        // one (PIMS's `MessageType`, §5.11).
+        .with_properties(egress_properties);
 
     if let Err(error) = egress.send(outgoing).await {
         let reason = format!("Unexpected error during message processing: {error}");
@@ -163,7 +166,10 @@ where
     Outcome::Handled
 }
 
-/// §1.6's first row, in one place so the two strings cannot drift apart.
+/// The transform-failure outcome (`spec/09-transformers.md` §1.6, first
+/// row), in one place so the log line and the `MESSAGE_FAILED` event cannot
+/// drift apart. The reason carries the transformer's structural error, never
+/// a field value (AGENTS.md: patient data stays out of logs).
 fn failed_to_transform<T: PayloadTransformer>(
     transformer: &T,
     body: &str,

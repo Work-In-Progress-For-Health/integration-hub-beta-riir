@@ -38,6 +38,7 @@ pub use error::TransformError;
 pub use runtime::{Outcome, Runtime, process_one};
 
 use hl7_2::Message;
+use ihb_bus::metadata::Properties;
 
 /// One flow's mapping.
 ///
@@ -96,6 +97,22 @@ pub trait Transformer: Send {
     /// and the message abandoned rather than completed.
     fn transform(&mut self, message: &Message) -> Result<Message, TransformError>;
 
+    /// The application properties to send with the transformed message.
+    ///
+    /// Implements `spec/09-transformers.md` §1.3.3 (upstream
+    /// `BaseTransformer.get_egress_properties`, `04b30e7`). The default
+    /// returns `incoming` unchanged, which is §1.3.1: the correlation id
+    /// survives the hop. Override it only to correct a property that a topic
+    /// subscription filters on and the mapping has changed (PIMS rewrites
+    /// the trigger, so its `MessageType` must follow, §5.11).
+    ///
+    /// Infallible by design: an override that cannot read what it needs
+    /// keeps the incoming value, because a routing property is not worth
+    /// holding a clinical message for.
+    fn egress_properties(&self, incoming: &Properties, _transformed: &Message) -> Properties {
+        incoming.clone()
+    }
+
     /// Audit text for `MESSAGE_RECEIVED` (§1.4).
     fn received_audit_text(&self) -> String {
         format!("Message received for {} transformation", self.name())
@@ -149,6 +166,25 @@ pub trait PayloadTransformer: Send {
     /// and the message abandoned rather than completed.
     fn transform_payload(&mut self, body: &str) -> Result<String, TransformError>;
 
+    /// Transform one payload and say which properties to send with it.
+    ///
+    /// Implements `spec/09-transformers.md` §1.3.3. The default is
+    /// [`PayloadTransformer::transform_payload`] with `incoming` returned
+    /// unchanged (§1.3.1); the blanket implementation for [`Transformer`]
+    /// calls [`Transformer::egress_properties`] with the parsed result, so the
+    /// override sees the message once, without a second parse.
+    ///
+    /// # Errors
+    ///
+    /// As [`PayloadTransformer::transform_payload`].
+    fn transform_payload_with_properties(
+        &mut self,
+        body: &str,
+        incoming: &Properties,
+    ) -> Result<(String, Properties), TransformError> {
+        Ok((self.transform_payload(body)?, incoming.clone()))
+    }
+
     /// Audit text for `MESSAGE_RECEIVED` (§1.4).
     fn received_audit_text(&self) -> String {
         format!("Message received for {} transformation", self.name())
@@ -183,6 +219,20 @@ impl<T: Transformer> PayloadTransformer for T {
         })?;
 
         Ok(Transformer::transform(self, &parsed)?.to_er7())
+    }
+
+    fn transform_payload_with_properties(
+        &mut self,
+        body: &str,
+        incoming: &Properties,
+    ) -> Result<(String, Properties), TransformError> {
+        // Same parse and error wording as `transform_payload`, kept in step
+        // by hand because the parsed message must reach `egress_properties`.
+        let parsed = ihb_validation::parse(body)
+            .map_err(|error| TransformError::Unexpected(error.to_string()))?;
+        let transformed = Transformer::transform(self, &parsed)?;
+        let properties = Transformer::egress_properties(self, incoming, &transformed);
+        Ok((transformed.to_er7(), properties))
     }
 
     fn received_audit_text(&self) -> String {

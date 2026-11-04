@@ -17,7 +17,7 @@ use ihb_telemetry::events::EventLogger;
 use ihb_telemetry::metrics::Metrics;
 
 use crate::config::{Config, Ingress, Variant};
-use crate::pipeline::{Context, Delivery, process_one};
+use crate::pipeline::{Context, Delivery, Settlement, process_one};
 use crate::throttle::{Throttle, batch_size};
 
 /// Read the configuration, connect, and run until shutdown.
@@ -45,6 +45,15 @@ where
     // whichever component happens to need it first.
     if !ihb_tls::startup_check() {
         return ExitCode::FAILURE;
+    }
+    if let Some(queue) = config.message_store_unused_queue.as_deref() {
+        // spec/02-configuration.md §2.1.2c — the default changed upstream, so
+        // a queue name with the store off is the silent failure to avoid.
+        tracing::warn!(
+            queue,
+            "MESSAGE_STORE_QUEUE_NAME is set but MESSAGE_STORE_ENABLED is not true; \
+             no message will be stored"
+        );
     }
     tracing::info!(
         ingress = %config.ingress.entity(),
@@ -91,7 +100,13 @@ where
     let Some(bus) = connect(&config).await else {
         return ExitCode::FAILURE;
     };
-    let Some((receiver, store)) = open(&bus, &config).await else {
+
+    // Before the receiver is opened, because accepting any session waits for
+    // one to exist and must be interruptible.
+    let shutdown = Shutdown::new();
+    shutdown.listen_for_signals();
+
+    let Some((receiver, store)) = open(&bus, &config, &shutdown.watcher()).await else {
         return ExitCode::FAILURE;
     };
 
@@ -104,9 +119,6 @@ where
                 return ExitCode::FAILURE;
             }
         };
-
-    let shutdown = Shutdown::new();
-    shutdown.listen_for_signals();
 
     let events = EventLogger::new(&config.workflow_id, &config.microservice_id)
         .with_redaction(config.redaction_enabled);
@@ -147,35 +159,75 @@ where
     ExitCode::SUCCESS
 }
 
-/// Open the ingress receiver, whatever shape §6.2 gave it.
+/// Open the ingress receiver, whatever shape §6.1 and §6.2 gave it.
 ///
 /// Its own function because §5.1.5's reopen path needs exactly this and
 /// nothing else — reopening the message-store sender as well would be
 /// wrong, and having two copies of the `Ingress` match would be worse.
-async fn open_receiver(bus: &LiveBus, config: &Config) -> Option<LiveReceiver> {
+///
+/// With `INGRESS_ACCEPT_ANY_SESSION`, "no session available" is the normal
+/// state of an idle queue, not a fault: this waits, with backoff, until a
+/// session appears or shutdown is requested. A fixed session or none fails
+/// at once, as before.
+async fn open_receiver(bus: &LiveBus, config: &Config, watcher: &Watcher) -> Option<LiveReceiver> {
+    let mut backoff = Backoff::new();
+
+    loop {
+        match try_open_receiver(bus, config).await {
+            Ok(receiver) => return Some(receiver),
+            Err(error) if config.accept_any_session && watcher.is_running() => {
+                tracing::debug!(%error, entity = %config.ingress.entity(), "no session available yet");
+                backoff.failed();
+                if !watcher.sleep(backoff.delay()).await {
+                    return None;
+                }
+            }
+            Err(error) => {
+                tracing::error!(%error, entity = %config.ingress.entity(), "could not open the receiver");
+                return None;
+            }
+        }
+    }
+}
+
+/// One attempt at [`open_receiver`]: pick the receiver kind from the
+/// ingress shape and `INGRESS_ACCEPT_ANY_SESSION`. Accept-any wins over a
+/// fixed session id so a replay deployment can drain whichever session has
+/// work; failure is returned, not logged, so the caller can back off and
+/// retry while the shutdown watcher is still honoured.
+async fn try_open_receiver(
+    bus: &LiveBus,
+    config: &Config,
+) -> Result<LiveReceiver, ihb_bus::BusError> {
+    let any = config.accept_any_session;
     match &config.ingress {
-        Ingress::Queue { name, session_id } => bus.session_receiver(name, session_id).await,
+        Ingress::Queue { name, session_id } => match (session_id, any) {
+            (_, true) => bus.next_session_receiver(name).await,
+            (Some(session), false) => bus.session_receiver(name, session).await,
+            (None, false) => bus.queue_receiver(name).await,
+        },
         Ingress::Subscription {
             topic,
             subscription,
             session_id,
-        } => match session_id {
-            Some(session) => {
+        } => match (session_id, any) {
+            (_, true) => {
+                bus.next_subscription_session_receiver(topic, subscription)
+                    .await
+            }
+            (Some(session), false) => {
                 bus.subscription_receiver(topic, subscription, session)
                     .await
             }
-            // A subscription without a session is a plain receiver over the
-            // same entity; §6.2 makes the session optional here.
-            None => bus.queue_receiver(&format!("{topic}/{subscription}")).await,
+            // A subscription without a session is a plain receiver; §6.2
+            // makes the session optional here.
+            (None, false) => bus.plain_subscription_receiver(topic, subscription).await,
         },
     }
-    .inspect_err(|error| {
-        tracing::error!(%error, entity = %config.ingress.entity(), "could not open the receiver");
-    })
-    .ok()
 }
 
-/// Everything the session loop needs.
+/// Everything the session loop needs. Borrowed for the lifetime of one
+/// process run; only `receiver` is swapped, when a session lock is lost.
 struct SessionLoop<'a, D> {
     /// The connection, for reopening a receiver.
     bus: &'a LiveBus,
@@ -253,7 +305,7 @@ async fn session_loop<D: Delivery>(state: SessionLoop<'_, D>) -> bool {
             return true;
         }
 
-        let Some(fresh) = open_receiver(bus, config).await else {
+        let Some(fresh) = open_receiver(bus, config, watcher).await else {
             tracing::error!(
                 entity = %config.ingress.entity(),
                 "could not reopen the receiver after a lost session"
@@ -312,18 +364,25 @@ enum LoopEnd {
 }
 
 /// Receive and deliver until shutdown, or until the session is lost.
+///
+/// Returns [`LoopEnd::SessionLost`] so the caller reopens the receiver:
+/// retrying on a receiver whose session is gone processes nothing forever
+/// while the health check stays green (`spec/03-message-bus.md` §5.1.5).
 async fn receive_loop<D: Delivery>(state: Loop<'_, D>) -> LoopEnd {
     let mut backoff = Backoff::new();
 
     // Everything that does not change between messages, assembled once.
     let context = Context {
         store: state.store,
-        // §2.5 — the store event carries the sender's own session, so
-        // replay puts the message back on the flow it came from.
+        // §2.5 — the fallback for the store event's session, used only when
+        // the message carries none. Replay puts the message back on the flow
+        // it came from, which is the session it arrived on when the
+        // receiver accepts any.
         store_session_id: state
             .config
             .ingress
             .session_id()
+            .or(state.config.replay_session_id.as_deref())
             .unwrap_or_default()
             .to_string(),
         microservice_id: state.config.microservice_id.clone(),
@@ -360,20 +419,32 @@ async fn receive_loop<D: Delivery>(state: Loop<'_, D>) -> LoopEnd {
         for message in &received {
             state.metrics.message_received();
 
-            let handled = process_one(state.delivery, message, state.throttle, &context).await;
+            let settlement = process_one(state.delivery, message, state.throttle, &context).await;
 
             // §1.1 — a message that was not positively acknowledged is
-            // abandoned, never completed.
-            let disposition = if handled {
-                Disposition::Accepted
-            } else {
-                Disposition::Deferred
+            // abandoned, never completed. The one exception is an `AR`,
+            // which is dead-lettered (`spec/10-senders.md` §3.7.1): it is
+            // moved aside for escalation, not discarded.
+            let result = match &settlement {
+                Settlement::Delivered => {
+                    state.receiver.settle(message, Disposition::Accepted).await
+                }
+                Settlement::Retry => state.receiver.settle(message, Disposition::Deferred).await,
+                Settlement::DeadLetter {
+                    reason,
+                    description,
+                } => {
+                    state
+                        .receiver
+                        .dead_letter(message, reason, description)
+                        .await
+                }
             };
-            if let Err(error) = state.receiver.settle(message, disposition).await {
+            if let Err(error) = result {
                 tracing::error!(%error, "could not settle a message");
             }
 
-            if !handled {
+            if !settlement.is_delivered() {
                 // Order within a session is the contract
                 // (`spec/01-architecture.md` §6.2), so the rest of the
                 // batch waits for the redelivery of this one.
@@ -386,7 +457,9 @@ async fn receive_loop<D: Delivery>(state: Loop<'_, D>) -> LoopEnd {
     LoopEnd::Stopped
 }
 
-/// Connect to Service Bus, reporting why not.
+/// Connect to Service Bus. `None` means the error was already logged
+/// (without the connection string, which is a `Secret`); the caller treats
+/// that as a failed startup rather than panicking.
 async fn connect(config: &Config) -> Option<LiveBus> {
     let endpoint = Endpoint::from_config(
         config
@@ -404,9 +477,16 @@ async fn connect(config: &Config) -> Option<LiveBus> {
         .ok()
 }
 
-/// Open the ingress receiver and, for the queue variant, the store sender.
-async fn open(bus: &LiveBus, config: &Config) -> Option<(LiveReceiver, Option<LiveSender>)> {
-    let receiver = open_receiver(bus, config).await?;
+/// Open the ingress receiver and, when `MESSAGE_STORE_QUEUE_NAME` is
+/// configured, the message-store sender (`spec/10-senders.md` §5.2: only
+/// the queue variant writes the audit copy). `None` if either fails, having
+/// logged why.
+async fn open(
+    bus: &LiveBus,
+    config: &Config,
+    watcher: &Watcher,
+) -> Option<(LiveReceiver, Option<LiveSender>)> {
+    let receiver = open_receiver(bus, config, watcher).await?;
 
     let store = match config.message_store_queue.as_deref() {
         None => None,
@@ -424,6 +504,11 @@ async fn open(bus: &LiveBus, config: &Config) -> Option<(LiveReceiver, Option<Li
 }
 
 /// Telemetry configuration, read straight from the environment.
+///
+/// Read from the environment directly rather than from [`Config`], so
+/// telemetry set-up does not depend on the rest of the configuration
+/// parsing cleanly. The default log level is the senders' `ERROR`
+/// (`spec/02-configuration.md` §6.1).
 fn telemetry_config(default_service: &str) -> ihb_telemetry::otel::Config {
     let read = |name: &str| {
         std::env::var(name)

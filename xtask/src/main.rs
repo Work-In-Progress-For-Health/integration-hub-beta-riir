@@ -64,7 +64,17 @@ const MEMBERS: &[&str] = &[
     "http-mock-receiver",
     "dashboard",
     "xml-fhir-proms-transformer",
+    "hl7-wds-transformer",
+    "hl7-lims-wrrs-transformer",
+    "db-sender",
+    "wrds-service",
+    "hl7-core-reference-transformer",
+    "hl7-rest-server",
+    "rest-server",
+    "lookup-service",
+    "ultra7",
     "ihb-e2e",
+    "integration-hub-tester",
 ];
 
 /// The schema groups, and the trigger events that arrive carried by another
@@ -184,11 +194,28 @@ fn usage() {
 ///    somebody goes looking for an image that was never pushed.
 ///
 /// The second is the reason this task exists. The first is a bonus.
+// The body is one linear walk (read, compare, report); splitting it would
+// scatter a single invariant across helpers.
+#[allow(clippy::too_many_lines)]
 fn verify_pipelines() -> Result<()> {
     // Binaries that are tooling, not services: `xtask` is this program,
     // `health-probe` ships *inside* every image rather than as one of its
     // own (`spec/18-deployment.md` §2.1).
-    const NOT_SERVICES: &[&str] = &["xtask", "health-probe"];
+    const NOT_SERVICES: &[&str] = &[
+        "xtask",
+        "health-probe",
+        // Phase 1 and not production ready (`spec/20-lookup-service.md`
+        // §1.1): the Python has no build pipeline for it either, because its
+        // deployment is that project's Phase 2. It has an image recipe (the
+        // common Dockerfile) and a Compose service, but nothing is pushed.
+        "lookup-service",
+        // Developer tooling that is never deployed
+        // (`spec/ultra7-test-message-sender.md` §1.1,
+        // `spec/integration-hub-tester-component-preview.md`): no image, no
+        // pipeline, nothing pushed.
+        "ultra7",
+        "integration-hub-tester",
+    ];
 
     let root = workspace_root()?;
     let directory = root.join("pipeline-ado");

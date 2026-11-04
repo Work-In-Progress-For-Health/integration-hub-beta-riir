@@ -148,7 +148,7 @@ async fn a_negative_acknowledgement_is_rejected_and_retried() {
             .expect("the exchange succeeds");
 
         assert!(!verdict.is_accepted(), "{code}");
-        let Verdict::Rejected { reason, .. } = &verdict else {
+        let Verdict::Nack { reason, .. } = &verdict else {
             panic!("{code}: expected a rejection")
         };
         assert_eq!(
@@ -170,7 +170,7 @@ async fn a_reply_with_no_msa_is_not_an_acknowledgement() {
         .expect("the exchange succeeds");
 
     assert!(!verdict.is_accepted());
-    let Verdict::Rejected { reason, .. } = &verdict else {
+    let Verdict::Nack { reason, .. } = &verdict else {
         panic!("expected a rejection")
     };
     assert_eq!(reason, "Received a non-ACK message");

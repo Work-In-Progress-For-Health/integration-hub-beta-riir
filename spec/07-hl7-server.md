@@ -24,11 +24,13 @@ queue or topic, and the session.
 §2.1 The listener binds `HOST:PORT` and speaks MLLP: `<VT> payload <FS><CR>`.
 Framing is `hl7-2-mllp`.
 
-§2.2 A frame is decoded as UTF-8. Invalid UTF-8 is a rejection; the
-connection is closed and the event is logged as `MESSAGE_FAILED`.
+§2.2 A frame is decoded as UTF-8. Invalid UTF-8 is a rejection; a generic `AE`
+NACK (§4.3.2) is sent, the connection is closed and the event is logged as
+`MESSAGE_FAILED`.
 
 §2.3 **Frame size.** A frame that would exceed `MAX_MESSAGE_SIZE_BYTES` MUST
-cause the connection to close. Before closing, the service MUST log at error
+cause a generic `AE` NACK (§4.3.2) to be sent and the connection to close.
+Before closing, the service MUST log at error
 
 ```
 Message size ({n} bytes) exceeds maximum allowed size ({limit} bytes). Connection will be closed.
@@ -106,7 +108,21 @@ of 1800 or later.
 | `MSH-9.2` not in `{A28, A31, A40}` | `Unsupported message type '{value}' for MPI outbound flow` |
 | No `PID-2` assigning authority codes | `PID.2.4.1 UpdateSources is missing from the MPI outbound message` |
 
-§3.3.3 Any other flow value performs no field-level rules here; its
+#### §3.3.3 `paris` — message type
+
+`custom_validation/paris_validation.py` (upstream `9e797ac`). Paris sends
+the same three triggers as MPI outbound, and the dedicated Paris sender topic
+(§6.2) carries nothing else, so the trigger is checked at the door.
+
+| Condition | Message |
+| --- | --- |
+| `MSH-9.2` blank | `MSH.9.2 MessageType is missing from the Paris message` |
+| `MSH-9.2` not in `{A28, A31, A40}` | `Unsupported message type '{value}' for Paris flow` |
+
+The rule has no `PID` requirement, unlike §3.3.2: Paris's `PID-2` is not a
+routing key.
+
+§3.3.4 Any other flow value performs no field-level rules here; its
 validation is the schema validation of §3.4.
 
 ### §3.4 Flow schema validation
@@ -192,10 +208,36 @@ because `MSH-11` is required in an ACK. This differs from
 
 §4.2 The ACK is MLLP-framed on the way out.
 
-§4.3 The server only ever sends `AA`. A message it cannot accept gets **no
-reply at all** — the connection carries the error by closing. This is the
-Python's behaviour (every failure path re-raises out of `reply`) and the
-source systems' retry logic depends on it.
+§4.3 The server sends `AA` only for a message it forwarded (§5.3). Every
+other outcome gets an explicit negative acknowledgement, then the connection
+closes. Upstream `62b8c34` replaced the earlier "no reply, the close is the
+signal" behaviour; senders now classify `AE` as retry and `AR` as
+dead-letter (`10-senders.md` §3.7.1), so a missing reply is no longer the
+retry signal and MUST NOT be relied on.
+
+| `MSA-1` | Failure |
+| --- | --- |
+| `AR` | Field-level validation (§3.1–§3.3), flow-schema validation (§3.4), standard-release validation (§3.6) |
+| `AE` | Unparseable message (§7.2), unsupported type (§7.1), Service Bus send failure (§5.3), oversized frame (§2.3), frame that is not UTF-8 (§2.2), anything unexpected |
+
+§4.3.1 **Parsed** failures echo the inbound header exactly as §4 does
+(`MSH-3`..`MSH-6` swapped, `MSH-9.2`, `MSH-10`, `MSH-11` with the `P`
+fallback), with `MSA-1` the code above, `MSA-2` the inbound `MSH-10` and
+`MSA-3` the reason. `MSH-12` is the inbound value, or `2.5` when absent.
+
+§4.3.2 **Unparsed** failures get a *generic* NACK: `MSH-3`..`MSH-6` and
+`MSH-9.2` empty, `MSH-9` `ACK^^ACK`, `MSH-11` `P`, `MSH-12` `2.5`, `MSA-1`
+`AE`, and a generated `MSH-10` (a UUID's first 20 hex characters, the
+`MSH-10` limit) repeated in `MSA-2`.
+
+§4.3.3 `MSA-3` has line breaks replaced by spaces and is capped at 199
+characters (the `ST` limit). HL7 delimiters in the reason are escaped
+(`\F\`, `\S\`, `\T\`, `\R\`, `\E\`); upstream does not, and an
+unescaped `|` in a reason corrupts the segment for a strict parser.
+
+§4.3.4 A failure to *write* the NACK is logged and the connection closes;
+it never changes the event already emitted. Telemetry failure never
+prevents the NACK (`MESSAGE_FAILED` emission is already best-effort here).
 
 ---
 
@@ -244,8 +286,33 @@ requirement.
 [`03-message-bus.md`](03-message-bus.md) §4: `MessageReceivedAt`,
 `CorrelationId`, `WorkflowID`, `SourceSystem` (from `MSH-3`, or `""`).
 
-§6.2 When `HL7_VALIDATION_FLOW` is `mpi`, the MPI routing properties of
-[`03-message-bus.md`](03-message-bus.md) §4 are merged in.
+§6.2 Routing properties (step 9), so that a Service Bus subscription filter
+can match without opening the payload
+([`03-message-bus.md`](03-message-bus.md) §4, upstream `d9cc216`, `8c1d012`,
+`9e797ac`):
+
+1. **Every flow except `mosaiq`** gets the *standard* routing set:
+   `SendingApplication`, `TriggerEvent`, `MessageType`, `UpdateSources`,
+   `AssigningAuthorities`.
+2. `mpi` and `wds` then add `DateDeath` and `ReasonDeath` and overwrite
+   `MessageType`, `UpdateSources` and `AssigningAuthorities` with the same
+   values, so the result is the five MPI properties of `03` §4 **plus**
+   `SendingApplication` and `TriggerEvent`.
+3. `mosaiq` gets **only** `SendingApplication` and `TriggerEvent`. The
+   standard set is deliberately skipped for it, and MUST be: the dedicated
+   Mosaiq topic's subscription filters on those two and a stray
+   `MessageType` would change what other rules see.
+4. `paris` gets the standard set and nothing flow-specific.
+5. `pims` gets the standard set and nothing flow-specific (upstream
+   `build_pims_properties`, `04b30e7`, returns only `MessageType` =
+   `MSH-9.2`, which the standard set already carries; the PIMS topic
+   subscriptions filter on `SourceSystem`, set for every flow, and
+   `MessageType` alone). The value is the **source** trigger (`A04`, `A08`,
+   `A40`); the transformer corrects it for the next hop
+   (`09-transformers.md` §5.11).
+
+§6.2.1 Each is built from the parsed message alone, so a message that
+cannot yield a value gets `""` for it (`03` §4.1), never a failure (§5.4).
 
 §6.3 The Service Bus `message_id` is the inbound `MSH-10`.
 
@@ -265,12 +332,13 @@ ADT^A04^ADT_A01   ADT^A08^ADT_A01   ADT^A40^ADT_A40
 
 §7.1 A message whose `MSH-9` is not one of these MUST be rejected. The
 failure is logged as `Unsupported Message Type: {detail}` and emitted as
-`MESSAGE_FAILED` with validation result `Unsupported message type`, and no
-reply is sent.
+`MESSAGE_FAILED` with validation result `Unsupported message type`, and an
+`AE` NACK echoing the header is sent (§4.3, §4.3.1).
 
 §7.2 A message that cannot be parsed at all is logged as
 `Invalid HL7 Message: {detail}`, emitted as `MESSAGE_FAILED` with
-validation result `Invalid HL7 message format`, and no reply is sent.
+validation result `Invalid HL7 message format`, and a generic `AE` NACK is
+sent (§4.3.2).
 
 §7.3 The list in §7 is a single allow-list applied by one handler; there is
 no per-type behaviour. It MAY be made configurable, but its default MUST be
@@ -314,12 +382,13 @@ a recording fake bus.
 the sample messages in `Integration-Hub-Beta/local/sample_messages/`,
 asserting the ACK bytes and the message that landed on the fake bus.
 
-§9.5 Integration: a frame exceeding `MAX_MESSAGE_SIZE_BYTES` closes the
-connection and emits the truncated event of §2.3.
+§9.5 Integration: a frame exceeding `MAX_MESSAGE_SIZE_BYTES` is answered with a
+generic `AE` NACK, closes the connection and emits the truncated event of
+§2.3.
 
 §9.6 Integration: two frames written in one `write` receive two ACKs (§2.5).
 
-§9.7 Integration: a Service Bus send failure produces no ACK (§5.3), and a
+§9.7 Integration: a Service Bus send failure produces an `AE` NACK and no `AA` (§5.3, §4.3), and a
 message store failure still produces one (§5.2).
 
 §9.8 Golden: for each flow's sample message, the bytes sent to the bus and

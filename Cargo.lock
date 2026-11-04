@@ -800,6 +800,7 @@ dependencies = [
  "tokio-test",
  "tower 0.5.3",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -807,6 +808,26 @@ name = "data-encoding"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
+
+[[package]]
+name = "db-sender"
+version = "0.1.0"
+dependencies = [
+ "ihb-bus",
+ "ihb-config",
+ "ihb-fields",
+ "ihb-health",
+ "ihb-runtime",
+ "ihb-telemetry",
+ "ihb-tls",
+ "roxmltree",
+ "thiserror 2.0.20",
+ "tiberius",
+ "tokio",
+ "tokio-test",
+ "tokio-util",
+ "tracing",
+]
 
 [[package]]
 name = "deranged"
@@ -962,7 +983,7 @@ dependencies = [
  "tokio-util",
  "url",
  "wasmtimer",
- "webpki-roots 1.0.9",
+ "webpki-roots 1.0.11",
 ]
 
 [[package]]
@@ -1387,6 +1408,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "hl7-core-reference-transformer"
+version = "0.1.0"
+dependencies = [
+ "hl7-2",
+ "ihb-bus",
+ "ihb-config",
+ "ihb-fields",
+ "ihb-transformer",
+ "ihb-validation",
+ "tokio",
+ "tracing",
+ "wrds-service",
+]
+
+[[package]]
+name = "hl7-lims-wrrs-transformer"
+version = "0.1.0"
+dependencies = [
+ "hl7-2",
+ "ihb-bus",
+ "ihb-config",
+ "ihb-fields",
+ "ihb-health",
+ "ihb-runtime",
+ "ihb-telemetry",
+ "ihb-tls",
+ "ihb-transformer",
+ "ihb-validation",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "hl7-mock-receiver"
 version = "0.1.0"
 dependencies = [
@@ -1435,13 +1491,41 @@ dependencies = [
  "ihb-health",
  "ihb-runtime",
  "ihb-telemetry",
+ "ihb-tls",
  "ihb-transformer",
  "ihb-validation",
  "serde_json",
+ "thiserror 2.0.20",
  "time",
  "tokio",
+ "tokio-rustls",
  "tokio-test",
  "tracing",
+]
+
+[[package]]
+name = "hl7-rest-server"
+version = "0.1.0"
+dependencies = [
+ "hl7-2",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "ihb-bus",
+ "ihb-config",
+ "ihb-fields",
+ "ihb-runtime",
+ "ihb-telemetry",
+ "ihb-tls",
+ "ihb-validation",
+ "rustls-pki-types",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-rustls",
+ "tokio-test",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1511,6 +1595,19 @@ dependencies = [
  "tokio-test",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "hl7-wds-transformer"
+version = "0.1.0"
+dependencies = [
+ "hl7-2",
+ "ihb-bus",
+ "ihb-fields",
+ "ihb-transformer",
+ "ihb-validation",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1657,7 +1754,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -1951,6 +2048,7 @@ dependencies = [
  "hl7-2",
  "hl7-2-from-er7-into-xml",
  "hl7-2-from-xml-into-er7",
+ "roxmltree",
  "serde_json",
  "thiserror 2.0.20",
  "uppsala",
@@ -1989,6 +2087,35 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "integration-hub-tester"
+version = "0.1.0"
+dependencies = [
+ "hl7-2",
+ "hl7-2-soap",
+ "hl7-chemo-transformer",
+ "hl7-core-reference-transformer",
+ "hl7-phw-transformer",
+ "hl7-pims-transformer",
+ "hl7-rest-server",
+ "hl7-sender",
+ "hl7-server",
+ "hl7-soap-server",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "ihb-bus",
+ "ihb-fields",
+ "ihb-sender",
+ "ihb-transformer",
+ "ihb-validation",
+ "serde_json",
+ "soap-sender",
+ "tokio",
+ "wrds-service",
+ "xml-fhir-proms-transformer",
 ]
 
 [[package]]
@@ -2093,6 +2220,30 @@ name = "log"
 version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+
+[[package]]
+name = "lookup-service"
+version = "0.1.0"
+dependencies = [
+ "askama",
+ "axum 0.8.9",
+ "base64",
+ "http-body-util",
+ "ihb-config",
+ "ihb-runtime",
+ "ihb-telemetry",
+ "ihb-tls",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+ "time",
+ "tokio",
+ "tokio-rustls",
+ "tower 0.5.3",
+ "tracing",
+]
 
 [[package]]
 name = "matchers"
@@ -2815,6 +2966,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "rest-server"
+version = "0.1.0"
+dependencies = [
+ "hl7-2",
+ "hl7-rest-server",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "ihb-bus",
+ "ihb-config",
+ "ihb-fields",
+ "ihb-health",
+ "ihb-runtime",
+ "ihb-telemetry",
+ "ihb-tls",
+ "ihb-validation",
+ "roxmltree",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-rustls",
+ "tokio-test",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2910,9 +3088,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.43"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "log",
  "once_cell",
@@ -2933,7 +3111,7 @@ dependencies = [
  "rustls-pki-types",
  "thiserror 2.0.20",
  "tracing",
- "webpki-roots 1.0.9",
+ "webpki-roots 1.0.11",
 ]
 
 [[package]]
@@ -2947,9 +3125,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.14"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0527518605e68109d875e248ea259b6758801cf165e4b2c2733ae3b51f12535a"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -3256,6 +3434,8 @@ dependencies = [
  "ihb-runtime",
  "ihb-sender",
  "ihb-telemetry",
+ "ihb-validation",
+ "roxmltree",
  "rustls-pki-types",
  "thiserror 2.0.20",
  "tokio",
@@ -3557,9 +3737,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
  "bytes",
  "libc",
@@ -3945,6 +4125,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ultra7"
+version = "0.1.0"
+dependencies = [
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "time",
+ "uuid",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4185,14 +4376,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
 dependencies = [
- "webpki-roots 1.0.9",
+ "webpki-roots 1.0.11",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.9"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
+checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -4392,6 +4583,22 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "wrds-service"
+version = "0.1.0"
+dependencies = [
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "ihb-tls",
+ "roxmltree",
+ "rustls-pki-types",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+]
 
 [[package]]
 name = "writeable"

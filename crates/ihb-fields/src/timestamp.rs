@@ -67,6 +67,9 @@ pub fn timestamp() -> String {
 }
 
 /// A moment as HL7 writes one: fourteen digits, no separators, no zone.
+///
+/// The caller chooses the offset; this only formats, so tests can pin a
+/// fixed moment without touching the process-wide local offset.
 fn format_hl7(at: OffsetDateTime) -> String {
     const HL7: &[time::format_description::FormatItem<'_>] =
         format_description!("[year][month][day][hour][minute][second]");

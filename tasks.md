@@ -805,6 +805,31 @@ mocks.
 
 ---
 
+## Upstream sync — October 2026
+
+Python changes after #413, ported in `docs/upstream-sync-2026-10.md`. Done
+and gate-checked except where noted.
+
+- [x] LIMS WRRS classifier (`hl7-lims-wrrs-transformer`) —
+  [`spec/09`](spec/09-transformers.md) §10
+- [x] WRRS database sender (`db-sender`) — [`spec/10`](spec/10-senders.md) §7
+- [x] Lookup service auth and trial switch —
+  [`spec/20`](spec/20-lookup-service.md) §2.7–§2.9, §12
+- [x] PIMS reference-data enrichment and topic flow —
+  [`spec/09`](spec/09-transformers.md) §5.10–§5.12
+- [x] PROMS FHIR mapping revision (also #346, #370) —
+  [`spec/16`](spec/16-proms-transformer.md) §10
+- [ ] **Open:** LIMS ingress is still a queue locally, so the LIMS WRRS
+  transformer and TRRR sender have no feed; moving `hl7-server` and
+  `hl7-soap-server` to publish to a topic is outstanding.
+- [ ] **Open:** the PIMS client sends `X-API-Key`; with lookup auth on it
+  needs a bearer token. Needs a decision.
+- [ ] **Open:** `cargo deny` advisories (rustls, webpki-roots, tokio) —
+  dependency bump, unrelated to this port.
+- [ ] **Open:** nothing here has run against a real Service Bus or SQL Server.
+
+---
+
 ## Not in scope
 
 Recorded so the omission is deliberate rather than forgotten.

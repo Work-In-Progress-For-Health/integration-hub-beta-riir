@@ -25,12 +25,12 @@
 //! So the shape of this module — which errors use `?` and which are caught
 //! and logged — is not stylistic. Each choice is a clause.
 //!
-//! # No reply is a reply
+//! # Every failure is a NACK
 //!
-//! Every failure here returns `Err`, and the caller answers by closing the
-//! connection without writing anything (§4.3). That is how a source system
-//! is told to retry. The temptation to send an `AE` instead should be
-//! resisted: it would look more informative and would stop the retry.
+//! Every failure here returns `Err`, and the caller answers with the NACK
+//! from [`Pipeline::nack`] and then closes the connection (§4.3). `AR` tells
+//! the sender the message is invalid; `AE` tells it to try again. A missing
+//! reply is no longer how a retry is signalled.
 
 use hl7_2::Message;
 use ihb_bus::message::Outgoing;
@@ -43,7 +43,7 @@ use ihb_telemetry::metrics::Metrics;
 
 use crate::ack;
 use crate::config::Config;
-use crate::routing::mpi_properties;
+use crate::routing::flow_properties;
 use crate::validate::{Rejection, check_fields, is_accepted_message_type, message_type_of};
 
 /// Mints the values §6 requires per message.
@@ -137,9 +137,9 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Pipeline<E, S, M> {
 
     /// Take one message through every step of §5.
     ///
-    /// Returns the ER7 acknowledgement to write back. An `Err` means **no
-    /// reply at all** (§4.3): the caller closes the connection, and the
-    /// source system retries.
+    /// Returns the ER7 acknowledgement to write back. An `Err` means the
+    /// message was not forwarded: the caller sends [`Pipeline::nack`] and
+    /// closes the connection (§4.3).
     ///
     /// # Errors
     ///
@@ -239,6 +239,7 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Pipeline<E, S, M> {
                 let rejection = Rejection {
                     reason: detail,
                     validation_result: "Standard HL7 validation failed",
+                    ack_code: ack::REJECT,
                 };
                 self.fail(raw, &rejection, Some(&correlation_id));
                 return Err(rejection);
@@ -253,9 +254,10 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Pipeline<E, S, M> {
 
         // ---- Step 9: routing properties (§6.2), non-blocking (§5.4). ---
         let mut properties = tracking.to_properties();
-        if self.config.is_mpi_flow() {
-            properties.extend(mpi_properties(&message));
-        }
+        properties.extend(flow_properties(
+            self.config.validation_flow_name.as_deref(),
+            &message,
+        ));
 
         // ---- Step 10: the message store, non-blocking (§5.2). ----------
         self.store_message(raw, xml.as_deref(), &tracking).await;
@@ -271,6 +273,16 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Pipeline<E, S, M> {
             .log_message_processed(raw, None, Some(&correlation_id));
 
         Ok(acknowledgement)
+    }
+
+    /// The NACK for a rejected message (`spec/07-hl7-server.md` §4.3).
+    ///
+    /// Re-parses `raw` to echo its header, as upstream does: a message that
+    /// parsed during [`handle`](Self::handle) parses again, and one that
+    /// did not gets the generic NACK of §4.3.2.
+    #[must_use]
+    pub fn nack(&self, raw: &str, rejection: &Rejection) -> String {
+        nack_for(raw, rejection, &self.mint.ack_timestamp())
     }
 
     /// Step 7 — produce the v2.xml rendering for the message store.
@@ -365,6 +377,7 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Pipeline<E, S, M> {
         let rejection = Rejection {
             reason: detail,
             validation_result: "XML schema validation failed",
+            ack_code: ack::REJECT,
         };
         // 3.
         self.fail(raw, &rejection, Some(correlation_id));
@@ -432,6 +445,9 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Pipeline<E, S, M> {
                 let rejection = Rejection {
                     reason: detail,
                     validation_result: "Service Bus send failed",
+                    // AE, not AR: the message is fine and the hub is not, so
+                    // the sender must retry (§4.3).
+                    ack_code: ack::ERROR,
                 };
                 self.fail(raw, &rejection, Some(correlation_id));
                 Err(rejection)
@@ -447,5 +463,15 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Pipeline<E, S, M> {
             Some(rejection.validation_result),
             correlation_id,
         );
+    }
+}
+
+/// [`Pipeline::nack`] without a pipeline, for the listener's own failures.
+fn nack_for(raw: &str, rejection: &Rejection, now: &str) -> String {
+    match ihb_validation::parse(raw) {
+        Ok(message) if !read(&message, "MSH-10").is_empty() => {
+            ack::build_nack(&message, rejection.ack_code, &rejection.reason, now)
+        }
+        _ => ack::build_generic_nack(&rejection.reason, None, now),
     }
 }

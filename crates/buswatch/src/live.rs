@@ -38,6 +38,7 @@ use ihb_bus::live::{LiveBus, LiveReceiver};
 use ihb_bus::message::{Outcome, Peeked};
 use tokio::sync::Mutex;
 
+use crate::config::split_subscription_entity;
 use crate::reader::{MessageDetail, QueueReader};
 use crate::snapshot::{MessageSummary, Snapshot};
 
@@ -83,17 +84,22 @@ const CLEAR_PASSES: usize = 50;
 const SESSION_MARKERS: [&str; 3] = ["sessionful", "requires session", "sessionrequired"];
 
 /// A reader backed by a real broker.
+///
+/// Opens a fresh receiver per operation and closes it before returning, so
+/// no link is held between page loads (§6.1's connection quota, §7.3).
 pub struct LiveReader {
     /// The connection. Behind an `Arc` so §7.3's shutdown can close it.
     bus: Arc<LiveBus>,
     /// The session-enabled queues of §4.4.
     session_queues: BTreeSet<String>,
-    /// Serialises reads.
+    /// Serialises **every** read, clear and detail lookup on this reader,
+    /// across all queues.
     ///
     /// The emulator has a hard connection quota (§6.1), and every receiver
-    /// opened here is a link on the one connection. The parallelism bound
-    /// lives in `web::refresh_all`; this is the guard on a single queue
-    /// being read by two requests at once.
+    /// opened here is a link on the one connection, so at most one link is
+    /// open at a time. Consequence worth knowing: `web::refresh_all`'s
+    /// `BUSWATCH_MAX_PARALLEL_QUEUE_FETCHES` bound is an upper limit only;
+    /// against this reader the effective parallelism is one.
     lock: Mutex<()>,
 }
 
@@ -143,21 +149,49 @@ impl LiveReader {
     /// gets a plain one, with a fallback if the broker says otherwise.
     async fn receiver_for(&self, queue: &str) -> Result<LiveReceiver, BusError> {
         if self.session_queues.contains(queue) {
-            return self.bus.next_session_receiver(queue).await;
+            return self.next_session(queue).await;
         }
 
-        match self.bus.queue_receiver(queue).await {
+        match self.plain(queue).await {
             Ok(receiver) => Ok(receiver),
             Err(error) if needs_a_session(&error.to_string()) => {
                 // The configuration was absent or stale. Not a warning worth
                 // raising: the answer is the same either way.
-                self.bus.next_session_receiver(queue).await
+                self.next_session(queue).await
             }
             Err(error) => Err(error),
         }
     }
 
+    /// A plain receiver for a queue, or for a `topic:subscription`
+    /// (`spec/14-buswatch.md` §2.2.1).
+    async fn plain(&self, entity: &str) -> Result<LiveReceiver, BusError> {
+        match split_subscription_entity(entity) {
+            Some((topic, subscription)) => {
+                self.bus
+                    .plain_subscription_receiver(topic, subscription)
+                    .await
+            }
+            None => self.bus.queue_receiver(entity).await,
+        }
+    }
+
+    /// A next-available-session receiver for a queue or a subscription.
+    async fn next_session(&self, entity: &str) -> Result<LiveReceiver, BusError> {
+        match split_subscription_entity(entity) {
+            Some((topic, subscription)) => {
+                self.bus
+                    .next_subscription_session_receiver(topic, subscription)
+                    .await
+            }
+            None => self.bus.next_session_receiver(entity).await,
+        }
+    }
+
     /// Peek `limit` messages, with the session handling of §4.4.
+    ///
+    /// Peek does not lock or settle anything, so delivery counts and
+    /// visibility to the real consumers are unchanged (§1.1).
     async fn peek(&self, queue: &str, limit: u32) -> Result<Vec<Peeked>, BusError> {
         let receiver = self.receiver_for(queue).await?;
         let peeked = receiver.peek(limit, None).await;
@@ -165,6 +199,8 @@ impl LiveReader {
         // a link against §6.1's quota.
         let closed = receiver.close().await;
 
+        // A failed close is dropped: the peek's own result is what the page
+        // needs, and the link is gone either way.
         match (peeked, closed) {
             (Ok(messages), _) => Ok(messages),
             (Err(error), _) => Err(error),
@@ -247,7 +283,7 @@ impl LiveReader {
         let mut cleared = 0;
 
         for _ in 0..CLEAR_SESSIONS {
-            let Ok(receiver) = self.bus.next_session_receiver(queue).await else {
+            let Ok(receiver) = self.next_session(queue).await else {
                 // No session left, which is what an empty queue looks like.
                 break;
             };
@@ -270,6 +306,10 @@ impl LiveReader {
 }
 
 /// Receive and complete everything a receiver can reach.
+///
+/// Stops on the first empty batch, after `CLEAR_PASSES` passes, or on the
+/// first failure. The count completed before a failure is not returned, so
+/// a partial clear reports only the error.
 async fn drain(receiver: &LiveReceiver) -> Result<usize, String> {
     let mut cleared = 0;
 
@@ -298,6 +338,9 @@ async fn drain(receiver: &LiveReceiver) -> Result<usize, String> {
 }
 
 /// Whether an error means the queue needs a session receiver.
+///
+/// Text matching, because the broker's refusal reaches here already
+/// flattened into a string by `ihb-bus`.
 fn needs_a_session(reason: &str) -> bool {
     let lowered = reason.to_ascii_lowercase();
     SESSION_MARKERS

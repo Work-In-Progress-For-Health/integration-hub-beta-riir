@@ -31,6 +31,15 @@ pub enum TransformError {
     #[error("{0}")]
     Datetime(String),
 
+    /// The transformer declined the message, with its own normative text.
+    ///
+    /// `spec/09-transformers.md` §7.3: the WDS filter's wording is matched on
+    /// by operators, so it travels verbatim like [`Self::Datetime`]'s. §1.6's
+    /// first row, not its second: refusing a message is a decision, not a
+    /// surprise.
+    #[error("{0}")]
+    Rejected(String),
+
     /// The message could not be re-parsed.
     ///
     /// PIMS re-parses flat before mapping

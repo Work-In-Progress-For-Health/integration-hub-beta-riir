@@ -1,7 +1,44 @@
 {# `spec/15-dashboard.md` §2.1's queue depths. #}
 {% extends "base.html" %}
 
-{% block title %}Integration Hub — Service Bus{% endblock %}
+{% block title %}Integration Hub — Service Bus<section class="panel">
+  <h2>Topics and subscriptions</h2>
+  {% if !topics_known %}
+  {# §10.5.2 -- "could not read" is not "there are none". #}
+  <p class="empty">The topics could not be read, so none are shown. This is not the same as there being none.</p>
+  {% else if topics.is_empty() %}
+  <p class="empty">No topics in the namespace.</p>
+  {% else %}
+  <table>
+    <thead>
+      <tr><th>Topic / subscription</th><th>Health</th><th style="text-align:right">Waiting</th><th style="text-align:right">Dead-lettered</th></tr>
+    </thead>
+    <tbody>
+      {% for topic in topics %}
+      <tr>
+        <td class="mono"><strong>{{ topic.name }}</strong></td>
+        <td><span class="state {{ topic.health.css_class() }}">{{ topic.health.label() }}</span></td>
+        <td class="num">{% match topic.active %}{% when Some with (n) %}{{ n }}{% when None %}<span class="absent">unknown</span>{% endmatch %}</td>
+        <td class="num">{% match topic.dead_letter %}{% when Some with (n) %}{{ n }}{% when None %}<span class="absent">unknown</span>{% endmatch %}</td>
+      </tr>
+      {% if !topic.subscriptions_read %}
+      <tr><td colspan="4" class="absent">The subscriptions of this topic could not be listed.</td></tr>
+      {% endif %}
+      {% for sub in topic.subscriptions %}
+      <tr>
+        <td class="mono" style="padding-left:2rem">{{ sub.name }}</td>
+        <td><span class="state {{ sub.health.css_class() }}">{{ sub.health.label() }}</span></td>
+        <td class="num">{% match sub.active %}{% when Some with (n) %}{{ n }}{% when None %}<span class="absent">unknown</span>{% endmatch %}</td>
+        <td class="num">{% match sub.dead_letter %}{% when Some with (n) %}{{ n }}{% when None %}<span class="absent">unknown</span>{% endmatch %}</td>
+      </tr>
+      {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+
+{% endblock %}
 
 {% block content %}
 

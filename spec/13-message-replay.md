@@ -98,6 +98,21 @@ suppress a deliberate replay.
 §4.2 The page is sent as a batch, split by size per
 [`03-message-bus.md`](03-message-bus.md) §3.3.
 
+§4.3 **Redirecting a topic-fed sender to the priority queue** (upstream
+`8c1d012`, `docs/MESSAGE_REPLAY.md`). A sender reads either a queue or a
+topic and subscription, never both
+([`02-configuration.md`](02-configuration.md) §6.1.1; the error is
+`Invalid ingress configuration: INGRESS_QUEUE_NAME cannot be set together
+with INGRESS_TOPIC_NAME/INGRESS_SUBSCRIPTION_NAME. …`). So for a sender whose
+`.env` has `INGRESS_TOPIC_NAME`/`INGRESS_SUBSCRIPTION_NAME` — today
+`paris-mpi-hl7-sender`, `mosaiq-mpi-hl7-sender` and `risp-mpi-hl7-sender`
+([`01-architecture.md`](01-architecture.md) §2.1.3) — the operator MUST
+**remove** those (and `INGRESS_ACCEPT_ANY_SESSION`, if set) before setting
+`INGRESS_QUEUE_NAME="local-inthub-priority-messagequeue"`; adding the queue
+beside them stops the sender at startup. `INGRESS_SESSION_ID` stays as it
+is: each replayed message already carries its stored `SessionId` (§4.1).
+After the replay the original ingress is restored and the profile restarted.
+
 ---
 
 ## §5 Retry and failure

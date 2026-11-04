@@ -26,6 +26,11 @@
 </p>
 {% endif %}
 
+<p class="pause-indicator">
+  <a href="/alarms/pauses">{{ pauses.active }} paused / {{ pauses.scheduled }} scheduled</a>
+  &middot; <a href="/alarms/pauses">Manage alarm pauses</a>
+</p>
+
 <div class="kpis">
   <div class="kpi">
     <div class="value">{{ summary.critical }}</div>
@@ -62,7 +67,9 @@
       <tr>
         <td>{{ rule.display_name }}</td>
         <td class="mono">{{ rule.workflow_id }}</td>
-        <td><span class="state {{ rule.status.label()|lower }}">{{ rule.status.label() }}</span></td>
+        <td><span class="state {{ rule.status.label()|lower }}">{{ rule.status.label() }}</span>
+          {% if let Some(note) = rule.pause_note %}<br><small class="muted">{{ note }}</small>{% endif %}
+          {% if let Some(note) = rule.scheduled_note %}<br><small class="muted">{{ note }}</small>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

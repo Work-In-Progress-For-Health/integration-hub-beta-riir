@@ -213,6 +213,16 @@ pub trait Observatory: Send + Sync + 'static {
         queues: &[String],
     ) -> impl Future<Output = BTreeMap<String, QueueDepths>> + Send;
 
+    /// Every topic in the namespace with its subscriptions
+    /// (`spec/15-dashboard.md` §10.5.1).
+    ///
+    /// `None` means the namespace could not be read — unknown. `Some` of an
+    /// empty list means it was read and has no topics. The default is
+    /// `None`, which is right for an observatory that cannot ask.
+    fn topics(&self) -> impl Future<Output = Option<Vec<crate::topics::Topic>>> + Send {
+        async { None }
+    }
+
     /// Every Container App the dashboard knows about.
     fn containers(&self) -> impl Future<Output = Vec<Container>> + Send;
 

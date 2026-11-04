@@ -5,12 +5,12 @@
 //! Framing is [`hl7_2_mllp::Framer`]; everything here is what to do with
 //! what it produces, and when to hang up.
 //!
-//! # Closing is how failure is reported
+//! # A failure is a NACK, then a close
 //!
-//! MLLP has no error frame. §4.3 makes the absence of a reply the signal
-//! that a message was not taken, so nearly every failure path in this
-//! module ends by returning and letting the connection drop. That is not
-//! giving up — it is the protocol's only way to say "send it again".
+//! §4.3: a message that was not forwarded is answered with an `AR` or `AE`
+//! and the connection then closes. A connection that is not speaking MLLP
+//! at all (§2.4) or that has gone silent (§2.6) gets nothing: there is no
+//! message to refer a NACK to.
 
 use std::io;
 use std::net::SocketAddr;
@@ -167,6 +167,14 @@ where
         // here to be logged.
         if accumulated.len() > limit {
             report_oversize(&events, &accumulated, limit);
+            send_generic_nack(
+                &mut stream,
+                &format!(
+                    "Message size ({} bytes) exceeds maximum allowed size ({limit} bytes)",
+                    accumulated.len()
+                ),
+            )
+            .await;
             return Ok(());
         }
 
@@ -232,6 +240,7 @@ where
             Some(INVALID_ENCODING),
             None,
         );
+        send_generic_nack(stream, "message is not valid UTF-8").await;
         return Ok(false);
     };
 
@@ -249,11 +258,36 @@ where
             Ok(true)
         }
         Err(rejection) => {
-            // §4.3 — no reply at all. The pipeline has already logged and
-            // emitted; there is nothing to add and nothing to send.
-            tracing::debug!(reason = %rejection.reason, "no acknowledgement sent");
+            // §4.3 — the pipeline has already logged and emitted; what is
+            // left is telling the sender. A failed write changes nothing
+            // (§4.3.4): the connection is closing either way.
+            let nack = pipeline.nack(&normalised, &rejection);
+            write_nack(stream, &nack, rejection.ack_code).await;
             Ok(false)
         }
+    }
+}
+
+/// §4.3.2 — an `AE` for a frame that never became a message.
+async fn send_generic_nack(stream: &mut TcpStream, reason: &str) {
+    let nack = crate::ack::build_generic_nack(reason, None, &crate::ack::timestamp());
+    write_nack(stream, &nack, crate::ack::ERROR).await;
+}
+
+/// §4.3.4 — write a NACK; a failure is logged and nothing more.
+async fn write_nack(stream: &mut TcpStream, nack: &str, code: &str) {
+    let written = async {
+        stream
+            .write_all(&hl7_2_mllp::encode(nack.as_bytes()))
+            .await?;
+        stream.flush().await
+    }
+    .await;
+    match written {
+        // Positive confirmation, so "no error logged" is not read as proof
+        // the sender was told.
+        Ok(()) => tracing::info!(code, bytes = nack.len(), "NACK written to client"),
+        Err(error) => tracing::warn!(code, %error, "could not write the NACK"),
     }
 }
 

@@ -33,6 +33,8 @@
 //! - [`xsd`] — real XSD validation, run through two independent engines and
 //!   compared. A cross-check on the dictionary route above, and a possible
 //!   replacement for it; see `spec/06-validation.md` §9.
+//! - [`trigger_map`], [`grammar`], [`resolver`] — the standard-release path
+//!   ported from upstream's `hl7_message_processor` (`spec/06-validation.md` §10).
 //! - [`error`] — what can be wrong, said without saying what is in the
 //!   message.
 //!
@@ -66,8 +68,11 @@
 pub mod convert;
 pub mod error;
 pub mod flow;
+pub mod grammar;
 pub mod repair;
+pub mod resolver;
 pub mod structure;
+pub mod trigger_map;
 pub mod validate;
 pub mod xsd;
 

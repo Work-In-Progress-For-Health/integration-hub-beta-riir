@@ -32,6 +32,9 @@ pub const NHS_CERTIFICATION_DISPLAYS: [(&str, &str); 8] = [
 ];
 
 /// `DHA_CODE`s and their health board names (§7.1.2).
+///
+/// The names are reproduced exactly, including their upper-case spelling and
+/// the mixed `LHB` / `LOCAL HEALTH BOARD` forms.
 pub const DHA_CODE_NAMES: [(&str, &str); 6] = [
     ("7A1", "BETSI CADWALADR UNIVERSITY LHB"),
     ("7A2", "HYWEL DDA UNIVERSITY LHB"),
@@ -97,14 +100,19 @@ pub fn dha_code_name(code: &str) -> Option<String> {
 /// the mapper omits the element rather than emitting an unmapped code
 /// (§7.2).
 pub trait ReferenceDataResolver {
-    /// A FHIR `AdministrativeGender` code, or `None`.
+    /// A FHIR `AdministrativeGender` code (`male`, `female`, `other`,
+    /// `unknown`), or `None` for a code that cannot be resolved (§7.2).
+    /// `system_id` identifies the sending board, for resolvers that hold a
+    /// per-board table.
     fn resolve_gender(&self, code: &str, system_id: &str) -> Option<&'static str>;
 
-    /// A UKCore `HumanLanguage` code, or `None`.
+    /// A UKCore `HumanLanguage` code, or `None` for a code that cannot be
+    /// resolved (§7.2). The interim resolver always returns `None`.
     fn resolve_language(&self, code: &str, system_id: &str) -> Option<String>;
 }
 
-/// §7.3's gender table.
+/// §7.3's gender table: WPAS sends either a letter or a digit, and both map
+/// to the same FHIR code. Unlisted codes are unresolved, not defaulted.
 const GENDER_CODES: [(&str, &str); 9] = [
     ("M", "male"),
     ("1", "male"),

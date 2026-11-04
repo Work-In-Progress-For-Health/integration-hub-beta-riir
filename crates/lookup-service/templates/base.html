@@ -1,0 +1,46 @@
+{# The shared shell. Structure only: the brand lives in static/lookup.css.
+   The scripts are external, not inline, so they run under the pages'
+   `default-src 'self'` policy (spec/20-lookup-service.md §9.1). #}
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Lookup Service{% endblock %} · Integration Hub</title>
+  <script src="/static/theme-init.js?v={{ asset_version }}"></script>
+  <link rel="stylesheet" href="/static/lookup.css?v={{ asset_version }}" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="topbar__brand" href="/">
+        <img src="/static/DHCW-logo-RGB-White.png" alt="DHCW" />
+        Integration Hub <span>Lookup Service</span>
+      </a>
+      <nav class="topbar__nav">
+        <a class="{% if active == "tables" %}active{% endif %}" href="/">Tables</a>
+        <a class="{% if active == "upload" %}active{% endif %}" href="/upload">Upload CSV</a>
+      </nav>
+      <div class="topbar__actions">
+        <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle light/dark theme">
+          <span id="theme-icon" aria-hidden="true"></span> Theme
+        </button>
+      </div>
+    </div>
+  </header>
+  {% if let Some(environment) = chrome.unauthenticated_environment %}
+  <div class="auth-disabled-banner" role="alert">
+    Authentication is disabled in {{ environment }}: anyone who can reach this service can view and
+    change tables. Use test data only.
+  </div>
+  {% endif %}
+  <main class="page-wrapper">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="dash-footer">
+    NHS Wales — Integration Hub Lookup Service (Phase 1, not production ready)
+  </footer>
+  {% block scripts %}{% endblock %}
+  <script src="/static/theme-toggle.js?v={{ asset_version }}"></script>
+</body>
+</html>

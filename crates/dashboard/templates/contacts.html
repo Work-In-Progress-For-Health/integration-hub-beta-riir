@@ -1,0 +1,120 @@
+{# `spec/15-dashboard.md` §10.3's Contacts page. Contact details are typed by
+   people and shown to people: everything is escaped by askama, and the edit
+   payload rides in an escaped attribute rather than in script text. #}
+{% extends "base.html" %}
+
+{% block title %}Integration Hub — contacts{% endblock %}
+
+{% block content %}
+
+{% if unavailable %}
+<p class="unavailable">
+  The contacts could not be read. This is not the same as there being none.
+</p>
+{% endif %}
+
+{% if !persistence_configured %}
+<p class="unavailable" style="background:#e6f0fa">
+  <code>COSMOS_ENDPOINT</code> is not set, so contacts cannot be stored.
+</p>
+{% endif %}
+
+<section class="panel">
+  <h2>Contacts ({{ total }})</h2>
+  <form method="get" action="/contacts" class="stacked" style="grid-auto-flow:column;align-items:end;max-width:none">
+    <label>Search
+      <input type="search" name="q" value="{{ q }}" placeholder="Name, e-mail, phone or organisation">
+    </label>
+    <label>Flow
+      <select name="flow">
+        <option value="">All flows</option>
+        {% for option in flow_options %}
+        <option value="{{ option.id }}"{% if option.id == flow %} selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div><button type="submit">Filter</button></div>
+  </form>
+
+  {% if rows.is_empty() %}
+  <p class="empty">No contacts{% if filtered %} match{% else %} yet{% endif %}.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Name</th><th>Organisation</th><th>E-mail</th><th>Phone</th><th>Flows</th><th>Notes</th><th></th></tr></thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.contact.first_name }} {{ row.contact.last_name }}
+          {% if row.contact.deleted %}<br><span class="state ended">deleted</span>{% endif %}</td>
+        <td>{{ row.contact.organisation_name }}<br><small class="muted">{{ row.contact.organisation_type }}</small></td>
+        <td>{{ row.contact.email }}</td>
+        <td>{{ row.contact.phone_number }}</td>
+        <td>{% for label in row.flows %}<div>{{ label }}</div>{% endfor %}</td>
+        <td>{{ row.contact.notes }}</td>
+        <td>
+          {% if row.contact.deleted %}
+          <button class="secondary" data-restore="{{ row.contact.id }}">Restore</button>
+          {% else %}
+          <button class="secondary" data-edit="{{ row.json }}">Edit</button>
+          <button class="danger" data-delete="{{ row.contact.id }}">Delete</button>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if pages > 1 %}
+  <form method="get" action="/contacts" class="stacked" style="grid-auto-flow:column;align-items:center;max-width:none">
+    <input type="hidden" name="q" value="{{ q }}">
+    <input type="hidden" name="flow" value="{{ flow }}">
+    {% if page > 1 %}<button name="page" value="{{ page - 1 }}" class="secondary">Previous</button>{% endif %}
+    <span>Page {{ page }} of {{ pages }}</span>
+    {% if page < pages %}<button name="page" value="{{ page + 1 }}" class="secondary">Next</button>{% endif %}
+  </form>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2 id="form-title">Add a contact</h2>
+  <form class="stacked" id="contact-form">
+    <input type="hidden" name="id">
+    <label>First name <input type="text" name="first_name" maxlength="100" required></label>
+    <label>Last name <input type="text" name="last_name" maxlength="100" required></label>
+    <label>E-mail <input type="email" name="email"></label>
+    <label>Phone number <input type="text" name="phone_number" maxlength="30"></label>
+    <label>Organisation type
+      <select name="organisation_type">
+        {% for kind in organisation_types %}<option value="{{ kind }}">{{ kind }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Organisation name <input type="text" name="organisation_name" maxlength="200" required></label>
+    <label>Flows (hold Ctrl or Cmd for several)
+      <select name="flow_ids" multiple size="6">
+        {% for option in flow_options %}<option value="{{ option.id }}">{{ option.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Notes <textarea name="notes" rows="3" maxlength="2000"></textarea></label>
+    <div>
+      <button type="submit">Save</button>
+      <button type="button" class="secondary" id="contact-reset">Clear</button>
+    </div>
+    <p class="form-message" id="contact-message" role="status"></p>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Import from CSV</h2>
+  <form class="stacked" id="import-form">
+    <p class="muted">Columns: first_name, last_name, organisation_type, organisation_name
+      (required); email, phone_number, flow_ids (separated by ;), notes. A row
+      matching an existing contact by e-mail, else phone, updates it.</p>
+    <label>CSV file <input type="file" name="file" accept=".csv,text/csv" required></label>
+    <div><button type="submit">Import</button></div>
+    <p class="form-message" id="import-message" role="status"></p>
+  </form>
+</section>
+
+<script src="/static/contacts.js"></script>
+{% endblock %}

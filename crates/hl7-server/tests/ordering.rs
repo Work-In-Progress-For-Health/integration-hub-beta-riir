@@ -397,3 +397,41 @@ async fn the_mpi_flow_adds_its_routing_properties() {
     assert_eq!(properties["AssigningAuthorities"], "|NHS|");
     assert_eq!(properties["CorrelationId"], "fixed-correlation-id");
 }
+
+#[tokio::test]
+async fn the_mosaiq_flow_publishes_only_its_two_routing_properties() {
+    // spec/07-hl7-server.md §6.2 item 3 (upstream 9e797ac): the tracking
+    // properties plus SendingApplication and TriggerEvent, and none of the
+    // standard set, which a Mosaiq topic filter was not written against.
+    let bus = FakeBus::new();
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let config = Config::from_pairs([
+        ("WORKFLOW_ID", "mosaiq-to-mpi"),
+        ("MICROSERVICE_ID", "hl7-server-mosaiq"),
+        ("HEALTH_BOARD", "MOSAIQ"),
+        ("PEER_SERVICE", "MPI"),
+        ("EGRESS_TOPIC_NAME", EGRESS),
+        ("EGRESS_SESSION_ID", "mosaiq-to-mpi"),
+        ("HL7_VALIDATION_FLOW", "mosaiq"),
+        ("SENDING_APP", "285"),
+        ("HL7_VERSION", "2.5"),
+    ])
+    .unwrap();
+
+    let egress = Recorder::new(&bus, EGRESS, &log);
+    let pipeline: Pipeline<Recorder, Recorder, FixedMint> =
+        Pipeline::with_mint(config, egress, None, FixedMint);
+
+    let inbound = "MSH|^~\\&|285|285|100|100|20250505232332||ADT^A28^ADT_A05|MOS1|P|2.5\r\
+                   EVN||20250502102000\r\
+                   PID|1||123456^^^Hospital^MR||DOE^JOHN||19900101|M";
+
+    pipeline.handle(inbound).await.expect("Mosaiq accepts it");
+
+    let properties = &bus.all_sent(EGRESS)[0].properties;
+    assert_eq!(properties["SendingApplication"], "285");
+    assert_eq!(properties["TriggerEvent"], "A28");
+    assert!(!properties.contains_key("MessageType"));
+    assert!(!properties.contains_key("UpdateSources"));
+    assert!(!properties.contains_key("AssigningAuthorities"));
+}

@@ -8,6 +8,13 @@
 //! to constants, normalises the trigger event, strips timezones from every
 //! timestamp, and drops anything it was not told to keep.
 //!
+//! Where it fits: one hop between the `hl7-server` ingress queue and the MPI
+//! egress topic, run by [`ihb_transformer::main_loop::run`]. [`Pims`] is the
+//! pure mapping (§5.1 to §5.9); [`PimsTransformer`] is the running service,
+//! which adds the reference-data lookup of §5.10 (a network call per coded
+//! field) and rewrites the `MessageType` property of §5.11 so the egress topic
+//! subscriptions still match after the trigger has been normalised.
+//!
 //! # Two comparisons that look the same and are not
 //!
 //! §5.1.1 upper-cases the trigger before matching, so `a04` normalises like
@@ -21,12 +28,17 @@
 //! why both sites say so.
 
 pub mod datetime;
+pub mod reference_data;
+
+use std::sync::Arc;
 
 use hl7_2::Message;
+use ihb_bus::metadata::Properties;
 use ihb_fields::{copy, copy_to, ensure_repetitions, read, set, trim_trailing_separators};
 use ihb_transformer::{TransformError, Transformer};
 
 use crate::datetime::strip_timezone;
+use crate::reference_data::{Dataset, ReferenceData};
 
 /// Segments §5.8 copies verbatim. `PV1` is **absent**, unlike ChemoCare's
 /// list, because §5.5 owns it.
@@ -85,17 +97,54 @@ pub fn is_a04_or_a08(trigger: &str) -> bool {
 }
 
 /// The PIMS mapping.
+///
+/// This is the mapping **without** §5.10's reference-data enrichment: it
+/// needs no network, which is what the golden corpus (captured before
+/// upstream's `c1d2a74` added enrichment) and the developer tester want.
+/// The running service is [`PimsTransformer`], which adds §5.10 and §5.11.
 #[derive(Debug, Default)]
 pub struct Pims;
 
 impl Pims {
-    /// Map one message.
+    /// Map one message, without enrichment (§5.1 to §5.9).
     ///
     /// # Errors
     ///
     /// [`TransformError`] when a timestamp cannot be stripped (§5.6) or a
     /// field cannot be written.
     pub fn map(&self, message: &Message) -> Result<Message, TransformError> {
+        self.map_with(message, None)
+    }
+
+    /// Map one message and enrich it from `lookup` (§5.10).
+    ///
+    /// # Errors
+    ///
+    /// As [`Pims::map`], and [`TransformError::Field`] naming the `PID`
+    /// field when a lookup fails (§5.10.3). A failed lookup fails the whole
+    /// transform: forwarding the untranslated code would put a PIMS code in a
+    /// field the eMPI reads as its own.
+    pub fn map_enriched(
+        &self,
+        message: &Message,
+        lookup: &dyn ReferenceData,
+    ) -> Result<Message, TransformError> {
+        self.map_with(message, Some(lookup))
+    }
+
+    /// The mapping, with or without a lookup (§5.0 to §5.9, and §5.10 when
+    /// `lookup` is `Some`).
+    ///
+    /// Order matters: the flat re-parse comes first, the trigger is read from
+    /// the *source* (the predicates of §5.7 and §5.9 are on the raw value, not
+    /// the normalised one `map_msh` writes), and `PID` is enriched only after
+    /// it is mapped, because enrichment reads the destination fields.
+    #[allow(clippy::unused_self)] // kept a method so `Pims.map(..)` call sites read the same
+    fn map_with(
+        &self,
+        message: &Message,
+        lookup: Option<&dyn ReferenceData>,
+    ) -> Result<Message, TransformError> {
         // §5.0 — re-parse flat. `ADT_A39`, which carries the A40 merge,
         // nests `PID`/`PD1`/`MRG`/`PV1` inside a repeating `PATIENT` group,
         // and every mapper below addresses segments directly.
@@ -114,6 +163,9 @@ impl Pims {
 
         if has(source, "PID") {
             map_pid(source, &mut out)?;
+            if let Some(lookup) = lookup {
+                enrich_pid(source, &mut out, lookup)?;
+            }
         }
         if a04_or_a08 {
             if has(source, "PD1") {
@@ -142,6 +194,8 @@ impl Pims {
 }
 
 impl Transformer for Pims {
+    /// `PIMS`; the same name as [`PimsTransformer`] so audit text is
+    /// identical whichever is running.
     fn name(&self) -> &'static str {
         "PIMS"
     }
@@ -149,6 +203,154 @@ impl Transformer for Pims {
     fn transform(&mut self, message: &Message) -> Result<Message, TransformError> {
         self.map(message)
     }
+}
+
+/// The service: the mapping, plus §5.10 and §5.11.
+///
+/// # Examples
+///
+/// ```
+/// use hl7_pims_transformer::PimsTransformer;
+/// use hl7_pims_transformer::reference_data::{Dataset, LookupError, ReferenceData};
+/// use ihb_transformer::Transformer;
+///
+/// /// Translates nothing: every code is its own translation.
+/// struct Identity;
+/// impl ReferenceData for Identity {
+///     fn lookup(&self, _: Dataset, code: &str) -> Result<String, LookupError> {
+///         Ok(code.to_owned())
+///     }
+/// }
+///
+/// let mut transformer = PimsTransformer::new(Arc::new(Identity));
+/// let message = ihb_validation::parse(
+///     "MSH|^~\\&|PIMS|X|EMPI|EMPI|20250702085450+0000||ADT^A04^ADT_A01|1|P|2.3.1\r\
+///      EVN||20250702085440+0000\rPID|||1^01^^^NI||T^T||20000101|F",
+/// )?;
+/// let out = transformer.transform(&message)?;
+/// assert_eq!(ihb_fields::read(&out, "PID-32"), "01");
+/// # use std::sync::Arc;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub struct PimsTransformer {
+    /// Where codes are resolved (§5.10); a [`reference_data::LookupClient`]
+    /// in the service, a fake in tests. Shared so the binary can hold one
+    /// TLS configuration for the process lifetime.
+    lookup: Arc<dyn ReferenceData>,
+}
+
+impl std::fmt::Debug for PimsTransformer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PimsTransformer").finish_non_exhaustive()
+    }
+}
+
+impl PimsTransformer {
+    /// A transformer resolving codes through `lookup`.
+    #[must_use]
+    pub fn new(lookup: Arc<dyn ReferenceData>) -> Self {
+        Self { lookup }
+    }
+}
+
+impl Transformer for PimsTransformer {
+    /// `PIMS`; operators match audit text on it (§1.5).
+    fn name(&self) -> &'static str {
+        "PIMS"
+    }
+
+    fn transform(&mut self, message: &Message) -> Result<Message, TransformError> {
+        Pims.map_enriched(message, &*self.lookup)
+    }
+
+    /// §5.11: the incoming properties with `MessageType` replaced by the
+    /// transformed `MSH-9.2`. Never fails; see `spec/09-transformers.md`
+    /// §1.3.3.
+    fn egress_properties(&self, incoming: &Properties, transformed: &Message) -> Properties {
+        // §5.11.1. The incoming `MessageType` is the source trigger
+        // (A04/A08); the transformed topic's subscriptions filter on the
+        // normalised one (A28/A31/A40). Upstream: `PimsTransformer
+        // .get_egress_properties`, 04b30e7.
+        let mut properties = incoming.clone();
+        properties.insert("MessageType".to_owned(), read(transformed, "MSH-9.2"));
+        properties
+    }
+}
+
+/// Whether a source value is absent, blank or the HL7 null (`""`), i.e.
+/// has nothing to translate (§5.10.1; upstream `_is_empty_or_hl7_null`).
+fn is_blank_or_null(value: &str) -> bool {
+    let value = value.trim();
+    value.is_empty() || value == datetime::EXPLICIT_NULL
+}
+
+/// §5.10 — replace the four coded `PID` fields with their eMPI codes.
+///
+/// Upstream: `pid_mapper._apply_reference_lookups`.
+fn enrich_pid(
+    source: &Message,
+    target: &mut Message,
+    lookup: &dyn ReferenceData,
+) -> Result<(), TransformError> {
+    // (dataset, source path, target path, whether a blank target is written)
+    //
+    // `PID-8` alone writes a blank: §5.3 copied the source code into it
+    // already, and skipping the write would leave the untranslated PIMS code
+    // in the outgoing message (§5.10.2, upstream 04b30e7).
+    let jobs = [
+        (Dataset::Gender, read(source, "PID-8"), "PID-8", true),
+        (
+            Dataset::MaritalStatus,
+            read(source, "PID-16.1"),
+            "PID-16.1",
+            false,
+        ),
+        (
+            Dataset::EthnicGroup,
+            read(source, "PID-22.1"),
+            "PID-22.1",
+            false,
+        ),
+        (
+            Dataset::NhsStatus,
+            nhs_status_source(source),
+            "PID-32",
+            false,
+        ),
+    ];
+
+    for (dataset, value, path, write_blank) in jobs {
+        if is_blank_or_null(&value) {
+            continue;
+        }
+        let code = lookup
+            .lookup(dataset, value.trim())
+            .map_err(|error| TransformError::field(path, error.0))?;
+        if code.is_empty() && !write_blank {
+            continue;
+        }
+        set(target, path, &code)?;
+    }
+    Ok(())
+}
+
+/// §5.10 — the `NI` repetition's `CX.2`, the source of `PID-32`.
+///
+/// `PID-32` does not exist in HL7 2.3.1, so PIMS carries the NHS number
+/// status in the check-digit component of the NHS number. The first
+/// repetition whose `CX.5` is `NI` (trimmed, case-insensitive) wins;
+/// upstream `_get_nhs_number_status_source`.
+fn nhs_status_source(source: &Message) -> String {
+    let count = ihb_fields::repetitions(source, "PID-3").len();
+    for index in 1..=count {
+        if read(source, &format!("PID-3[{index}].5"))
+            .trim()
+            .eq_ignore_ascii_case("NI")
+        {
+            return read(source, &format!("PID-3[{index}].2")).trim().to_owned();
+        }
+    }
+    String::new()
 }
 
 /// §5.1 — `MSH`, with its constants and its trigger normalisation.
@@ -180,7 +382,9 @@ fn map_msh(source: &Message, target: &mut Message, trigger: &str) -> Result<(), 
     Ok(())
 }
 
-/// §5.2 — `EVN`.
+/// §5.2 — `EVN`: copies `EVN-1`, and strips the timezone from `EVN-2.1` and
+/// `EVN-6.1` when present (§5.6). A malformed timestamp fails the message
+/// rather than being forwarded unstripped.
 fn map_evn(source: &Message, target: &mut Message) -> Result<(), TransformError> {
     copy(source, target, "EVN-1")?;
     for path in ["EVN-2.1", "EVN-6.1"] {
@@ -262,18 +466,22 @@ fn map_pid(source: &Message, target: &mut Message) -> Result<(), TransformError>
     Ok(())
 }
 
-/// §5.4 — `PD1`.
+/// §5.4 — `PD1`: `PD1-4.1` is copied, and a second `PD1-4` repetition (the
+/// practice) is moved to `PD1-3.3`. Called only for `A04`/`A08` (§5.9).
 fn map_pd1(source: &Message, target: &mut Message) -> Result<(), TransformError> {
     copy(source, target, "PD1-4.1")?;
     // Only when the source `PD1-4` repeats: the second repetition is the
-    // practice, which MPI reads from `PD1-3.3`.
+    // practice, which MPI reads from `PD1-3.3`. `[2]` is 1-based here; the
+    // spec's `PD1-4[1]` and the Python's `[1]` are the same 0-based repetition.
     if ihb_fields::repetitions(source, "PD1-4").len() > 1 {
         copy_to(source, target, "PD1-4[2].1", "PD1-3.3")?;
     }
     Ok(())
 }
 
-/// §5.7 — `MRG`.
+/// §5.7 — `MRG`: copies the prior identifier (`MRG-1.1`) and stamps the
+/// assigning-authority (`103`) and type (`PI`) literals the spec gives.
+/// Called only when the source trigger is exactly `A40`.
 fn map_mrg(source: &Message, target: &mut Message) -> Result<(), TransformError> {
     copy(source, target, "MRG-1.1")?;
     set(target, "MRG-1.4.1", "103")?;
@@ -281,12 +489,12 @@ fn map_mrg(source: &Message, target: &mut Message) -> Result<(), TransformError>
     Ok(())
 }
 
-/// Whether the message carries this segment.
+/// Whether the message carries a segment with this name (any position).
 fn has(message: &Message, name: &str) -> bool {
     message.segments().any(|segment| segment.name == name)
 }
 
-/// How many fields a segment carries.
+/// How many fields the first segment of this name carries; `0` if absent.
 fn field_count(message: &Message, name: &str) -> usize {
     message
         .segments()
@@ -294,7 +502,9 @@ fn field_count(message: &Message, name: &str) -> usize {
         .map_or(0, |segment| segment.fields.len())
 }
 
-/// Copy a whole segment, field by field.
+/// Copy a whole segment, field by field (§5.8).
+///
+/// The count comes from the source, so no trailing empty fields are invented.
 fn copy_segment(source: &Message, target: &mut Message, name: &str) -> Result<(), TransformError> {
     for index in 1..=field_count(source, name) {
         copy(source, target, &format!("{name}-{index}"))?;
@@ -302,7 +512,13 @@ fn copy_segment(source: &Message, target: &mut Message, name: &str) -> Result<()
     Ok(())
 }
 
-/// The output's segments, in §5's order.
+/// The output's segments as bare ER7, in §5's order: `MSH`, `EVN`, `PID`,
+/// then (for `A04`/`A08`) `PD1` and `PV1`, `MRG` for an exact `A40`, then
+/// [`NON_SPECIFIC`].
+///
+/// `PV1` is emitted for A04/A08 even when the source has none, because §5.5
+/// sets `PV1-2` unconditionally; `EVN` is always emitted because `map_evn`
+/// always writes `EVN-1`.
 fn skeleton(source: &Message, trigger: &str, a04_or_a08: bool) -> String {
     let mut names: Vec<&str> = vec!["MSH", "EVN"];
 
@@ -507,6 +723,174 @@ mod tests {
 
         assert!(!mapped.to_er7().contains("PV1"), "{}", mapped.to_er7());
         assert!(!mapped.to_er7().contains("PD1"), "{}", mapped.to_er7());
+    }
+
+    /// A lookup that answers from a table and refuses anything else, as
+    /// upstream's `StubLookupClient` does.
+    struct Stub(Vec<(Dataset, &'static str, &'static str)>);
+
+    impl ReferenceData for Stub {
+        fn lookup(
+            &self,
+            dataset: Dataset,
+            code: &str,
+        ) -> Result<String, crate::reference_data::LookupError> {
+            self.0
+                .iter()
+                .find(|(d, c, _)| *d == dataset && *c == code)
+                .map(|(_, _, target)| (*target).to_owned())
+                .ok_or_else(|| {
+                    crate::reference_data::LookupError(format!(
+                        "no stub mapping for dataset '{}'",
+                        dataset.code_type()
+                    ))
+                })
+        }
+    }
+
+    /// A source with all four coded fields (gender `F`, marital `M`, ethnic
+    /// `1`, NHS status `3`).
+    fn coded() -> Message {
+        a04(&pid(&[
+            (3, "N4000000001^3^^^NI~N1000001^^^^PI"),
+            (8, "F"),
+            (16, "M"),
+            (22, "1"),
+        ]))
+    }
+
+    fn full_table() -> Stub {
+        Stub(vec![
+            (Dataset::Gender, "F", "2"),
+            (Dataset::MaritalStatus, "M", "M1"),
+            (Dataset::EthnicGroup, "1", "A"),
+            (Dataset::NhsStatus, "3", "7"),
+        ])
+    }
+
+    #[test]
+    fn all_four_codes_are_translated() {
+        // spec/09-transformers.md §5.10, upstream test_pid_mapper.
+        let out = Pims.map_enriched(&coded(), &full_table()).unwrap();
+
+        assert_eq!(read(&out, "PID-8"), "2");
+        assert_eq!(read(&out, "PID-16.1"), "M1");
+        assert_eq!(read(&out, "PID-22.1"), "A");
+        assert_eq!(read(&out, "PID-32"), "7");
+    }
+
+    #[test]
+    fn without_a_lookup_nothing_is_enriched() {
+        // §5.10 vs the golden corpus: `Pims::map` is the unenriched mapping.
+        let out = Pims.map(&coded()).unwrap();
+
+        assert_eq!(read(&out, "PID-8"), "F", "the §5.3 copy");
+        assert_eq!(read(&out, "PID-16.1"), "");
+        assert_eq!(read(&out, "PID-32"), "");
+    }
+
+    #[test]
+    fn a_blank_target_leaves_marital_ethnic_and_nhs_unset() {
+        // §5.10.2; upstream test_blank_target_code_leaves_field_unset.
+        let table = Stub(vec![
+            (Dataset::Gender, "F", "F"),
+            (Dataset::MaritalStatus, "M", ""),
+            (Dataset::EthnicGroup, "1", ""),
+            (Dataset::NhsStatus, "3", ""),
+        ]);
+        let out = Pims.map_enriched(&coded(), &table).unwrap();
+
+        assert_eq!(read(&out, "PID-8"), "F");
+        assert_eq!(read(&out, "PID-16.1"), "");
+        assert_eq!(read(&out, "PID-22.1"), "");
+        assert_eq!(read(&out, "PID-32"), "");
+    }
+
+    #[test]
+    fn a_blank_gender_target_clears_the_copied_source_code() {
+        // §5.10.2; upstream test_blank_gender_target_clears_copied_source_code.
+        let table = Stub(vec![
+            (Dataset::Gender, "F", ""),
+            (Dataset::MaritalStatus, "M", ""),
+            (Dataset::EthnicGroup, "1", ""),
+            (Dataset::NhsStatus, "3", ""),
+        ]);
+        let out = Pims.map_enriched(&coded(), &table).unwrap();
+
+        assert_eq!(read(&out, "PID-8"), "", "the PIMS code must not leak");
+        assert!(!out.to_er7().contains("|F|"), "{}", out.to_er7());
+    }
+
+    #[test]
+    fn absent_and_null_sources_are_not_looked_up() {
+        // §5.10.1: an empty table would fail any lookup that was attempted.
+        let none = Stub(vec![]);
+        let bare = a04(&pid(&[(3, "N4000000001^3^^^XX"), (16, "\"\""), (22, "  ")]));
+
+        let out = Pims.map_enriched(&bare, &none).unwrap();
+
+        assert_eq!(read(&out, "PID-16.1"), "");
+        assert_eq!(read(&out, "PID-32"), "", "no NI repetition, no source");
+    }
+
+    #[test]
+    fn the_nhs_status_comes_from_the_ni_repetition_wherever_it_is() {
+        // §5.10: first repetition whose CX.5 is NI, case-insensitive.
+        let message = a04(&pid(&[(3, "N1^^^^PI~N4000000001^3^^^ni")]));
+        let table = Stub(vec![(Dataset::NhsStatus, "3", "7")]);
+
+        let out = Pims.map_enriched(&message, &table).unwrap();
+
+        assert_eq!(read(&out, "PID-32"), "7");
+    }
+
+    #[test]
+    fn a_failed_lookup_fails_the_transform_without_the_code() {
+        // §5.10.3 and spec/index.md §0.8.
+        let error = Pims
+            .map_enriched(&coded(), &Stub(vec![]))
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("PID-8"), "{error}");
+        assert!(error.contains("gender"), "{error}");
+    }
+
+    #[test]
+    fn the_outgoing_message_type_is_the_transformed_trigger() {
+        // §5.11.1; upstream test_get_egress_properties_*.
+        let mut transformer = PimsTransformer::new(Arc::new(full_table()));
+        let mut incoming = Properties::new();
+        incoming.insert("SourceSystem".into(), "PIMS".into());
+        incoming.insert("CorrelationId".into(), "abc".into());
+        incoming.insert("MessageType".into(), "ORIGINAL".into());
+
+        let out = transformer.transform(&coded()).unwrap();
+        let properties = transformer.egress_properties(&incoming, &out);
+
+        assert_eq!(properties["MessageType"], "A28");
+        assert_eq!(properties["SourceSystem"], "PIMS");
+        assert_eq!(properties["CorrelationId"], "abc");
+        assert_eq!(incoming["MessageType"], "ORIGINAL", "not mutated");
+
+        let alone = transformer.egress_properties(&Properties::new(), &out);
+        assert_eq!(alone.len(), 1);
+        assert_eq!(alone["MessageType"], "A28");
+    }
+
+    #[test]
+    fn the_runtime_hook_sends_the_corrected_properties() {
+        // §1.3.3 through the blanket `PayloadTransformer` implementation.
+        use ihb_transformer::PayloadTransformer;
+        let mut transformer = PimsTransformer::new(Arc::new(full_table()));
+        let mut incoming = Properties::new();
+        incoming.insert("MessageType".into(), "A08".into());
+
+        let (_, properties) = transformer
+            .transform_payload_with_properties(&coded().to_er7(), &incoming)
+            .unwrap();
+
+        assert_eq!(properties["MessageType"], "A28");
     }
 
     #[test]

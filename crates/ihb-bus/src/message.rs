@@ -49,6 +49,10 @@ impl Outgoing {
     }
 
     /// Set the Service Bus message id.
+    ///
+    /// Replaces any earlier id. Ingress passes `MSH-10` so that duplicate
+    /// detection (when enabled on the queue) keys on the source system's own
+    /// identifier rather than one minted here.
     #[must_use]
     pub fn with_message_id(mut self, id: impl Into<String>) -> Self {
         self.message_id = Some(id.into());
@@ -56,6 +60,10 @@ impl Outgoing {
     }
 
     /// Set the session.
+    ///
+    /// Required for a session-enabled queue: the broker rejects a send
+    /// without one (`spec/01-architecture.md` §2.3.1). The value is a flow
+    /// name such as `phw-to-mpi`, never a message identifier (§2.3.2).
     #[must_use]
     pub fn with_session(mut self, session: impl Into<String>) -> Self {
         self.session_id = Some(session.into());
@@ -63,13 +71,20 @@ impl Outgoing {
     }
 
     /// Set the session, when there is one.
+    ///
+    /// Passing `None` clears any session already set, which is what lets one
+    /// code path serve both session-enabled queues and the message-store
+    /// queue (`spec/01-architecture.md` §2.3.3).
     #[must_use]
     pub fn with_optional_session(mut self, session: Option<&str>) -> Self {
         self.session_id = session.map(str::to_string);
         self
     }
 
-    /// Attach application properties.
+    /// Attach application properties, replacing any already set.
+    ///
+    /// Not merged: a forwarding hop passes the received map through whole so
+    /// the tracking keys arrive unchanged (`spec/03-message-bus.md` §4).
     #[must_use]
     pub fn with_properties(mut self, properties: Properties) -> Self {
         self.properties = properties;
@@ -180,6 +195,10 @@ impl Peeked {
 
 impl Incoming {
     /// The body as text, when it is valid UTF-8.
+    ///
+    /// Copies the body, so call it once per message rather than per field.
+    /// `None` means a non-UTF-8 payload, which the caller must reject rather
+    /// than lossily decode (`spec/index.md` §0.6).
     #[must_use]
     pub fn text(&self) -> Option<String> {
         String::from_utf8(self.body.clone()).ok()

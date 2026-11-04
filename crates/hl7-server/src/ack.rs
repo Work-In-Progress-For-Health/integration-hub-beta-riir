@@ -8,14 +8,15 @@
 //! place is not a cosmetic defect; it is a source system deciding its
 //! message was lost and sending it again.
 //!
-//! # Only ever `AA`
+//! # `AA` only for a forwarded message
 //!
-//! There is no code path here that produces `AE` or `AR`. A message this
-//! server cannot accept gets **no reply at all**, and the connection
-//! carries the failure by closing (§4.3). That is the Python's behaviour —
-//! every failure path re-raises out of `reply` — and the source systems'
-//! retry logic is built on it. Returning a negative acknowledgement instead
-//! would look more correct and would silently stop messages being retried.
+//! [`build`] is the `AA`. A message the server cannot forward gets a
+//! negative acknowledgement instead (`spec/07-hl7-server.md` §4.3):
+//! [`build_nack`] when the message parsed and its header can be echoed,
+//! [`build_generic_nack`] when it did not. `AR` means the message is invalid
+//! and retrying will not help; `AE` means try again. The senders classify on
+//! exactly that (`spec/10-senders.md` §3.7.1), so choosing the wrong code is
+//! choosing between a dead letter and a retry storm.
 
 use hl7_2::Message;
 use ihb_fields::read;
@@ -31,6 +32,21 @@ const ACK: &str = "ACK";
 
 /// `MSA-1` for an accepted message.
 const ACCEPT: &str = "AA";
+
+/// `MSA-1`: the message is invalid; do not send it again.
+pub const REJECT: &str = "AR";
+
+/// `MSA-1`: the server failed; send it again.
+pub const ERROR: &str = "AE";
+
+/// `MSH-12` of a NACK when there is no inbound message to copy it from.
+const DEFAULT_VERSION: &str = "2.5";
+
+/// The `MSH-10` limit, which bounds a generated control id.
+const GENERATED_CONTROL_ID_LENGTH: usize = 20;
+
+/// The HL7 `ST` limit, which bounds `MSA-3`.
+const MAX_NACK_REASON_LENGTH: usize = 199;
 
 /// `MSH-11` when the inbound message did not say.
 const PRODUCTION: &str = "P";
@@ -128,6 +144,104 @@ pub fn build(inbound: &Message, now: &str) -> String {
     let msa = ["MSA", ACCEPT, &control_id].join(&FIELD_SEPARATOR.to_string());
 
     format!("{msh}\r{msa}")
+}
+
+/// Build an `AR` or `AE` echoing a message that did parse.
+///
+/// `spec/07-hl7-server.md` §4.3.1. The header is built exactly as [`build`]
+/// builds it, so the two cannot drift; only `MSA-1` and `MSA-3` differ.
+///
+/// # Examples
+///
+/// ```
+/// use hl7_server::ack::{build_nack, REJECT};
+///
+/// let inbound = ihb_validation::parse(
+///     "MSH|^~\\&|252|252|100|100|20250505232332||ADT^A31^ADT_A05|M1|P|2.5",
+/// )?;
+/// let nack = build_nack(&inbound, REJECT, "Message has wrong version", "20260820091500");
+///
+/// assert!(nack.ends_with("MSA|AR|M1|Message has wrong version"), "{nack}");
+/// # Ok::<(), ihb_validation::ValidationError>(())
+/// ```
+#[must_use]
+pub fn build_nack(inbound: &Message, code: &str, reason: &str, now: &str) -> String {
+    let accepted = build(inbound, now);
+    let (msh, msa) = accepted.split_once('\r').unwrap_or((&accepted, ""));
+    let control_id = msa.split('|').nth(2).unwrap_or_default();
+
+    // MSH-12 falls back where `build` leaves it empty, because a NACK is
+    // the one reply that must be parseable when the inbound was sloppy.
+    let msh = if read(inbound, "MSH-12").is_empty() {
+        let mut fields: Vec<&str> = msh.split('|').collect();
+        if let Some(last) = fields.last_mut() {
+            *last = DEFAULT_VERSION;
+        }
+        fields.join("|")
+    } else {
+        msh.to_string()
+    };
+
+    format!("{msh}\rMSA|{code}|{control_id}|{}", sanitize_reason(reason))
+}
+
+/// Build an `AE` when no message could be recovered.
+///
+/// `spec/07-hl7-server.md` §4.3.2: the frame was oversized, not UTF-8, or
+/// did not parse, so there is no header to echo. `control_id` is generated
+/// when `None`.
+///
+/// # Examples
+///
+/// ```
+/// use hl7_server::ack::build_generic_nack;
+///
+/// let nack = build_generic_nack("could not parse", Some("GEN1"), "20260820091500");
+///
+/// assert_eq!(
+///     nack,
+///     "MSH|^~\\&|||||20260820091500||ACK^^ACK|GEN1|P|2.5\rMSA|AE|GEN1|could not parse"
+/// );
+/// ```
+#[must_use]
+pub fn build_generic_nack(reason: &str, control_id: Option<&str>, now: &str) -> String {
+    let generated = control_id.map_or_else(generate_control_id, ToString::to_string);
+    let control_id = generated.as_str();
+
+    format!(
+        "MSH|{ENCODING_CHARACTERS}|||||{now}||{ACK}^^{ACK}|{control_id}|{PRODUCTION}|{DEFAULT_VERSION}\
+         \rMSA|{ERROR}|{control_id}|{}",
+        sanitize_reason(reason)
+    )
+}
+
+/// A fresh `MSH-10`: the first 20 hex characters of a UUID.
+#[must_use]
+pub fn generate_control_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()[..GENERATED_CONTROL_ID_LENGTH].to_string()
+}
+
+/// `spec/07-hl7-server.md` §4.3.3: no line breaks, delimiters escaped,
+/// at most 199 characters.
+///
+/// The cap is applied to the **input** first, as upstream does, so an
+/// escape sequence is never cut in half.
+fn sanitize_reason(reason: &str) -> String {
+    reason
+        .chars()
+        .take(MAX_NACK_REASON_LENGTH)
+        .map(|c| if c == '\r' || c == '\n' { ' ' } else { c })
+        .fold(String::new(), |mut out, c| {
+            match c {
+                '|' => out.push_str("\\F\\"),
+                '^' => out.push_str("\\S\\"),
+                '&' => out.push_str("\\T\\"),
+                '~' => out.push_str("\\R\\"),
+                '\\' => out.push_str("\\E\\"),
+                other => out.push(other),
+            }
+            out
+        })
 }
 
 /// Re-exported from [`ihb_fields::timestamp`], where it lives so that
@@ -268,5 +382,73 @@ mod tests {
 
         assert_eq!(now.len(), 14, "{now}");
         assert!(now.chars().all(|c| c.is_ascii_digit()), "{now}");
+    }
+
+    #[test]
+    fn a_nack_echoes_the_header_with_the_code_and_reason() {
+        // spec/07-hl7-server.md §4.3.1.
+        for code in [REJECT, ERROR] {
+            let nack = build_nack(&inbound("2.5", "T"), code, "why", "20260820091500");
+            let ack = build(&inbound("2.5", "T"), "20260820091500");
+
+            assert_eq!(
+                nack.split('\r').next(),
+                ack.split('\r').next(),
+                "the header is the AA's"
+            );
+            assert!(nack.ends_with(&format!("MSA|{code}|MSGID1|why")), "{nack}");
+        }
+    }
+
+    #[test]
+    fn a_nack_for_a_message_without_a_version_still_has_one() {
+        // spec/07-hl7-server.md §4.3.1 — MSH-12 falls back to 2.5.
+        let message =
+            ihb_validation::parse("MSH|^~\\&|252|252|100|100|20250505232332||ADT^A31|M1|P|")
+                .unwrap();
+        let nack = build_nack(&message, ERROR, "x", "20260820091500");
+
+        assert!(nack.contains("|M1|P|2.5\r"), "{nack}");
+    }
+
+    #[test]
+    fn a_generic_nack_has_the_shape_of_section_4_3_2() {
+        let nack = build_generic_nack("bad", Some("CTRL"), "20260820091500");
+
+        assert_eq!(
+            nack,
+            "MSH|^~\\&|||||20260820091500||ACK^^ACK|CTRL|P|2.5\rMSA|AE|CTRL|bad"
+        );
+    }
+
+    #[test]
+    fn a_generated_control_id_fits_msh_10() {
+        let id = generate_control_id();
+
+        assert_eq!(id.len(), 20, "{id}");
+        assert_ne!(id, generate_control_id());
+        let nack = build_generic_nack("x", None, "20260820091500");
+        assert!(
+            nack.contains(&format!("|{id}|")) || nack.contains("|ACK^^ACK|"),
+            "{nack}"
+        );
+    }
+
+    #[test]
+    fn the_reason_cannot_break_the_segment() {
+        // spec/07-hl7-server.md §4.3.3.
+        let nack = build_generic_nack("a|b^c&d~e\\f\r\ng", Some("C"), "20260820091500");
+        let msa = nack.split('\r').nth(1).unwrap();
+
+        assert_eq!(nack.matches('\r').count(), 1, "{nack:?}");
+        assert_eq!(msa, "MSA|AE|C|a\\F\\b\\S\\c\\T\\d\\R\\e\\E\\f  g");
+    }
+
+    #[test]
+    fn the_reason_is_capped_at_199_characters() {
+        // spec/07-hl7-server.md §4.3.3 — the HL7 ST limit.
+        let nack = build_generic_nack(&"x".repeat(1000), Some("C"), "20260820091500");
+
+        assert_eq!(nack.rsplit('|').next().unwrap().len(), 199);
     }
 }

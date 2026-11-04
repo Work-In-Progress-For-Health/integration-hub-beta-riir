@@ -62,6 +62,29 @@ impl Scope {
         )
     }
 
+    /// The URL listing every topic in a namespace, with its runtime counts
+    /// (`spec/15-dashboard.md` §10.5.1).
+    #[must_use]
+    pub fn topics_url(&self, namespace: &str) -> String {
+        format!(
+            "{ARM_HOST}/subscriptions/{}/resourceGroups/{}\
+             /providers/Microsoft.ServiceBus/namespaces/{}/topics\
+             ?api-version={SERVICE_BUS_API_VERSION}",
+            self.subscription_id, self.resource_group, namespace,
+        )
+    }
+
+    /// The URL listing a topic's subscriptions (§10.5.1).
+    #[must_use]
+    pub fn subscriptions_url(&self, namespace: &str, topic: &str) -> String {
+        format!(
+            "{ARM_HOST}/subscriptions/{}/resourceGroups/{}\
+             /providers/Microsoft.ServiceBus/namespaces/{}/topics/{}/subscriptions\
+             ?api-version={SERVICE_BUS_API_VERSION}",
+            self.subscription_id, self.resource_group, namespace, topic,
+        )
+    }
+
     /// The URL listing every Container App in the group.
     #[must_use]
     pub fn container_apps_url(&self) -> String {
@@ -126,6 +149,47 @@ pub fn parse_queues(
             Some((name, depths))
         })
         .collect()
+}
+
+/// Read every topic and its subscriptions (§10.5.1).
+///
+/// A topic whose subscriptions could not be listed is returned with none and
+/// `subscriptions_read: false`, so the caller can tell "no subscriptions"
+/// from "could not ask".
+///
+/// # Errors
+///
+/// [`HttpError`] when the topic list itself could not be read.
+pub async fn topics(
+    client: &HttpsClient,
+    token: &str,
+    scope: &Scope,
+    namespace: &str,
+) -> Result<Vec<crate::topics::Topic>, HttpError> {
+    let document = client
+        .get_json(&scope.topics_url(namespace), Some(token))
+        .await?;
+    let mut topics = crate::topics::parse_topics(&document);
+
+    for topic in &mut topics {
+        match client
+            .get_json(
+                &scope.subscriptions_url(namespace, &topic.name),
+                Some(token),
+            )
+            .await
+        {
+            Ok(document) => {
+                topic.subscriptions = crate::topics::parse_subscriptions(&document, &topic.name);
+            }
+            Err(error) => {
+                tracing::warn!(%error, "could not list a topic's subscriptions");
+                topic.subscriptions_read = false;
+            }
+        }
+    }
+
+    Ok(topics)
 }
 
 /// Read every Container App's state (§3.2's container row).

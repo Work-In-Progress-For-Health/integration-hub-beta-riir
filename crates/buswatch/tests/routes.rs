@@ -522,3 +522,65 @@ async fn a_queue_that_is_not_configured_is_not_shown() {
 
     assert!(!body.contains("gamma"), "{body}");
 }
+
+#[tokio::test]
+async fn the_refresh_bar_and_theme_control_render_and_their_script_is_served() {
+    // spec/14-buswatch.md §7.5, §8.1.2.
+    let app = App::new();
+
+    let (status, body) = app.get("/").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains(r#"id="refresh-bar""#), "{body}");
+    assert!(body.contains("Last updated"));
+    assert!(body.contains(r#"id="theme-toggle""#));
+    assert!(body.contains("/static/buswatch.js"));
+    // Without JavaScript the bar still has a way to refresh.
+    assert!(body.contains("/?refresh_all=true"));
+
+    let response = router(Arc::clone(&app.state))
+        .oneshot(
+            Request::builder()
+                .uri("/static/buswatch.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()["content-type"],
+        "text/javascript; charset=utf-8"
+    );
+}
+
+#[tokio::test]
+async fn the_stylesheet_has_a_dark_theme_that_the_control_can_override() {
+    // §7.5.
+    let css = buswatch::web::STYLESHEET_FOR_TESTS;
+
+    assert!(css.contains("prefers-color-scheme: dark"));
+    assert!(css.contains(r#":root[data-theme="dark"]"#));
+    assert!(
+        css.contains(r#":root:not([data-theme="light"])"#),
+        "light must win over the system"
+    );
+}
+
+#[tokio::test]
+async fn a_subscription_is_listed_beside_the_queues_and_its_name_survives_the_url() {
+    // §2.2.1 -- `topic:subscription` is a path segment, so the colon has to
+    // round-trip through the links the page builds.
+    let config = Config::from_pairs([("BUSWATCH_QUEUE_NAMES", "q,topic:sub")]).unwrap();
+    let app = App {
+        state: Arc::new(AppState::new(FakeReader::new(), config)),
+    };
+    app.reader().push("topic:sub", 7, "hello");
+
+    let (_, index) = app.get("/").await;
+    assert!(index.contains("topic:sub"), "{index}");
+    assert!(index.contains("/messages/topic%3Asub/7"), "{index}");
+
+    let (status, detail) = app.get("/messages/topic%3Asub/7").await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(detail.contains("hello"));
+}

@@ -8,6 +8,11 @@
 //! a fresh message and copies nothing else except the non-specific segments
 //! of §4.6. A field not in §4's tables does not reach MPI.
 //!
+//! Where it fits: one hop between the `hl7-server` ingress queue and the MPI
+//! egress queue, run by [`ihb_transformer::main_loop::run`]. It is pure and
+//! synchronous (no network call, unlike the core-reference transformer), so
+//! every behaviour is covered by the golden-file tests in `tests/golden.rs`.
+//!
 //! # The health-board prefix
 //!
 //! The one piece of real business logic here is §4.3.2, and it is worth
@@ -31,6 +36,9 @@ pub const HEALTH_BOARDS: &[(&str, &str)] = &[
 ];
 
 /// Segments §4.6 copies verbatim, in this order.
+///
+/// The order is the output order: `skeleton` lays the segments out from this
+/// list, so reordering it reorders what MPI receives.
 pub const NON_SPECIFIC: &[&str] = &[
     "PV1", "PV2", "OBX", "AL1", "DG1", "PR1", "GT1", "IN1", "IN2", "IN3",
 ];
@@ -59,16 +67,27 @@ pub fn health_board(msh3: &str) -> Option<&'static str> {
         .map(|(_, prefix)| *prefix)
 }
 
-/// The ChemoCare mapping.
+/// The ChemoCare mapping (§4).
+///
+/// A unit struct: the mapping holds no configuration and no per-message
+/// state, so the same value can be reused for every message.
 #[derive(Debug, Default)]
 pub struct Chemo;
 
 impl Chemo {
-    /// Map one message.
+    /// Map one message into a freshly built one (§4).
+    ///
+    /// Segments are emitted in §4's order (`MSH`, `EVN`, `PID`, `PD1`, `NK1`,
+    /// then [`NON_SPECIFIC`]); a segment the source lacks is absent from the
+    /// output, not emitted empty. Trailing separators are trimmed last so the
+    /// output matches the Python's `hl7apy` serialisation byte for byte.
     ///
     /// # Errors
     ///
-    /// [`TransformError`] when a field cannot be written.
+    /// [`TransformError::Parse`] if the skeleton cannot be parsed, or
+    /// [`TransformError`] when a mapped field cannot be written. A failure
+    /// copying a [`NON_SPECIFIC`] segment is *not* an error (§4.6.1).
+    /// Messages in the error carry paths, never field values.
     pub fn map(&self, message: &Message) -> Result<Message, TransformError> {
         let mut out = ihb_validation::parse(&skeleton(message))
             .map_err(|error| TransformError::Parse(error.to_string()))?;
@@ -117,7 +136,8 @@ impl Transformer for Chemo {
     }
 }
 
-/// §4.1 — `MSH`.
+/// §4.1 — `MSH`: copies the sender, receiver, time and control fields,
+/// forces `MSH-9.3` to `ADT_A05` and `MSH-12.1` to `2.5`.
 fn map_msh(source: &Message, target: &mut Message) -> Result<(), TransformError> {
     for path in [
         "MSH-3.1", "MSH-4.1", "MSH-5.1", "MSH-6.1", "MSH-7.1", "MSH-8",
@@ -141,6 +161,9 @@ fn map_msh(source: &Message, target: &mut Message) -> Result<(), TransformError>
 }
 
 /// §4.3 — `PID`, including the health-board prefix.
+///
+/// Each `copy` is a no-op for an empty source value (`spec/09-transformers.md`
+/// §2.1), so absent fields stay absent in the output.
 fn map_pid(source: &Message, target: &mut Message) -> Result<(), TransformError> {
     copy(source, target, "PID-1")?;
 
@@ -211,7 +234,8 @@ fn map_pid(source: &Message, target: &mut Message) -> Result<(), TransformError>
     Ok(())
 }
 
-/// §4.4 — `PD1`.
+/// §4.4 — `PD1`: only `PD1-3` and `PD1-4` components are carried; the rest
+/// of the segment does not reach MPI.
 fn map_pd1(source: &Message, target: &mut Message) -> Result<(), TransformError> {
     for component in [1, 3, 4, 5, 7, 9] {
         copy(source, target, &format!("PD1-3.{component}"))?;
@@ -226,7 +250,7 @@ fn map_pd1(source: &Message, target: &mut Message) -> Result<(), TransformError>
     Ok(())
 }
 
-/// §4.5 — `NK1`.
+/// §4.5 — `NK1`: name, relationship, address and phone components only.
 fn map_nk1(source: &Message, target: &mut Message) -> Result<(), TransformError> {
     copy(source, target, "NK1-2.2")?;
     copy(source, target, "NK1-2.7")?;
@@ -239,7 +263,7 @@ fn map_nk1(source: &Message, target: &mut Message) -> Result<(), TransformError>
     Ok(())
 }
 
-/// The first of two paths that reads non-empty (§4.3.1).
+/// The first of two paths that reads non-empty (§4.3.1); empty when both are.
 fn first_non_empty(message: &Message, primary: &str, fallback: &str) -> String {
     let value = read(message, primary);
     if value.is_empty() {
@@ -249,7 +273,8 @@ fn first_non_empty(message: &Message, primary: &str, fallback: &str) -> String {
     }
 }
 
-/// How many repetitions a field has.
+/// How many repetitions a field has (an absent field has none or one,
+/// per `ihb_fields::repetitions`).
 fn repetition_count(message: &Message, path: &str) -> usize {
     ihb_fields::repetitions(message, path).len()
 }
@@ -267,7 +292,10 @@ fn field_count(message: &Message, name: &str) -> usize {
         .map_or(0, |segment| segment.fields.len())
 }
 
-/// Copy a whole segment, field by field.
+/// Copy a whole segment, field by field (§4.6).
+///
+/// The count comes from the source, so no trailing empty fields are invented.
+/// Used for `EVN` and the [`NON_SPECIFIC`] segments, which §4 does not remap.
 fn copy_segment(source: &Message, target: &mut Message, name: &str) -> Result<(), TransformError> {
     for index in 1..=field_count(source, name) {
         copy(source, target, &format!("{name}-{index}"))?;
@@ -275,7 +303,11 @@ fn copy_segment(source: &Message, target: &mut Message, name: &str) -> Result<()
     Ok(())
 }
 
-/// The output's segments, in §4's order.
+/// The output's segment layout as bare ER7 (`MSH|^~\&|` then `NAME|` per
+/// segment), in §4's order, containing only segments the source has.
+///
+/// Built up front because `hl7-2` writes into segments that already exist;
+/// `hl7apy` added them as each mapper ran.
 fn skeleton(source: &Message) -> String {
     let mut names: Vec<&str> = vec!["MSH"];
     for name in ["EVN", "PID", "PD1", "NK1"] {

@@ -19,7 +19,7 @@ kinds:
 
 | Kind | Reads from | Writes to | Crates |
 | --- | --- | --- | --- |
-| **Ingress server** | A network socket (MLLP or HTTP/SOAP) | A pre-transform queue or a topic, plus the message-store queue | `hl7-server`, `hl7-soap-server` |
+| **Ingress server** | A network socket (MLLP or HTTP/SOAP) | A pre-transform queue or a topic, plus the message-store queue | `hl7-server`, `hl7-soap-server`, `hl7-rest-server`, `rest-server` (`19-rest-servers.md`) |
 | **Transformer** | A pre-transform queue | A post-transform queue | `hl7-phw-transformer`, `hl7-chemo-transformer`, `hl7-pims-transformer`, `xml-fhir-proms-transformer` |
 | **Sender** | A post-transform queue or a topic subscription | A network socket (MLLP or HTTP/SOAP), plus the message-store queue | `hl7-sender`, `hl7-subscription-sender`, `soap-sender`, `soap-subscription-sender` |
 | **Persistence** | The message-store queue, or Azure SQL | Azure SQL, or a priority queue | `message-store-service`, `message-replay-job` |
@@ -49,18 +49,38 @@ validation profile.
 | Flow | `WORKFLOW_ID` | Port | Ingress | Pre-transform queue | Transformer | Post-transform queue | Destination |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | PHW → MPI | `phw-to-mpi` | 2575 | `hl7-server` | `…-phw-transformer-ingress` | `hl7-phw-transformer` | `…-mpi-sender-ingress` | MPI |
-| Paris → MPI | `paris-to-mpi` | 2577 | `hl7-server` | *(none)* | *(none)* | `…-mpi-sender-ingress` | MPI |
+| CAV Paris → MPI | `paris-to-mpi` | 2577 | `hl7-server` | *(none)* | *(none)* | topic `…-cav-paris-mpi-sender-ingress` (§2.1.3) | MPI |
 | ChemoCare → MPI | `chemocare-to-mpi` | 2578 | `hl7-server` | `…-chemo-transformer-ingress` | `hl7-chemo-transformer` | `…-mpi-sender-ingress` | MPI |
 | PIMS → MPI | `pims-to-mpi` | 2579 | `hl7-server` | `…-pims-transformer-ingress` | `hl7-pims-transformer` | `…-mpi-sender-ingress` | MPI |
 | MPI → Topic (outbound) | `mpi-to-topic` | 2580 | `hl7-server` | topic `mpihl7input` | *(none)* | subscriptions of `mpihl7input` | Downstream systems |
-| WDS → MPI | `wds-to-mpi` | 2582 | `hl7-server` | *(none)* | *(none)* | `…-mpi-sender-ingress` | MPI |
-| Mosaiq → MPI | `mosaiq-to-mpi` | 2583 | `hl7-server` | *(none)* | *(none)* | `…-mpi-sender-ingress` | MPI |
+| WDS → MPI | `wds-to-mpi` | 2582 | `hl7-server` | *(none)* | *(none)* | `…-mpi-sender-ingress` (queue here; a topic upstream, §2.1.3) | MPI |
+| Mosaiq → MPI | `mosaiq-to-mpi` | 2583 | `hl7-server` | *(none)* | *(none)* | topic `…-mosaiq-mpi-sender-ingress` (§2.1.3) | MPI |
+| RISP → MPI | `risp-to-mpi` | 8080 | `hl7-rest-server` | topic `…-core-reference-transformer-ingress` | `hl7-core-reference-transformer` | topic `…-risp-mpi-sender-ingress` (§2.1.3) | MPI (and WRRS, topic `…-wrrs-outbound`) |
 | LIMS → MPI | `lims-soapserver` | 8080 | `hl7-soap-server` | `…-lims-transformer-ingress` | *(future)* | — | MPI |
 
 §2.1.1 Queue names shown as `…-` are prefixed by the namespace and
 environment: locally `local-inthub-`. The full name always comes from an
 environment variable ([`02-configuration.md`](02-configuration.md)); nothing
 in this workspace constructs a queue name from parts.
+
+§2.1.3 **Queue to topic (upstream `b2d0978`, `2b26c7f`, `9e797ac`, `7157ee3`,
+`8c1d012`).** Upstream moved the MPI-bound flows from the shared
+`…-mpi-sender-ingress` queue to topics. A server publishes to a topic with
+`EGRESS_TOPIC_NAME` and its own `EGRESS_SESSION_ID`; a **dedicated
+`hl7-sender`** per flow reads the matching subscription with
+`INGRESS_TOPIC_NAME`, `INGRESS_SUBSCRIPTION_NAME` and `INGRESS_SESSION_ID`
+(`02-configuration.md` §6.1.1). The dedicated flows here are Mosaiq, CAV
+Paris and RISP; each delivers to the *topic* mock receiver
+(`11-mock-receivers.md` §5). Every subscription requires sessions, as every
+queue does (§4.1).
+
+§2.1.4 **Not migrated here: PHW, ChemoCare, PIMS and WDS.** Upstream's
+`8c1d012` also moved their shared `…-mpi-sender-ingress` to a topic. That
+shared name is what `ihb-e2e`'s `phw_to_mpi` and `in_compose` fixtures and
+`18-deployment.md` §5.3 are written against, and a queue and a topic cannot
+share a name in one namespace, so migrating it means rewriting both
+emulator-backed tests, which cannot be run without a broker. It is recorded
+in `docs/upstream-sync-2026-10.md` and left as a queue until it can be run.
 
 §2.1.2 Ports 2575, 2577–2583 and 8080 are the deployment contract. A
 service MUST bind the port given by `PORT` and MUST NOT assume a default
@@ -203,8 +223,14 @@ an idle queue.
 | `local-inthub-chemo-transformer-ingress` | queue | Chemo server → Chemo transformer |
 | `local-inthub-pims-transformer-ingress` | queue | PIMS server → PIMS transformer |
 | `local-inthub-lims-transformer-ingress` | queue | LIMS SOAP server → *(future)* |
-| `local-inthub-mpi-sender-ingress` | queue | Transformers, Paris/WDS/Mosaiq servers → MPI sender |
+| `local-inthub-mpi-sender-ingress` | queue | Transformers, WDS server → MPI sender |
 | `local-inthub-mpi-mock-receiver` | queue, **no session** | Mock receiver's forwarding sink |
+| `local-inthub-cav-paris-mpi-sender-ingress` / `-sub` | topic / subscription | Paris server → Paris MPI sender (§2.1.3) |
+| `local-inthub-mosaiq-mpi-sender-ingress` / `-sub` | topic / subscription | Mosaiq server → Mosaiq MPI sender (§2.1.3) |
+| `local-inthub-risp-mpi-sender-ingress` / `-sub` | topic / subscription | RISP transformer → RISP MPI sender (§2.1.3) |
+| `local-inthub-core-reference-transformer-ingress` / `-sub` | topic / subscription | RISP REST server → core-reference transformer |
+| `local-inthub-wrrs-outbound` / `-sub` | topic / subscription | RISP REST server → WRRS |
+| `local-inthub-hl7-topic-mock-receiver` / `-verifier` | topic / subscription | Topic mock receiver's forwarding sink |
 | `local-inthub-messagestore` | queue, **no session** | All components → message store service |
 | `local-inthub-priority-messagequeue` | queue | Replay job → priority processing |
 | `local-inthub-soap-sender` | queue | SOAP sender ingress |

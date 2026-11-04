@@ -50,6 +50,10 @@ it is a change in what an operator sees and needs the Hub team's agreement.
 | `/trace/{operation_id}` | One distributed trace |
 | `/alarms` | Alarm state |
 | `/alarms/config` | Alarm configuration |
+| `/alarms/pauses` | Alarm pauses: active, scheduled, recently ended (§10.2) |
+| `/contacts` | Who to call about a flow (§10.3) |
+| `/network-test` | TCP connectivity test (§10.4) |
+| `/network-test/config` | Flow source servers (§10.4.5) |
 | `/set-language` (`POST`) | Set the display language (§6) |
 
 ### §2.2 JSON API
@@ -68,6 +72,7 @@ MUST NOT change without changing the script.
 | `/api/servicebus-metrics` | Queue and dead-letter depths |
 | `/api/hl7-throughput` | Messages per interval |
 | `/api/alarms/status` | Alarm state |
+| `/api/alarm-pauses`, `/api/contacts`, `/api/network-test/*` | §10.2–§10.4 |
 
 §2.2.1 `/api/status` is served from a **30-second in-memory cache**. The
 cache is shared across requests and refreshed on demand by `/api/refresh`.
@@ -314,8 +319,8 @@ order decides what an operator sees:
 
 1. A rule with `deleted` set, or without `alarm_enabled`, is not evaluated
    at all.
-2. A rule whose `paused_until` is in the future reports `paused` and is not
-   evaluated further. A `paused_until` in the past is **cleared** and
+2. A rule covered by an active pause record (§10.2), or whose `paused_until`
+   is in the future, reports `paused` and is not evaluated further. A `paused_until` in the past is **cleared** and
    evaluation continues, so a lapsed pause does not linger.
 3. No data at all reports `unknown`. Not `healthy`: a silent query and a
    silent flow must not look the same (§4.5).
@@ -427,6 +432,9 @@ database `COSMOS_DATABASE`, container `COSMOS_CONTAINER`, partition key
 | blank | — | Persistence disabled; reads return empty, writes are no-ops |
 | set | set | Key authentication; the database and container are auto-created |
 | set | blank | AAD RBAC; the database and container MUST be provisioned externally |
+
+§5.6.0 The container defaults to `dashboard` and holds more than alarms:
+see §10.1.
 
 §5.6.1 `COSMOS_DISABLE_SSL_VERIFY` MAY be true **only** for the local
 emulator's self-signed certificate. A deployment with it true and a
@@ -743,3 +751,405 @@ until it is — and that is the Hub team's decision, not this port's.
 
 §6.2 keeps the route and stores the preference so that completing the
 catalogue is the only remaining work.
+
+---
+
+## §10 Upstream sync, October 2026
+
+Twenty commits landed on the Python dashboard after this specification was
+written (`docs/upstream-sync-2026-10.md`). Each subsection below records one
+of them: what it changed, and where this port deliberately differs. The
+clauses are normative; the upstream commit is cited so a future reader can
+read the Python.
+
+### §10.1 One container, many kinds of document (upstream `78f2d23`)
+
+§10.1.1 **The default `COSMOS_CONTAINER` is `dashboard`**, not `alarms`. The
+container now holds everything the dashboard owns — alarm configuration and
+state, alarm pauses (§10.2), contacts (§10.3), flow source servers and
+network test history (§10.4) — so it is named for the owner rather than for
+one kind of data. A deployment that sets `COSMOS_CONTAINER` explicitly is
+unaffected. One that relied on the default MUST have a container called
+`dashboard` provisioned (§5.6's AAD row: the dashboard cannot create it).
+
+§10.1.2 **A storage-managed `type` discriminator.** Every document written
+carries `type`, so the mixed container can be browsed and queried by kind:
+
+| `type` | Partition (`pk`) | Written by |
+| --- | --- | --- |
+| `alarm_config` | `alarm1` / `alarm2` / `alarm3` | the Python's config pages |
+| `alarm_state` | `alarm1` / `alarm2` / `alarm3` | §5.1.3 |
+| `alarm_pause` | `alarm-pause` | §10.2 |
+| `contact` | `contacts` | §10.3 |
+| `flow_source_server` | `flow-source-server` | §10.4 |
+| `network_test_history` | `network-test` | §10.4 |
+
+§10.1.3 `id`, `pk` and `type` are **routing metadata**. They are stamped on
+write — overriding any value of the same name in the caller's payload — and
+stripped on read, together with Cosmos' own `_`-prefixed properties, so a
+caller gets back exactly the payload it stored. The consequence, which upstream
+hit as a bug (`326b3ec`): a record's own identifier MUST be stored under a
+field of its own (`pause_id`, `source_id`, `contact_id`), because `id` does
+not survive the round trip.
+
+§10.1.4 **A read that fails is an error, not an empty list** (§5.6.3 applies
+to every kind of document). **A write of a record somebody typed in is
+refused when persistence is disabled**, rather than accepted and dropped: a
+pause that silently was not stored pages on-call. Alarm *state* keeps §5.6's
+no-op, because it is a cooldown and not a record.
+
+§10.1.5 *Limit.* A partition is read in one request
+(`x-ms-max-item-count: -1`, server-sized, up to 4 MB). The HTTP client
+returns only the body, so a continuation token is not followed. Every
+partition here is small — tens to low thousands of documents. A partition
+that outgrew one page would be truncated without any signal, so the limit is
+written down here to be a known limit rather than a surprise; following
+`x-ms-continuation` needs the client to return headers and is the fix.
+
+### §10.2 Scheduled alarm pauses (upstream `5eae123`)
+
+An alarm can be paused ahead of planned maintenance: for one rule, for every
+alarm of one or more flows, or for everything. A pause starts now or at a
+future time, and ends after a duration, at a set time, or when cancelled.
+
+§10.2.1 **A pause is a document of its own**, one per pause, in partition
+`alarm-pause` with `type` `alarm_pause` (§10.1.2). It is *not* a field of the
+alarm's state document (§5.1.3): the evaluator rewrites the whole state
+document on every change, so a pause written into it would race with the
+evaluation cycle and lose. `RuleState.paused_until` remains and is still
+honoured (§5.1.2 step 2) so a pause made before the upgrade runs out
+normally; nothing new writes it.
+
+§10.2.2 Fields: `pause_id` (§10.1.3), `scope_type` (`rule` / `flows` /
+`all`), `targets`, `start_at`, `end_at` (null = until cancelled), `reason`,
+`requested_by`, `created_at`, `cancelled_at`. `targets` is `[]` for `all`; a
+list of workflow ids for `flows`; and for `rule` a list of
+`{alarm_type, rule_id, workflow_id}` — the workflow id is stored so a flow can
+be badged with the pauses touching it. Times are stored as RFC 3339 in UTC.
+
+§10.2.3 **Status** is derived from the clock, never stored:
+
+| Status | When |
+| --- | --- |
+| `cancelled` | `cancelled_at` is set and not after `start_at` |
+| `scheduled` | `start_at` is in the future |
+| `active` | started, and `end_at` is null or in the future |
+| `ended` | otherwise (including a pause cancelled after it began) |
+
+A pause with no readable `start_at` is `ended`. Cancelling an active pause
+sets `cancelled_at` **and** `end_at` to now, so it reads `ended` with a
+`cancelled_early` mark.
+
+§10.2.4 **A flow-scoped pause covers rules added later.** `flows` and `all`
+are matched against the rule at evaluation time rather than expanded to rule
+ids when created, so a rule added to a paused flow during the maintenance
+window is covered too. `rule` matches `alarm_type` and `rule_id`.
+
+§10.2.5 **Evaluation.** Before §5.1.2 step 3, a rule covered by an active
+pause reports `paused`, is not evaluated further and does not escalate. Where
+several active pauses cover a rule the one that ends **last** is shown, an
+indefinite pause counting as latest. A rule with a *scheduled* pause carries
+the soonest start so the page can say so.
+
+§10.2.6 **Reads fail open for evaluation, closed for writes.** If the pauses
+cannot be read while evaluating, no pause applies and alarms keep firing: a
+Cosmos outage must not silence the estate, and the failure is logged. But a
+write path (create, cancel) that cannot read the existing pauses MUST fail
+(HTTP 503) rather than act on a guess. A create against a store with
+persistence disabled is refused (503, "Pause persistence is not configured.")
+because a pause that was accepted and not kept would page on-call at 02:00
+(§10.1.4).
+
+§10.2.7 **Validation**, each failure a `400` carrying a message safe to show:
+
+- `scope_type` is one of the three; `rule` and `flows` need at least one
+  target and at most 500; a flow id matches
+  `^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$`; a rule target must name an existing,
+  non-deleted rule of that alarm type.
+- `reason` (at most 200 characters) and `requested_by` (at most 100) are
+  required and trimmed.
+- `start` is empty / `now` or a UK-time `YYYY-MM-DDTHH:MM`. A start up to two
+  minutes in the past is taken as now (a form left open, clock skew); earlier
+  is refused; later than 365 days ahead is refused.
+- `end_mode` is `duration` (1 minute to 365 days), `until` (UK time, strictly
+  after the start) or `indefinite`.
+- **UK time.** Wall-clock times are `Europe/London`. A time that does not
+  exist (the spring-forward gap) is refused; an ambiguous autumn time takes
+  the first occurrence (BST).
+
+§10.2.8 **Routes.** `GET /alarms/pauses` (page: active, scheduled, recently
+ended — the last seven days — and a form), `GET /api/alarm-pauses` (the same
+as `{groups, summary}`), `GET /api/alarm-pauses/options` (flow and rule
+pickers), `POST /api/alarm-pauses` (create, `201 {ok, pause}`),
+`POST /api/alarm-pauses/{pause_id}/cancel` (`200 {ok, pause}`; `404` unknown;
+`400` already ended). Ended or cancelled pauses older than 30 days are purged
+on the next create or cancel.
+
+§10.2.9 The alarm rows of `/api/alarms/status` and the alarm page carry
+`pause_id`, `pause_scope`, `paused_by`, `pause_reason`, `pause_remaining`
+(minutes; null when indefinite), `pause_indefinite` and `scheduled_pause`
+(`{pause_id, start}` or null). `/api/status` and `/api/alarms/status` carry
+`pause_summary` `{active, scheduled}`.
+
+§10.2.10 *Not ported.* Upstream's `POST /alarmN/pause|unpause/<rule>` shims
+and the per-flow alarm configuration screens that arrived in the same commit
+(`/alarms/by-flow`, `/alarms/config?flow=`) have no counterpart here: this
+port has no alarm configuration UI at all (§2.1 lists `/alarms/config`, which
+is not yet built), and a single-rule pause is `POST /api/alarm-pauses` with
+scope `rule`. Upstream's *conflict* rule — a single-rule resume refused while
+a wider pause covers the rule — is therefore moot; the cancel route always
+cancels exactly the pause named.
+
+### §10.3 Contacts (upstream `e0c9d88`)
+
+A page of the people to call about a flow: staff in a team, a health board or
+a supplier, each linked to the flows they can speak to.
+
+§10.3.1 **A contact is a document**, partition `contacts`, `type` `contact`
+(§10.1.2), identified by `contact_id` (§10.1.3). The API presents that as
+`id`. Fields: `first_name`, `last_name`, `email`, `phone_number`,
+`organisation_type`, `organisation_name`, `notes`, `flow_ids`, `deleted`,
+`deleted_at`, `created_at`, `updated_at`.
+
+§10.3.2 **Validation**, each failure a `400` with a message safe to show:
+
+- `first_name` and `last_name`: strings, trimmed, non-empty, at most 100.
+- `email`: optional, trimmed and lowercased, matching
+  `^[^@\s.]+(\.[^@\s.]+)*@[^@\s.]+(\.[^@\s.]+)+$`.
+- `phone_number`: optional, matching `^[0-9+()\- ]{5,30}$` (whitespace
+  inside is allowed; the value is trimmed).
+- **At least one** of `email` and `phone_number`: a contact nobody can reach
+  is not a contact.
+- `organisation_type`: exactly `Team`, `Health Board` or `Supplier`.
+- `organisation_name`: non-empty, at most 200. `notes`: optional, at most
+  2,000.
+- `flow_ids`: a list of strings, blanks dropped, duplicates collapsed, each
+  one a flow of §3.1. *Deviation:* upstream checks against live discovery and
+  skips the check when discovery is down; §3.1 rejects discovery and the set
+  of flows is closed, so the check here is unconditional.
+
+§10.3.3 **Deletion is soft.** `DELETE` sets `deleted` and `deleted_at`;
+`POST …/restore` clears both. A deleted contact stays visible, badged, to
+everyone, and is excluded from the per-flow contact lists on the Flows page.
+Deleting a contact that does not exist is a no-op.
+
+§10.3.4 **Retention.** A contact soft-deleted for more than
+`CONTACT_RETENTION_DAYS` (default 90) is permanently deleted. The age is
+`deleted_at`, else `updated_at`; one with neither readable is left alone,
+because purging on a guess is the one irreversible mistake here. The purge
+runs at most once a day, when the Contacts page is viewed, and a failure never
+breaks the page.
+
+§10.3.5 **List.** `GET /api/contacts?q=&flow=&page=&per_page=&include_deleted=`
+returns `{contacts, total, page, per_page}`. `q` is a case-insensitive
+substring over names, e-mail, phone, organisation name and type. Sorted by
+last name then first name, case-insensitively. `page` and `per_page` below 1
+are 1; `per_page` defaults to 25. `include_deleted` defaults to **true**.
+
+§10.3.6 **Import.** `POST /api/contacts/import` takes a CSV. Required columns
+`first_name`, `last_name`, `organisation_type`, `organisation_name`; optional
+`email`, `phone_number`, `flow_ids` (`;`-separated) and `notes`; headers are
+case-insensitive and in any order. A bad row is reported (`Row N: …`) and
+skipped rather than aborting the import. A row matches an existing contact by
+**e-mail** (case-insensitive), else by **phone number**, and updates it;
+otherwise it creates one; a later row in the same file matches an earlier one.
+Result: `{created, updated, errors, persistence_failed}`, `503` when
+`persistence_failed`. *Deviation:* the body is the CSV itself
+(`Content-Type: text/csv`, at most 1,000,000 bytes, UTF-8, a leading byte
+order mark tolerated) rather than a multipart form — this workspace's `axum`
+is built without multipart, and the only client is this page's own script.
+
+§10.3.7 **Persistence disabled** (§10.1.4): a write is refused with `503`
+and "Contact persistence is not configured."; the page renders and says so.
+A failed write is `503` "Contact persistence is currently unavailable —
+please try again shortly."
+
+§10.3.8 **Contact details are personal data** of people who are not patients.
+They are shown on this page and the Flows page, which is the feature, and
+they MUST NOT reach a log line, a metric dimension or an error message: logs
+carry the contact's `id` only.
+
+§10.3.9 Routes: `GET /contacts`; `GET`/`POST /api/contacts`;
+`GET`/`PUT`/`DELETE /api/contacts/{id}`; `POST /api/contacts/{id}/restore`;
+`POST /api/contacts/import`. `PUT` of an unknown id is a `400` "Contact not
+found." (upstream's behaviour, kept so the script need not change); `GET` and
+`restore` of one are `404`.
+
+### §10.4 Network Test and flow source servers (upstream `4b4f589`, `326b3ec`, `cdde18d`)
+
+A tool for support staff to ask, from inside the dashboard's own network,
+"can I reach this host and port, and how quickly?" — the question that comes
+before every "is the sender's firewall open" conversation.
+
+> **No separate application is needed.** Upstream also added
+> `network_test_app/`, a bare container that sleeps so an engineer can
+> `exec` into it with `nc`, `dig` and `curl`. That is an infrastructure
+> convenience with no dashboard behaviour, and is not ported. The Network
+> Test page is part of the dashboard and uses only the standard library's
+> sockets: no subprocess, no raw sockets, no elevated container privileges.
+> A hop-by-hop traceroute is out of scope for that reason.
+
+§10.4.1 **A test** resolves the host, then makes `attempts` (default 4)
+sequential TCP connects to the first resolved address, each with a timeout
+(default 3 s), and the resolution has its own timeout (default 3 s). Connecting
+to the address resolved once, rather than the name each time, stops a slow
+resolver being paid for on every attempt. If resolution fails or times out,
+every attempt is reported as failed with that error and no connect is tried.
+
+§10.4.2 `POST /api/network-test/run` takes `{"host", "port"}` and returns
+
+```json
+{"host": "", "port": 0, "dns": {"resolved": true, "addresses": [], "resolve_time_ms": 0.0, "error": "only on failure"},
+ "attempts": [{"success": true, "latency_ms": 0.0, "error": null}],
+ "success_count": 0, "failure_count": 0, "loss_percent": 0.0,
+ "min_latency_ms": null, "avg_latency_ms": null, "max_latency_ms": null,
+ "success": true, "timestamp": 0.0}
+```
+
+`success` is true if any attempt connected. Latencies are milliseconds to two
+places and `null` when nothing connected; `timestamp` is Unix seconds.
+`history_warning` is added when the result could not be saved (§10.4.4); the
+test itself has still run and its result is returned.
+
+§10.4.3 **Validation** is syntactic only and is the boundary that keeps free
+text out of the socket calls: a host is an IP address or a hostname (RFC 1123
+labels of at most 63 characters, no leading or trailing hyphen, at most 253
+in all); a port is an integer from 1 to 65535. Failure is a `400`
+`{"error": "Invalid host or port."}` — the same message for both, naming
+neither, so a response never echoes what was typed.
+
+§10.4.4 **History.** Every run appends a sample (`timestamp`, `success`,
+`avg_latency_ms`, `min_latency_ms`, `max_latency_ms`, `loss_percent`) to the
+endpoint's document — partition `network-test`, id `history:{host}:{port}`,
+type `network_test_history` — keeping the most recent 200.
+`GET /api/network-test/history?host=&port=` returns `{host, port, samples}`;
+`DELETE` removes the endpoint's history and with it the endpoint from the
+list. `GET /api/network-test/list` returns every tested endpoint with its
+latest sample, most recently tested first, and a `description` matched from
+the flow source servers (case-insensitive host, exact port) or `null`; an
+endpoint with no samples is omitted. With persistence disabled a run is not
+an error and carries no warning (§10.1.4: nothing was ever going to be kept);
+with persistence configured and failing it carries `history_warning`.
+
+§10.4.5 **Flow source servers** are the managed list the page's "Flow
+Source Server" picker draws from: `description` (non-empty, at most 200),
+`url` (validated as a host, §10.4.3) and `port`. They are documents in
+partition `flow-source-server`, type `flow_source_server` (§10.1.2), with
+the public identifier in `source_id` (§10.1.3).
+
+§10.4.6 **A source is identified by `url:port`, case-insensitively**, and two
+sources MUST NOT share one. The document id is derived from that key
+(`flow-source:{url lowercase}:{port}`), and a source is **created, not
+upserted**: the store refuses to create a document whose id exists, so two
+people adding the same server at once cannot both succeed. Editing a source
+to a different `url:port` creates the new document first, then deletes the
+old; if the delete fails the new one is removed again, so a failed edit never
+leaves both.
+
+§10.4.7 **Routes.** `GET /network-test`; `GET /network-test/config`;
+`GET`/`POST /api/network-test/sources` (`201` on create);
+`PUT`/`DELETE /api/network-test/sources/{id}`;
+`POST /api/network-test/sources/import`. Statuses: `400` for a failed
+validation or a duplicate, `503` for persistence, with the same
+disabled/unavailable messages as §10.3.7 ("Source persistence is …").
+Deleting a source that is not there is a no-op.
+
+§10.4.8 **Import.** A CSV with columns `description`, `url`, `port`
+(case-insensitive, any order). A row failing validation, or repeating an
+earlier row of the same file (`Row N: duplicate of row M (…)`), is reported
+and skipped; a row duplicating a stored source is reported
+(`description (url:port): message`) and skipped; a persistence failure stops
+the import. Result `{imported, errors, persistence_failed}`; `503` when
+`persistence_failed`. As §10.3.6, the body is the CSV itself, not a multipart
+form.
+
+§10.4.9 *Deviation: no destination picker.* Upstream also fills a
+"destination" picker from the destination host and port each flow was
+discovered to deliver to. §3.1 rejects that discovery and `FLOWS` carries no
+destination address, so the picker is not ported; any destination can be
+tested by typing it, and the history list names it if it matches a source.
+
+§10.4.10 **Finding for the Hub team: this is a connectivity probe with no
+authentication.** Any host and port reachable from the dashboard's network
+can be tested by anyone who can reach the dashboard, including loopback,
+link-local (the instance metadata address) and the rest of the VNet. A
+bare connect reveals only open or closed, and the dashboard has no
+authentication of its own anywhere, so this is not newly exposed — but it is a
+port scanner inside the VNet. Reproduced as upstream has it; the dashboard
+MUST be reachable only by support staff (`spec/18-deployment.md`). Nothing
+the operator types reaches a log line: the host and port are validated and
+the log carries neither.
+
+### §10.5 Topics and subscriptions on the dashboard (upstream `f7da495`)
+
+The Service Bus page showed queues only; the estate also publishes to topics
+(the MPI outbound flow, WDS). Upstream added an inventory of topics and their
+subscriptions.
+
+§10.5.1 **The snapshot.** The Service Bus namespace is read for its topics,
+and each topic for its subscriptions, through the same management API and
+version as queues (§4.6). A topic and a subscription each carry `name`,
+`active` and `dead_letter`; a subscription also carries its `topic`. The
+entity name of a subscription is `{topic}/{subscription}`.
+
+§10.5.2 **Unknown is not zero** (§2.2.2, §3.3) applies to every count. A
+topic or subscription whose depths could not be read has them absent, and
+its health is `Unknown`. A subscription that ARM listed without counts is
+unknown for the same reason, and not "empty".
+
+§10.5.3 **Health** of a topic or subscription is §3.2's queue rule applied to
+its own depths and no container: a dead-lettered message is `Critical`;
+waiting messages at the critical threshold `Critical`, at the warning
+threshold `Warning`; anything unread `Unknown`; otherwise `Healthy`.
+*Deviation:* upstream's `_entity_health` has no dead-letter-critical rule
+(it warns at `DLQ_WARNING_THRESHOLD`); this port keeps one rule for every
+Service Bus entity rather than a second, weaker one for topics.
+
+§10.5.4 **KPIs** over the snapshot: counts of queues, topics and
+subscriptions, and the totals of waiting and dead-lettered messages for each
+kind. As §2.2.3, a total spanning an entity that could not be read is
+**absent**, and the count of unreadable entities is carried alongside.
+
+§10.5.5 **Surfaces.** `/service-bus` lists topics with their subscriptions
+beneath the queues; `/api/servicebus-metrics` carries `topics` (each with its
+`subscriptions`, `health`, `known`) and `namespace_kpis` beside the existing
+fields, which are unchanged (§2.3.2). With no Azure configuration both are
+empty and the page says why (§1.2).
+
+§10.5.6 *Not ported.* Upstream also (a) discovers each subscription's
+consuming Container Apps and their `MICROSERVICE_ID`, (b) counts a flow's
+owning topic into that flow's health and totals, attributing a shared topic
+to its publisher only, (c) filters the Messages page and throughput chart by
+queue, topic or subscription, and (d) adds `wds-to-wis` and
+subscription-transformer roles to flow discovery. All four rest on
+Container App environment discovery that §3.1 rejects, and `FLOWS` carries
+no topic or subscription names to attribute. They are recorded rather than
+approximated: a flow health computed from a guess at which topic is whose is
+the class of error §2.3.1a records. Adding `topic` and `subscriptions` to a
+`Flow` is the prerequisite for (b).
+
+§10.1.6 **The store is wired.** `main` builds a Cosmos-backed store whenever
+`COSMOS_ENDPOINT` is set (key or AAD per §5.6) and passes it to the router;
+before this it always passed the disabled store, so a deployment's alarm
+state, pauses, contacts and history went nowhere whatever the configuration
+said. The HTTP client verifies certificates unconditionally (§4.7), so
+`COSMOS_DISABLE_SSL_VERIFY` for the emulator's self-signed certificate is
+accepted by configuration but not yet honoured by the transport; running
+against the emulator needs the emulator's CA in `SSL_CERT_FILE`.
+
+### §10.6 Alarms operator guide (upstream `daf7fdb`)
+
+§10.6.1 `crates/dashboard/docs/working_with_alarms.md` is the guide for
+support staff: reading the alarm status, pausing now or in advance (single
+rule, flows, everything; after a duration, until a time, until cancelled),
+the Alarm Pauses page and what a paused row means. It is written against this
+port's pages (§10.2) and omits the per-flow configuration walk-through and
+screenshots of upstream's guide, which describe screens this port does not
+have (§10.2.10).
+
+§10.6.2 Upstream's other two fixes in that commit do not apply: edits to
+built-in seed rules being dropped on save and the pause dialog's custom
+duration row always showing are defects of the Python's configuration screens
+and of its Bootstrap markup, neither of which exists here. The seed rules of
+§5.4.4 and §5.5.5 are listed by the evaluator and are not editable in this
+port.

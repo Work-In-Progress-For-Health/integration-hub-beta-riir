@@ -15,9 +15,11 @@ repository's first Rust service was one of them.
 
 ## §1 The mock convention
 
-§1.1 **The word `fail`, in any case, anywhere in the request, means "reject
-me".** This is how a test drives the unhappy path without constructing a
-malformed message, and every mock in this workspace honours it.
+§1.1 **The word `fail`, in any case, anywhere in the request, means "answer
+`AE`"** (the sender should retry), and **`reject` means "answer `AR`"** (the
+sender should dead-letter; upstream `330f1a7`). `reject` wins when both
+appear. This is how a test drives either unhappy path without constructing a
+malformed message, and `hl7-mock-receiver` honours both.
 
 §1.2 A mock MUST always answer. A mock that goes silent looks like a hung
 endpoint, which is the harder failure to diagnose than a rejection.
@@ -37,6 +39,7 @@ under the message's own `MSH-10` as the Service Bus message id.
 | --- | --- |
 | Forwarded successfully | `AA` |
 | §1.1's `fail` trigger | `AE` |
+| §1.1's `reject` trigger | `AR` |
 | The queue would not take the message | `AE` |
 | The message could not be parsed at all | the fallback of §2.5 |
 
@@ -167,3 +170,39 @@ asserting a message reaches the fake bus and the sender completes it.
 
 §4.7 Integration: `soap-sender` against `http-mock-receiver` end to end,
 including the `fail` trigger producing a fault that the sender rejects.
+
+---
+
+## §5 `hl7-topic-mock-receiver`
+
+Reference implementation:
+`Integration-Hub-Beta/mock_receivers/hl7_topic_mock_receiver/`. A second
+binary of `crates/hl7-mock-receiver`, the way `hl7-subscription-sender` is a
+second binary of `hl7-sender`.
+
+§5.1 Everything in §1 and §2 applies, **except** that the message is
+forwarded to a Service Bus **topic**, `EGRESS_TOPIC_NAME`, so several
+subscriptions can consume the same traffic. Sending to a topic is the same
+operation as sending to a queue; only the name differs.
+
+§5.2 **The topic is optional.** Unlike §2's `EGRESS_QUEUE_NAME`, a missing
+`EGRESS_TOPIC_NAME` is not a startup failure: the receiver then runs as in
+§2.6, logging what it would have forwarded. It forwards only when the topic
+**and** one of `SERVICE_BUS_CONNECTION_STRING` / `SERVICE_BUS_NAMESPACE` are
+set. A topic with no connection information is also log-only, with a warning,
+as the Python does (`service_bus_enabled`).
+
+§5.3 `EGRESS_SESSION_ID`, `HOST`, `PORT` (default `2576`), the health-check
+variables and `MAX_MESSAGE_SIZE_BYTES` are as §2. `EGRESS_QUEUE_NAME` is not
+read.
+
+§5.4 **Deviation, inherited from §2.3.** The Python forwards first and then
+answers `AE`/`AR` for `fail`/`reject`; `hl7-mock-receiver` answers the NACK
+without forwarding, and so does this binary, so the two mocks are
+interchangeable. A topic subscriber therefore sees only messages that were
+acknowledged `AA`, which is what the Python README means by "verified
+traffic".
+
+§5.5 Tests: `EGRESS_TOPIC_NAME` alone starts log-only; topic plus
+connection string forwards; topic without connection is log-only; no
+variables is valid.

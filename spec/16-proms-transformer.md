@@ -47,13 +47,20 @@ code does consult it, and it is written down here so a reader of
 `resolve_message_type` does not conclude the specification is describing
 something else.
 
-§2.2 The six message types and their bundle shapes:
+§2.2 The ten message types and their bundle shapes. Upstream #370 split
+`SURGERY` and `PREOP` into suffixed placeholder codes (`PROMS Scenarios.xlsx`,
+"PROMS Message-TEMP" column); the bare codes survive as a **legacy
+fallback** routed to the original scenario (§10.2).
 
 | `eventCode` | Bundle | Clinical resource |
 | --- | --- | --- |
 | `REFERRAL` | Referral | `ServiceRequest` |
-| `SURGERY` | Procedure | `Procedure` |
-| `PREOP` | Appointment | `Appointment`, scheduled |
+| `SURGERY-PROC`, legacy `SURGERY` | Procedure | `Procedure` |
+| `SURGERY-PERF` | Surgery performed | `Procedure` |
+| `SURGERY-DN` | Discharge | `Encounter`, `finished` |
+| `PREOP-AS`, legacy `PREOP` | Appointment | `Appointment`, scheduled |
+| `PREOP-VIS` | Outpatient visit | `Encounter`, `finished` |
+| `PREOP-AR` | Appointment reschedule | `Appointment`, `booked` |
 | `INPATIENT` | Encounter | `Encounter` |
 | `CANCELLED` | Appointment cancellation | `Appointment`, `status = cancelled` |
 | `PREREAD` | Encounter, pre-admission | `Encounter`, pre-admission |
@@ -71,18 +78,28 @@ as `INPATIENT`; they differ in status and coding, not structure.
 | `eventCode` | Type | `eventCoding.code` | `eventCoding.display` | Clinical resource | `definition` suffix |
 | --- | --- | --- | --- | --- | --- |
 | `REFERRAL` | `REFERRAL` | `REFERRAL` | Patient Referral | `ServiceRequest` | `/referral` |
-| `SURGERY` | `PROCEDURE_PERFORMED` | `SURGERY` | Procedure Performed | `Procedure` | `/procedure` |
-| `PREOP` | `APPOINTMENT_SCHEDULED` | `PREOP` | Appointment Scheduled | `Appointment`, `booked` | `/appointment` |
+| `SURGERY-PROC`, `SURGERY` | `PROCEDURE_PERFORMED` | `SURGERY-PROC` | Procedure Performed | `Procedure` | `/procedure` |
+| `SURGERY-PERF` | `SURGERY_PERFORMED` | `SURGERY-PERF` | Surgery Performed | `Procedure` | `/surgery` |
+| `SURGERY-DN` | `DISCHARGE` | `SURGERY-DN` | Discharge Notification | `Encounter` | `/discharge` |
+| `PREOP-AS`, `PREOP` | `APPOINTMENT_SCHEDULED` | `PREOP-AS` | Appointment Scheduled | `Appointment`, `booked` | `/appointment` |
+| `PREOP-VIS` | `OUTPATIENT_VISIT` | `PREOP-VIS` | Outpatient Visit | `Encounter` | `/outpatient` |
+| `PREOP-AR` | `APPOINTMENT_RESCHEDULE` | `PREOP-AR` | Appointment Reschedule | `Appointment`, `booked` | `/appointment-reschedule` |
 | `INPATIENT` | `INPATIENT_ADMISSION` | `INPATIENT` | Inpatient Admission | `Encounter` | `/encounter` |
 | `CANCELLED` | `APPOINTMENT_CANCELLED` | `CANCELLED` | Appointment Cancellation | `Appointment`, `cancelled` | `/appointment-cancellation` |
 | `PREREAD` | `PREADMISSION` | `PREREAD` | Pre-admission Notification | `Encounter` | `/preadmission` |
 
-§2.4.2 Three further types are **defined and unreachable** —
-`SURGERY_PERFORMED`, `OUTPATIENT_VISIT` and `DISCHARGE`. Each shares an
-`eventCode` with a type that is selected instead. They are **not** ported:
-a type nothing can route to is not behaviour, and carrying it across would
-suggest a choice exists where none does. What they reveal is recorded as
-§9.8, which is a question for the Hub team rather than a porting decision.
+§2.4.2 *Superseded by §10.2.* Three types — `SURGERY_PERFORMED`,
+`OUTPATIENT_VISIT` and `DISCHARGE` — were once defined and unreachable
+because they shared an `eventCode` with another type, and were not ported.
+Upstream #370 gave each its own code, so all three are now routed and
+ported, and §9.8's collision no longer exists for the suffixed codes. It
+remains true of the **legacy** bare `SURGERY` and `PREOP`, which still mean
+procedure-performed and appointment-scheduled.
+
+§2.4.3 §2.3's failure message lists the routing table's keys, bare codes
+included, sorted: `CANCELLED`, `INPATIENT`, `PREOP`, `PREOP-AR`, `PREOP-AS`,
+`PREOP-VIS`, `PREREAD`, `REFERRAL`, `SURGERY`, `SURGERY-DN`, `SURGERY-PERF`,
+`SURGERY-PROC`.
 
 ---
 
@@ -137,8 +154,9 @@ Entry order is **positional and normative** — Promptly reads by position.
 | Procedure | `MessageHeader`, `Patient`, `Procedure`, `Practitioner`, `Organization`, `Location` |
 | Appointment | `MessageHeader`, `Patient`, `Appointment`, `Practitioner`, `Organization`, `Location` |
 | Encounter | `MessageHeader`, `Patient`, `Encounter`, `Practitioner`, `Organization`, `Location` |
-| Appointment cancellation | as Appointment |
-| Encounter pre-admission | as Encounter |
+| Appointment cancellation, reschedule | as Appointment |
+| Encounter pre-admission, outpatient visit, discharge | as Encounter |
+| Surgery performed | as Procedure |
 
 §3.1 `MessageHeader` is always first. FHIR requires it of a `message`
 bundle.
@@ -182,26 +200,37 @@ this reason and the Rust does the same.
 
 §5.1 A source health board is looked up by the WPAS `SYSTEM_ID` field.
 
-§5.2 Eight `SYSTEM_ID` values route to the PROMs queue. Only Swansea Bay
-(`108`) has a documented `MessageHeader.source.name` and `endpoint`.
+§5.2 **Seven** `SYSTEM_ID` values are WPAS health boards (upstream #423,
+`WPAS PROMS Mapping - Amy_Questions.xlsx`). Each has a name:
 
-§5.2.1 **`source.name` is omitted for an undocumented source.** Measured:
-`REFERRAL_MESSAGE` (`SYSTEM_ID` 149) produces a `source` carrying only an
-`endpoint`.
+| `SYSTEM_ID` | `source.name` |
+| --- | --- |
+| `108` | Swansea Bay Health Board |
+| `109` | Betsi Cadwaladr University Health Board |
+| `126` | Cwm Taf Morgannwg University Health Board |
+| `139` | Aneurin Bevan University Health Board |
+| `149` | Hywel Dda University Health Board |
+| `170` | Powys Teaching Health Board |
+| `310` | Velindre University NHS Trust |
 
-§5.2.2 **`source.endpoint` is *not* omitted — it is fabricated.** The Python
-emits `https://wpas-source.invalid/system-id/{id}`, and
-`https://wpas-source.invalid/system-id/unknown` when there is no `SYSTEM_ID`
-at all. An earlier draft of this section said the field was "left unset
-rather than guessed" and that an unknown source "produces a bundle with the
-field absent, not a fabricated one". That is not what happens.
+`103` (Princess of Wales, PIMS) and `140` (Cardiff and Vale) do not use
+WPAS, and `131` was a spreadsheet error for Velindre. None of the three is a
+source: `140`, which was previously configured, is **removed**.
 
-The choice is defensible — `.invalid` is reserved by RFC 2606 and can never
-resolve, so the value is inert rather than misleading — and `endpoint` is
-required by FHIR when `source` is present, which is presumably why it exists.
-It is reproduced. But it is a fabricated value in a clinical message and the
-specification claimed the opposite, so it is recorded rather than quietly
-matched. See §9.2.
+§5.2.1 `source.name` is the board's name for a known board and **omitted**
+for an unknown one.
+
+§5.2.2 `source.endpoint` is `https://fhir.nhs.uk/source-system/wpas/{id}` for
+a known board, unless the `WPAS_SOURCE_ENDPOINT_{id}` environment variable
+overrides it. For an unknown board, or no `SYSTEM_ID` at all, it is the same
+base plus the id as sent, or `unknown`. FHIR requires `endpoint` when
+`source` is present, which is why it is never omitted.
+
+This **supersedes** the earlier fabricated
+`https://wpas-source.invalid/system-id/{id}` placeholder (the former §5.2.2
+and §9.2): the endpoint is now derived from the id on a real-looking base
+rather than a reserved-invalid one. An unknown id still yields a value no
+registry has issued, so §9.2 stands in a reduced form (§10.4).
 
 ---
 
@@ -259,12 +288,12 @@ names and family. Two formats occur: `"ARDERN-JONES L"` (referrer) and
 | --- | --- | --- |
 | `id` | — | UUID (§4.1) |
 | `meta.profile` | — | `…/wpas-messageheader`. Flagged incorrect by a reviewer; see §9.4 |
-| `eventCoding.code` | `eventCode`, `event_code`, `EVENT_CODE` | Falls back to the routed type's own code |
+| `eventCoding.code` | `eventCode`, `event_code`, `EVENT_CODE`, then the legacy `MESSAGE_TYPE`, `messageType`, `MSG_TYPE`, `msgType` | As sent, so a legacy bare `SURGERY` stays `SURGERY`; falls back to the routed type's own code (§10.2) |
 | `eventCoding.display` | — | The message type's display |
 | `source` | `system_id`, `SYSTEM_ID`, `systemId`, then `hbCode`, `hb_code`, `HB_CODE` | §5.2.1–§5.2.2 |
-| `destination` | — | Fixed Promptly Collect name and endpoint |
+| `destination` | — | Fixed Promptly Collect name; the endpoint is the `PROMPTLY_DESTINATION_ENDPOINT` environment variable when set, otherwise the Promptly staging `$process-message` URL (§10.3) |
 | `definition` | — | The message type's definition, when it has one |
-| `sender` | `referrer_org`, `referrerOrg` | Reference to the `Organization` entry; `display` from the field |
+| `sender` | — | Reference to the `Organization` entry; `display` is the health board name of §6.10 (omitted when unresolved) |
 | `focus` | — | Ordered: `Patient` always, then `ServiceRequest`, `PractitionerRole`, `Procedure`, `Encounter`, `Appointment` as present |
 
 §6.2.1 `focus[0]` is always the patient, with `display` built from
@@ -274,42 +303,53 @@ names and family. Two formats occur: `"ARDERN-JONES L"` (referrer) and
 
 | Target | Source | Rule |
 | --- | --- | --- |
+| `meta.profile` | — | `…/StructureDefinition/wpas-patient` (was `DataStandardsWales-Patient`) |
+| `active` | — | `true` |
 | `identifier[NHS]` | `nhsNumber`, `NHS_NUMBER` | System is the NHS number URI |
 | `identifier[NHS].extension` | `NHS_CERTIFICATION`, `nhsCertification` | Verification-status extension; display from the resolver |
 | `identifier[PAS]` | `crn`, `UNIT_NUMBER`, `unitNumber` | Omitted unless the source system has a documented PAS identifier system |
 | `name.family` | `patientSurname`, `SURNAME`, `surname` | `use = official` |
-| `name.given` | `patientFirstname`/`FORENAME`/`forename`, then `patientMiddlename`/`patientMiddleName` | In that order |
-| `name.prefix` | `patientTitle`, `TITLE`, `title` | |
+| `name.given` | `patientFirstname`/`FORENAME`/`forename`, `patientMiddlename`/`patientMiddleName` | **One** value: first and middle joined with a space |
+| `name.prefix` | — | **Not mapped** (was `patientTitle`) |
 | `gender` | `gender`, `SEX`, `sex` | Through the resolver; unresolved leaves it unset (§7.2) |
 | `birthDate` | `dob`, `BIRTHDATE`, `birthDate` | §6.1.1 |
 | `address.line` | `buildingName`/`ADDRESS_1` and `streetRoadName` | Joined with `", "` |
 | `address.city` | `postTown`, `ADDRESS_2` | |
+| `address.district` | `postalCounty`, `postal_county` | Upstream #346; a county alone makes an address |
 | `address.postalCode` | `postCode`, `POSTCODE`, `postalCode` | |
-| `communication` | `preferred_spoken_language_code`/`PREFERRED_LANGUAGE`, and `spoken_language` | `preferred = true` |
-| `deceased*` | `DEATHDATE`, `deathDate` | Only when the caller asks for it |
+| `telecom` | `home_phone`/`homePhone`/`TELEPHONE_DAY`; `work_phone`/`workPhone`; `mobile_phone`/`mobilePhone`; `email`/`EMAIL` | One `ContactPoint` per populated field, in that order: `phone`+`home`, `phone`+`work`, `phone`+`mobile`, `email` (no `use`) |
+| `extension[ethnicCategory]` | `ethnic_origin_code`/`ethnicOriginCode`, `ethnic_origin`/`ethnicOrigin` | `valueCodeableConcept.coding` under the WPAS ethnicity system, `text` the display |
+| `communication.language` | `preferred_spoken_language_code`/`preferredSpokenLanguageCode`/`PREFERRED_LANGUAGE`/`preferredLanguage`, and `spoken_language`/`spokenLanguage` | Code and display **as sent**, under the WPAS spoken-language system; no `preferred` flag; no resolver |
+| `deceased*` | `DOD`/`dod`, then legacy `DEATHDATE`/`deathDate` | Always considered now (§6.3.3) |
 
 §6.3.1 `name` is omitted entirely unless a family **or** a first given name
 is present.
 
-§6.3.2 `communication` uses the resolved code when there is one and the raw
-display text otherwise, so a language is not silently lost when the code
-cannot be mapped.
+§6.3.2 `communication` is no longer resolved through the reference-data
+service: the code and display are taken as sent. This supersedes the
+resolver-then-display behaviour and **retires §9.9** — a patient's spoken
+language now reaches Promptly. The earlier `contactPreference` extension
+(upstream #346) is removed again by #423.
 
-§6.3.3 `deceased` has four outcomes, and they differ: the field **absent**
-leaves the element unset; **present and empty** is `deceasedBoolean = false`;
-a parseable value is `deceasedDateTime`; a non-empty unparseable value is
+§6.3.3 `deceased` has three outcomes: no `DOD` element (or an empty one,
+which §2.5.2 makes the same thing) leaves the element **unset** — the former
+`deceasedBoolean = false` for "present and empty" is gone; a parseable value
+is `deceasedDateTime`; a non-empty unparseable value is
 `deceasedBoolean = true` — deceased with an unknown date, rather than
-silently alive.
+silently alive. The former `include_deceased` switch is gone: every bundle
+now carries it.
 
 ### §6.4 `ServiceRequest` (Referral)
 
 | Target | Source | Rule |
 | --- | --- | --- |
 | `status` | — | `active` |
-| `intent` | — | Fixed |
+| `intent` | — | `order` (was `plan`) |
+| `doNotPerform` | — | `false` |
 | `subject` | — | The `Patient` entry |
-| `identifier` | `pathway`, `unique_code`, `uniqueCode`, `UNIQUE_ID` | See §9.5 — no source field was specified |
-| `code.coding.code` | `eventPathway`, `event_pathway` | `display = "Referral"` |
+| `identifier` | `pathway`, `unique_code`, `uniqueCode`, `UNIQUE_ID` | System `https://fhir.nhs.wales/Id/wpas-servicerequest`; see §9.5 |
+| `code.coding` | the routing field (`eventCode` and its aliases, §2.5.7), upper-cased; `REFERRAL` when only the root tag routed | System `…/CodeSystem/proms-event`, `display = "Referral"` |
+| `reasonCode.coding` | `eventPathway`, `event_pathway` | System `…/CodeSystem/wpas-event-pathway`, **no display** yet (pending a WPAS ServicePoint lookup) |
 | `occurrenceDateTime` | `eventDate`, `event_date` | §6.1.2 |
 | `requester` | — | The `PractitionerRole` entry |
 
@@ -322,85 +362,96 @@ silently alive.
 | `code.coding.code` | `eventPathway`, `event_pathway` | `display = "Procedure performed"` |
 | `performedDateTime` | `appointmentDate` + `appointmentTime` | Concatenated, then §6.1.2 |
 
-### §6.6 `Appointment` (`PREOP`, `CANCELLED`)
+### §6.6 `Appointment` (`PREOP-AS`, `PREOP-AR`, `CANCELLED`)
 
 | Target | Source | Rule |
 | --- | --- | --- |
+| `identifier` | `activityNotekey`, `activity_note_key` | System `…/id/wpas-appointment` (upstream #346) |
 | `status` | — | From the message type; `booked` by default, `cancelled` for `CANCELLED` |
-| `participant[0]` | — | The `Patient`, `status = accepted` — §9.5 |
+| `participant[0]` | `CONFIRM_APPT`, `confirmAppt`, `confirm_appt` | The `Patient`; `Y` is `accepted`, `N` is `declined`, anything else (including absent) is `tentative` |
 | `participant[1]` | — | The `Practitioner`, when present |
 | `serviceType` | `main_specialty_name`, `mainSpecialtyName`, `specialty_name` | `display` only, no code |
 | `start` | `appointmentDate` + `appointmentTime` | §6.1.2 |
 | `end` | — | **Set equal to `start`** — WPAS supplies no duration; §9.5 |
 
-### §6.7 `Encounter` (`INPATIENT`, `PREREAD`)
+### §6.7 `Encounter` (`INPATIENT`, `PREREAD`, `PREOP-VIS`, `SURGERY-DN`)
 
 | Message type | `class` | `status` |
 | --- | --- | --- |
 | `INPATIENT_ADMISSION` | `IMP`, "inpatient encounter" | `in-progress` |
 | `PREADMISSION` | `PRENC`, "pre-admission" | `planned` |
+| `OUTPATIENT_VISIT` | `AMB`, "Ambulatory" | `finished` |
+| `DISCHARGE` | `IMP`, "Inpatient encounter" | `finished` |
 | anything else | `AMB`, "ambulatory" | `in-progress` |
 
-`subject` references the `Patient` entry. The `Encounter` carries no other
-mapped fields.
+`subject` references the `Patient` entry. `identifier` is `activityNotekey`
+(or `activity_note_key`) under `…/id/wpas-encounter`, when present. The
+`Encounter` carries no other mapped fields.
+
+§6.7.1 The two new displays are **capitalised** where the first two are not,
+because they come from `fhir_constants.py`'s constants rather than the
+mapper's literals. Reproduced. The v3 ActCode `EncounterClass` set has no
+discharge class, so a discharge reuses `IMP` and differs only in `status`
+(a TEMP placeholder upstream).
 
 ### §6.8 `PractitionerRole`
 
+Built for the Referral bundle only.
+
 | Target | Source | Rule |
 | --- | --- | --- |
-| `identifier` | `activityNotekey`, `activity_notekey` | See §9.5 — no source field was specified |
+| `identifier` | `referrer_code`, `referrerCode` | System is the **GMC** number URI (referral). A non-referral caller would use `consultant_code` under `https://fhir.nhs.wales/Id/wpas-practitioner-role`; no bundle does today |
 | `practitioner` | — | The `Practitioner` entry, when present |
 | `organization` | — | The `Organization` entry, when present |
-| `specialty.coding.code` | `consultant_specialty`, `consultantSpecialty` | |
+| `specialty.coding.code` | `consultant_specialty`, `consultantSpecialty` | **First three characters** only |
 | `specialty.coding.display` | `specialty_name`, `specialtyName`, `main_specialty_name` | |
 | `location` | — | The `Location` entry, when present |
 
 ### §6.9 `Practitioner`
 
-The source fields **depend on the bundle** (§2.2):
-
-| Bundle | `identifier` | Name |
+| Target | Source | Rule |
 | --- | --- | --- |
-| Referral | `referrer_code`, `referrerCode` | `referrer_name`, `referrerName` |
-| every other | `consultant_code`, `consultantCode` | `clinicianName`, `clinician_name`, `CONS_NAME` |
+| `identifier[0]` | `consultant_code`, `consultantCode` | System `https://fhir.nhs.wales/Id/wpas-practitioner`; every bundle |
+| `identifier[1]` | `referrer_code`, `referrerCode` | Referral only; GMC number URI (§9.6) |
+| `name.text` | Referral: `referrer_name`, `referrerName`. Others: `clinicianName`, `clinician_name`, `CONS_NAME` | Free text; **not** parsed into family and given |
 
-§6.9.1 Omitted entirely when neither an identifier nor a name is available
+§6.9.1 Omitted entirely when there is neither an identifier nor a name
 (§6.0.2).
 
-§6.9.2 `identifier.system` is the GMC number URI. A `consultant_code` such
-as `HANJO` is plainly not a GMC number; the system is used as the best
-available option. See §9.6.
+§6.9.2 `split_person_name` (§6.1.3) is no longer used by any mapper.
 
 ### §6.10 `Organization`
 
+Promptly asked for the **health board**, not the practice.
+
 | Target | Source | Rule |
 | --- | --- | --- |
-| `identifier` | `dhaCode`, `DHA_CODE`, `dha_code` | ODS organisation code system |
-| `name` | `referrer_org`, `referrerOrg` | Falls back to the DHA code lookup when empty |
+| `active` | — | `true` |
+| `identifier` | `hb_code`, `hbCode`, `HB_CODE` | ODS organisation code system |
+| `name` | — | The health board name: from the `system_id` lookup (§5.2) when it is a known board, otherwise `dha_code_name(hb_code)` (§7.1.2); omitted when that is just the code echoed back |
 
-§6.10.1 Omitted when neither `referrer_org` nor a DHA code is present. The
-fallback exists because `referrer_org` is present-but-empty in real SIT
-payloads.
+§6.10.1 Omitted when there is no `hb_code`. `referrer_org` and `dhaCode` are
+no longer read. The same name is `MessageHeader.sender.display` (§6.2).
 
 ### §6.11 `Location` — always present
 
 | Target | Source | Rule |
 | --- | --- | --- |
-| `identifier` | `referrer_location`, `referrerLocation` | The whole free-text string, used as-is |
-| `name` | `referrer_location` | **The first comma-delimited segment** — §9.5 |
+| `status` | — | `active` |
+| `identifier` | `referrer_prac`, `referrerPrac` | `wrts-location-identifier` system |
+| `name` | — | **None** — the mapping has no `Location.name` |
+| `address.text` | `referrer_location`/`referrerLocation` and `referrer_postcode`/`referrerPostcode` | The two joined with a space (so a location that already ends with the postcode repeats it) |
 | `address.postalCode` | `referrer_postcode`, `referrerPostcode` | |
 
 §6.11.0 **A `Location` entry is emitted even when there is nothing to put
-in it.** Unlike §6.9's `Practitioner` and §6.10's `Organization`,
-`map_location` has no guard: a bundle whose payload carries neither
-`referrer_location` nor `referrer_postcode` still ends with a `Location`
-holding only an `id` and a `meta.profile`. Measured —
-`EXPLICIT_EVENT_CODE_MESSAGE` is exactly that case. See §9.13.
+in it**, except that it now carries `status = active` always. Unlike §6.9's
+`Practitioner` and §6.10's `Organization`, `map_location` has no guard: a
+bundle whose payload carries neither `referrer_prac` nor location data
+still ends with a `Location` holding an `id`, a `meta.profile` and
+`status`. See §9.13.
 
-§6.11.1 `referrer_location` is a full free-text address, e.g.
-`"YSBYTY GWYNEDD, PENRHOSGARNEDD, BANGOR, GWYNEDD, LL57 2PW"`. The
-specification records no dedicated name field, so the first segment is
-taken.
+§6.11.1 The former first-segment `Location.name` and whole-string
+`Location.identifier` rules (§9.5) are retired by #423.
 
 ### §6.12 Not ported
 
@@ -662,3 +713,49 @@ change the entry count of every bundle.
 Worth noting how this was found: reading the three mappers side by side
 suggests they behave alike, and only the byte-for-byte comparison against
 the Python's own output showed otherwise.
+
+---
+
+## §10 Upstream synchronisation (#346, #370, #423)
+
+§10.0 The Rust port had been captured from the Python **before** upstream
+#346 (`927e69d`, "fhir transformer cont mapping changes") and #370
+(`8a7f6f3`, "additional event scenarios"), although both pre-date the
+`9e797ac` baseline the rest of the workspace was synced to. Verified by
+regenerating the corpus from `927e69d^`: it reproduced the committed
+`python-golden.json` exactly. #346, #370 and #423 (`c074825`, INTHUB-594635
+"revised spec") were therefore ported together, and the corpus was
+regenerated from the upstream HEAD with the §4.4 factory.
+
+§10.1 #346: `Appointment.identifier` and `Encounter.identifier` from
+`activityNotekey`; the patient `Appointment.participant.status` rule of
+§6.6; `address.district` of §6.3; `OUTPATIENT_VISIT` and `DISCHARGE`
+encounter classes of §6.7; `MessageHeader.eventCoding.code` preserving the
+raw routing field. Its `contactPreference` extension and `PractitionerRole`
+identifier from `specialty_name` were short-lived and are replaced by #423.
+
+§10.2 #370: the suffixed codes of §2.2. Because the bare `SURGERY` and
+`PREOP` still route, `eventCoding.code` reports the code **as sent**
+(§6.2), while `eventCoding.display` and `definition` come from the routed
+type. This is why a bare `SURGERY` payload yields `eventCoding.code =
+SURGERY` with display "Procedure Performed".
+
+§10.3 #423: §5, §6.2 to §6.4 and §6.8 to §6.11. The destination endpoint is
+environment-dependent: `PROMPTLY_DESTINATION_ENDPOINT` overrides the staging
+default `https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message`.
+The default is a **staging** URL in a production message when the variable is
+unset; deployments MUST set it. Identifier systems for `ServiceRequest` and
+`PractitionerRole` moved from the `tools.labs.promptly.health` host to
+`https://fhir.nhs.wales/Id/…`, which **retires §9.11**.
+
+§10.4 Findings revised by this sync: §9.2 (the `.invalid` placeholder) is
+replaced by an id-derived `fhir.nhs.uk` URL for unknown boards (§5.2.2);
+§9.5's `PractitionerRole.identifier`, `Location.name`, `Location.identifier`
+and `Patient.communication` rows are retired (§6.8, §6.11, §6.3.2); §9.8 now
+applies only to the legacy bare codes (§2.4.2); §9.9 and §9.11 are retired.
+The remaining rows stand.
+
+§10.5 The upstream tester's PROMs sample referral gained `home_phone`,
+`work_phone`, `mobile_phone`, `email`, `ethnic_origin_code`,
+`ethnic_origin` and `referrer_prac`, and `hbCode` became `7A2`
+(`integration-hub-tester`, `spec/integration-hub-tester-component-preview.md`).

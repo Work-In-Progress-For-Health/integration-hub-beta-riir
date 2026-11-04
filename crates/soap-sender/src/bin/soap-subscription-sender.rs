@@ -10,6 +10,8 @@ use ihb_sender::config::Variant;
 use soap_sender::{Endpoint, SoapClient};
 
 fn main() -> ExitCode {
+    // Before Tokio spawns any thread: the local UTC offset can only be read
+    // reliably while the process is single-threaded (`ihb_fields::timestamp`).
     ihb_fields::timestamp::capture_local_offset();
 
     let runtime = match tokio::runtime::Runtime::new() {

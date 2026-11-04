@@ -1,0 +1,44 @@
+[package]
+name = "lookup-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "Reference-data lookup service for the Integration Hub transformers. Phase 1: not production ready (spec/20-lookup-service.md)."
+
+[lib]
+name = "lookup_service"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lookup-service"
+path = "src/main.rs"
+
+[dependencies]
+askama.workspace = true
+axum.workspace = true
+base64.workspace = true
+http-body-util.workspace = true
+ihb-config.workspace = true
+ihb-runtime.workspace = true
+ihb-telemetry.workspace = true
+ihb-tls.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+tokio-rustls.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true

@@ -3,8 +3,10 @@
 //! Implements `spec/11-mock-receivers.md` §3.
 //!
 //! A stand-in for a downstream SOAP system: it answers anything vaguely
-//! SOAP-shaped, forwards the payload if a queue is configured, and rejects
-//! anything containing the word `fail` (§1.1).
+//! SOAP-shaped, forwards the payload if a queue is configured, and answers
+//! a SOAP fault to anything containing the word `fail` (§1.1). Unlike
+//! `hl7-mock-receiver` there is no `reject` trigger: SOAP has no
+//! reject/error distinction to drive.
 
 #![allow(clippy::large_futures)]
 
@@ -42,6 +44,10 @@ async fn run() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    // Configuration is read inline rather than through `ihb_config`: this
+    // mock has four optional variables and no cross-field rules, so the
+    // all-problems-at-once reader (`spec/02-configuration.md` §1.4) would
+    // add nothing.
     let host = read("HOST").unwrap_or_else(|| "127.0.0.1".to_string());
     let port: u16 = match read("PORT").map(|value| value.parse::<u16>()) {
         None => 8080,

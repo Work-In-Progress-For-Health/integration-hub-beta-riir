@@ -23,7 +23,7 @@ use serde::Deserialize;
 
 use crate::alarm::Trip;
 use crate::alarm::rules::{
-    FailureThreshold, InactivityThresholds, Row, Summary, evaluate_all, failure_trip,
+    FailureThreshold, InactivityThresholds, Row, Summary, evaluate_all_with_pauses, failure_trip,
     inactivity_trip,
 };
 use crate::alarm::store::{AlarmStore, Partition};
@@ -47,6 +47,9 @@ pub struct AppState<O, S = crate::alarm::store::Disabled> {
     pub config: Config,
     /// §2.2.1's shared 30-second cache.
     pub status: Cached<Status>,
+    /// When the daily contact purge last ran (§10.3.4), so it runs on a page
+    /// view at most once a day without a scheduler.
+    pub contacts_purged_at: std::sync::Mutex<Option<time::OffsetDateTime>>,
 }
 
 impl<O: Observatory> AppState<O, crate::alarm::store::Disabled> {
@@ -67,6 +70,7 @@ impl<O: Observatory, S: AlarmStore> AppState<O, S> {
             alarms,
             config,
             status: Cached::new(ttl),
+            contacts_purged_at: std::sync::Mutex::new(None),
         }
     }
 
@@ -83,6 +87,19 @@ impl<O: Observatory, S: AlarmStore> AppState<O, S> {
     /// must not look like having no rules.
     async fn evaluate_alarms(&self, now: time::OffsetDateTime) -> AlarmView {
         let mut view = AlarmView::default();
+
+        // §10.2.6 — fail open: pauses that cannot be read are no pauses, so
+        // an outage never silences an alarm. Said in the log, because a
+        // pause an operator set that is not being honoured is exactly the
+        // thing they will ask about.
+        let pauses = match crate::alarm::pause::list(&self.alarms).await {
+            Ok(pauses) => pauses,
+            Err(error) => {
+                tracing::warn!(%error, "alarm pauses could not be read; none are applied");
+                Vec::new()
+            }
+        };
+        view.pauses = crate::alarm::pause::summarise(&pauses, now);
 
         for partition in Partition::all() {
             // The rules first, so the queries ask about exactly the
@@ -104,10 +121,11 @@ impl<O: Observatory, S: AlarmStore> AppState<O, S> {
 
             let measurement = self.measure(partition, &workflow_ids).await;
 
-            let evaluated = evaluate_all(&self.alarms, partition, now, |rule| {
-                measurement.trip_for(rule, now)
-            })
-            .await;
+            let evaluated =
+                evaluate_all_with_pauses(&self.alarms, partition, now, &pauses, |rule| {
+                    measurement.trip_for(rule, now)
+                })
+                .await;
 
             match evaluated {
                 Ok(rows) => view.push(partition, rows),
@@ -137,6 +155,12 @@ impl<O: Observatory, S: AlarmStore> AppState<O, S> {
         let view = self.evaluate_alarms(now_utc()).await;
 
         if let Some(object) = body.as_object_mut() {
+            // §10.2.9 — the overview's "N paused / M scheduled" indicator.
+            object.insert(
+                "pause_summary".to_string(),
+                serde_json::to_value(view.pauses).unwrap_or_else(|_| serde_json::json!({})),
+            );
+
             for partition in Partition::all() {
                 let rows: Vec<Row> = view
                     .partitions
@@ -247,6 +271,9 @@ pub fn router<O: Observatory, S: AlarmStore>(state: Arc<AppState<O, S>>) -> Rout
         .route("/api/hl7-throughput", get(api_throughput::<O, S>))
         .route("/api/messages", get(api_messages::<O, S>))
         .route("/api/alarms/status", get(api_alarms::<O, S>))
+        .merge(crate::pages::pauses::routes::<O, S>())
+        .merge(crate::pages::contacts::routes::<O, S>())
+        .merge(crate::pages::network_test::routes::<O, S>())
         .route("/static/dashboard.css", get(stylesheet))
         .with_state(state)
 }
@@ -347,9 +374,10 @@ async fn api_service_bus<O: Observatory, S: AlarmStore>(
     let hours = query.hours_or_default();
 
     let queues = state.queue_names();
-    let (depths, series) = tokio::join!(
+    let (depths, series, topics) = tokio::join!(
         state.azure.queue_depths(&queues),
         state.azure.throughput(hours, None, None),
+        state.azure.topics(),
     );
 
     let rows: Vec<serde_json::Value> = depths
@@ -370,6 +398,15 @@ async fn api_service_bus<O: Observatory, S: AlarmStore>(
         "outgoing": series.outgoing,
         "timespan": series.timespan,
         "queues": rows,
+        // §10.5.5 -- beside the existing fields, which do not change.
+        "topics": topics.as_ref().map_or_else(Vec::new, |topics| {
+            topics
+                .iter()
+                .map(|t| crate::topics::topic_json(t, state.config.thresholds))
+                .collect()
+        }),
+        "topics_known": topics.is_some(),
+        "namespace_kpis": topics.as_deref().map(crate::topics::kpis),
         "azure_configured": state.azure.is_configured(),
     }))
     .into_response()
@@ -485,6 +522,28 @@ struct ServiceBusPage {
     queues: Vec<QueueRow>,
     /// Whether Azure could be reached at all.
     configured: bool,
+    /// Topics and their subscriptions (§10.5.5).
+    topics: Vec<TopicRow>,
+    /// Whether the namespace's topics could be read (§10.5.2).
+    topics_known: bool,
+}
+
+/// One topic, as the page shows it.
+struct TopicRow {
+    name: String,
+    active: Option<u64>,
+    dead_letter: Option<u64>,
+    health: crate::health::Health,
+    subscriptions_read: bool,
+    subscriptions: Vec<SubscriptionRow>,
+}
+
+/// One subscription, as the page shows it.
+struct SubscriptionRow {
+    name: String,
+    active: Option<u64>,
+    dead_letter: Option<u64>,
+    health: crate::health::Health,
 }
 
 /// One queue, as the page shows it.
@@ -636,6 +695,8 @@ pub struct AlarmView {
     pub partitions: Vec<(&'static str, Vec<Row>)>,
     /// Partitions whose store could not be read.
     pub failed: Vec<&'static str>,
+    /// How many pauses are in force or waiting (§10.2.9).
+    pub pauses: crate::alarm::pause::PauseSummary,
 }
 
 impl AlarmView {
@@ -673,6 +734,8 @@ struct AlarmsPage {
     partitions: Vec<AlarmPartition>,
     /// Alarms whose store could not be read.
     failed: Vec<&'static str>,
+    /// Pauses in force or waiting (§10.2.9).
+    pauses: crate::alarm::pause::PauseSummary,
 }
 
 /// One alarm's rules, as the page shows them.
@@ -691,6 +754,10 @@ struct AlarmRow {
     workflow_id: String,
     /// What it is doing.
     status: crate::alarm::Status,
+    /// Why it is paused, when it is (§10.2.9).
+    pause_note: Option<String>,
+    /// When a pause starts, when one is waiting (§10.2.9).
+    scheduled_note: Option<String>,
 }
 
 async fn overview<O: Observatory, S: AlarmStore>(
@@ -728,9 +795,32 @@ async fn service_bus_page<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
 ) -> Response {
     let names = state.queue_names();
-    let depths = state.azure.queue_depths(&names).await;
+    let (depths, topics) = tokio::join!(state.azure.queue_depths(&names), state.azure.topics(),);
+    let thresholds = state.config.thresholds;
 
     page(&ServiceBusPage {
+        topics_known: topics.is_some(),
+        topics: topics
+            .unwrap_or_default()
+            .into_iter()
+            .map(|topic| TopicRow {
+                health: crate::topics::health(topic.depths, thresholds),
+                active: topic.depths.active,
+                dead_letter: topic.depths.dead_letter,
+                subscriptions_read: topic.subscriptions_read,
+                subscriptions: topic
+                    .subscriptions
+                    .into_iter()
+                    .map(|s| SubscriptionRow {
+                        health: crate::topics::health(s.depths, thresholds),
+                        active: s.depths.active,
+                        dead_letter: s.depths.dead_letter,
+                        name: s.name,
+                    })
+                    .collect(),
+                name: topic.name,
+            })
+            .collect(),
         queues: depths
             .into_iter()
             .map(|(name, depths)| QueueRow {
@@ -835,6 +925,9 @@ async fn api_alarms<O: Observatory, S: AlarmStore>(
                         "status": row.outcome.status.label().to_lowercase(),
                         "cooldown_remaining_minutes": row.outcome.cooldown_remaining,
                         "pause_remaining_minutes": row.outcome.pause_remaining,
+                        // §10.2.9.
+                        "pause": row.pause,
+                        "scheduled_pause": row.scheduled,
                     }))
                     .collect::<Vec<_>>(),
             })
@@ -844,6 +937,7 @@ async fn api_alarms<O: Observatory, S: AlarmStore>(
     Json(serde_json::json!({
         "alarms": partitions,
         "summary": view.summary(),
+        "pause_summary": view.pauses,
         // §5.6 — a store outage is named, not swallowed. Without this a
         // Cosmos failure and "no rules configured" are the same JSON.
         "unavailable": view.failed,
@@ -871,11 +965,27 @@ async fn alarms_page<O: Observatory, S: AlarmStore>(
                         display_name: row.rule.display_name.clone(),
                         workflow_id: row.rule.workflow_id.clone(),
                         status: row.outcome.status,
+                        pause_note: row.pause.as_ref().map(|pause| {
+                            if pause.pause_indefinite {
+                                format!("until cancelled — {}", pause.pause_reason)
+                            } else {
+                                format!(
+                                    "until {} — {}",
+                                    pause.paused_until.clone().unwrap_or_default(),
+                                    pause.pause_reason
+                                )
+                            }
+                        }),
+                        scheduled_note: row
+                            .scheduled
+                            .as_ref()
+                            .map(|scheduled| format!("pause starts {}", scheduled.start_display)),
                     })
                     .collect(),
             })
             .collect(),
         failed: view.failed.clone(),
+        pauses: view.pauses,
     })
 }
 
@@ -891,7 +1001,7 @@ async fn stylesheet() -> Response {
 }
 
 /// Render a template, or say plainly that it could not be rendered.
-fn page<T: Template>(template: &T) -> Response {
+pub(crate) fn page<T: Template>(template: &T) -> Response {
     template.render().map_or_else(
         |error| {
             (
@@ -905,7 +1015,7 @@ fn page<T: Template>(template: &T) -> Response {
 }
 
 /// Now.
-fn now_utc() -> time::OffsetDateTime {
+pub(crate) fn now_utc() -> time::OffsetDateTime {
     time::OffsetDateTime::now_utc()
 }
 

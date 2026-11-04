@@ -55,6 +55,11 @@ pub enum TlsError {
 
 /// Build a rustls configuration from the PEM files.
 ///
+/// No client authentication is requested (`with_no_client_auth`): callers
+/// are identified by the assigning-authority check of `spec/08` §4, not by
+/// a client certificate. Called once at startup so a bad file stops the
+/// service there, not on the first request.
+///
 /// # Errors
 ///
 /// [`TlsError`] naming the file at fault.
@@ -94,7 +99,8 @@ fn read_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsErr
     Ok(certificates)
 }
 
-/// The private key.
+/// The private key: the first PEM key in the file, in any of the formats
+/// `rustls-pki-types` accepts (PKCS#1, PKCS#8, SEC1).
 fn read_key(path: &Path) -> Result<PrivateKeyDer<'static>, TlsError> {
     PrivateKeyDer::from_pem_file(path).map_err(|error| TlsError::Unreadable {
         path: path.display().to_string(),
@@ -104,9 +110,15 @@ fn read_key(path: &Path) -> Result<PrivateKeyDer<'static>, TlsError> {
 
 /// Serve until the watcher says stop.
 ///
+/// `tls` of `None` serves plaintext, which is the normal shape behind Azure
+/// Container Apps ingress (which terminates TLS itself; see
+/// `spec/08-hl7-soap-server.md` §6.2). On stop the listener closes first and
+/// in-flight requests are then awaited, never cancelled.
+///
 /// # Errors
 ///
-/// [`io::Error`] if the address cannot be bound.
+/// [`io::Error`] if the address cannot be bound. Per-connection failures
+/// are logged and do not end the loop.
 pub async fn serve<E, S, M>(
     address: SocketAddr,
     processor: Arc<Processor<E, S, M>>,

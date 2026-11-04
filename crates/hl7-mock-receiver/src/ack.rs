@@ -61,16 +61,30 @@ fn field(message: &Message, path: &str) -> String {
     message.get(path).ok().flatten().unwrap_or_default()
 }
 
-/// Whether this payload should be answered with a negative acknowledgement.
+/// The negative acknowledgement this payload asks for, if any.
 ///
-/// The mock's contract with its callers: a message whose text contains
-/// `fail`, in any case, comes back rejected. That is how a test drives the
-/// unhappy path without needing a malformed message.
+/// The mock's contract with its callers (`spec/11-mock-receivers.md` §1.1):
+/// a message whose text contains `reject`, in any case, comes back `AR` (a
+/// sender must dead-letter it); one containing `fail` comes back `AE` (a
+/// sender must retry it). `reject` wins when both appear, as upstream does.
+/// That is how a test drives either unhappy path without needing a
+/// malformed message.
 #[must_use]
-pub fn should_reject(payload: &[u8]) -> bool {
+pub fn requested_nack(payload: &[u8]) -> Option<AckCode> {
     // Not text: it cannot be a message this mock accepts, so it is
     // rejected rather than forwarded.
-    std::str::from_utf8(payload).map_or(true, |text| text.to_ascii_lowercase().contains("fail"))
+    let Ok(text) = std::str::from_utf8(payload) else {
+        return Some(AckCode::Error);
+    };
+    let text = text.to_ascii_lowercase();
+
+    if text.contains("reject") {
+        Some(AckCode::Reject)
+    } else if text.contains("fail") {
+        Some(AckCode::Error)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -129,11 +143,27 @@ mod tests {
     }
 
     #[test]
-    fn fail_anywhere_in_the_text_asks_for_a_rejection() {
-        assert!(should_reject(b"MSH|^~\\&|...|please FAIL this"));
-        assert!(should_reject(b"...Failure..."));
-        assert!(!should_reject(MESSAGE.as_bytes()));
+    fn fail_anywhere_in_the_text_asks_for_an_ae() {
+        assert_eq!(
+            requested_nack(b"MSH|^~\\&|...|please FAIL this"),
+            Some(AckCode::Error)
+        );
+        assert_eq!(requested_nack(b"...Failure..."), Some(AckCode::Error));
+        assert_eq!(requested_nack(MESSAGE.as_bytes()), None);
         // Bytes that are not text cannot be accepted.
-        assert!(should_reject(&[0xff, 0xfe]));
+        assert_eq!(requested_nack(&[0xff, 0xfe]), Some(AckCode::Error));
+    }
+
+    #[test]
+    fn reject_anywhere_in_the_text_asks_for_an_ar_and_beats_fail() {
+        // spec/11-mock-receivers.md §1.1.
+        assert_eq!(requested_nack(b"...REJECT me"), Some(AckCode::Reject));
+        assert_eq!(requested_nack(b"fail and reject"), Some(AckCode::Reject));
+    }
+
+    #[test]
+    fn a_reject_differs_only_in_the_code() {
+        let frame = reply(MESSAGE.as_bytes(), AckCode::Reject, "20250102030405");
+        assert!(text(&frame).contains("MSA|AR|MSG00001"));
     }
 }

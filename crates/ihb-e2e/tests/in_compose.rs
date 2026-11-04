@@ -31,8 +31,8 @@
 //! paris, mosaiq      MLLP → hl7-server →               hl7-sender → mock
 //! ```
 //!
-//! and five HL7 releases and trigger types between them — 2.5 `ADT^A31`,
-//! 2.3.1 `ADT^A40`, 2.4 `ADT^A28`, 2.5.1 `ADT^A31`. A flow that only works
+//! and four HL7 releases and trigger types between them — 2.5 `ADT^A31`
+//! (phw, mosaiq), 2.3.1 `ADT^A40`, 2.4 `ADT^A28`, 2.5.1 `ADT^A31`. A flow that only works
 //! for the version its transformer was written against fails here.
 //!
 //! `lims-to-mpi` is covered separately, by
@@ -75,6 +75,15 @@ const EMULATOR: &str = "Endpoint=sb://127.0.0.1;\
 /// per `spec/01-architecture.md` §4.1.
 const MOCK_EGRESS: &str = "local-inthub-mpi-mock-receiver";
 
+/// Where the **dedicated-sender** flows end up instead: the topic mock
+/// receiver's verifier subscription, and the session its `.env` publishes
+/// under (`local/mpi-hl7-topic-mock-receiver.env`). Paris and Mosaiq moved to
+/// a topic-fed sender and the topic mock receiver, per
+/// `spec/01-architecture.md` §2.1.3, so the queue above never sees them.
+const TOPIC_MOCK_EGRESS: &str = "local-inthub-hl7-topic-mock-receiver";
+const TOPIC_MOCK_SUBSCRIPTION: &str = "local-inthub-hl7-topic-mock-receiver-verifier";
+const TOPIC_MOCK_SESSION: &str = "mock";
+
 /// The compose file, relative to the workspace root.
 const COMPOSE: &str = "local/docker-compose.yml";
 
@@ -100,6 +109,9 @@ struct Flow {
     /// Whether a transformer sits in the middle. Not used to weaken an
     /// assertion — recorded so a failure says which shape broke.
     transformed: bool,
+    /// Whether the flow ends at the topic mock receiver rather than the
+    /// queue one (`spec/01-architecture.md` §2.1.3).
+    topic_sink: bool,
 }
 
 /// The five MLLP flows.
@@ -114,6 +126,7 @@ const FLOWS: &[Flow] = &[
         sample: include_str!("../../../local/sample_messages/phw-to-mpi.sample.hl7"),
         control_id: "202505052323364444444444",
         transformed: true,
+        topic_sink: false,
     },
     Flow {
         profile: "pims-to-mpi",
@@ -121,6 +134,7 @@ const FLOWS: &[Flow] = &[
         sample: include_str!("../../../local/sample_messages/pims-to-mpi.sample.hl7"),
         control_id: "48209218",
         transformed: true,
+        topic_sink: false,
     },
     Flow {
         profile: "chemo-to-mpi",
@@ -128,6 +142,7 @@ const FLOWS: &[Flow] = &[
         sample: include_str!("../../../local/sample_messages/chemocare-to-mpi.sample.hl7"),
         control_id: "951317629075403",
         transformed: true,
+        topic_sink: false,
     },
     Flow {
         profile: "paris-to-mpi",
@@ -135,6 +150,7 @@ const FLOWS: &[Flow] = &[
         sample: include_str!("../../../local/sample_messages/paris-to-mpi.sample.hl7"),
         control_id: "185352920250619115040",
         transformed: false,
+        topic_sink: true,
     },
     Flow {
         profile: "mosaiq-to-mpi",
@@ -142,6 +158,7 @@ const FLOWS: &[Flow] = &[
         sample: include_str!("../../../local/sample_messages/mosaiq-to-mpi.sample.hl7"),
         control_id: "185352920250619115040",
         transformed: false,
+        topic_sink: true,
     },
 ];
 
@@ -248,6 +265,7 @@ const ALL_PROFILES: &[&str] = &[
     "chemo-to-mpi",
     "paris-to-mpi",
     "mosaiq-to-mpi",
+    "risp-to-mpi",
     "lims-to-mpi",
     "mpi-to-topic",
     "dashboard",
@@ -399,10 +417,30 @@ async fn every_mllp_flow_carries_its_sample_through_the_containers() {
         // Drain the mock receiver's egress until this run's marker appears.
         // Everything received on the way is settled, so a queue left dirty
         // by an earlier run is cleaned up rather than getting in the way.
-        let receiver = bus
-            .queue_receiver(MOCK_EGRESS)
-            .await
-            .expect("the mock egress queue exists");
+        let receiver = if flow.topic_sink {
+            // The session may not exist until the first message lands, so
+            // ask again for a while, as `phw_to_mpi` does for its sessions.
+            let mut accepted = None;
+            for _ in 0..240 {
+                if let Ok(receiver) = bus
+                    .subscription_receiver(
+                        TOPIC_MOCK_EGRESS,
+                        TOPIC_MOCK_SUBSCRIPTION,
+                        TOPIC_MOCK_SESSION,
+                    )
+                    .await
+                {
+                    accepted = Some(receiver);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+            accepted.expect("the topic mock receiver's session became available")
+        } else {
+            bus.queue_receiver(MOCK_EGRESS)
+                .await
+                .expect("the mock egress queue exists")
+        };
 
         // Twelve receives, not three. Each hop waits out its own receive
         // window on an idle queue (§5.1.2's sixty seconds), and there are

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Tables{% endblock %}
+{% block content %}
+<div class="page-header page-header--split">
+  <div>
+    <h1 class="page-title">Lookup tables</h1>
+    <p class="page-subtitle">
+      Source: <span class="badge">{{ source }}</span>
+      {% if source == "file" %}read-only tables from seed files.{% else %}tables stored by the service.{% endif %}
+    </p>
+  </div>
+  {% if uploads_blocked.is_none() %}
+  <a class="btn-dash btn-dash--primary" href="/upload">Upload CSV</a>
+  {% endif %}
+</div>
+
+<section class="kpi-strip">
+  <div class="kpi-card"><div class="kpi-card__value">{{ tables.len() }}</div><div class="kpi-card__label">Tables</div></div>
+  <div class="kpi-card"><div class="kpi-card__value">{{ total_rows }}</div><div class="kpi-card__label">Total rows</div></div>
+  <div class="kpi-card"><div class="kpi-card__value">{{ composite_count }}</div><div class="kpi-card__label">Composite-key tables</div></div>
+  <div class="kpi-card"><div class="kpi-card__value">{{ cached_entries }}</div><div class="kpi-card__label">Cached entries (TTL tables)</div></div>
+</section>
+
+<section class="dash-card">
+  <h2 class="dash-card__title">Tables</h2>
+  {% if tables.is_empty() %}
+    <p class="empty-state">No tables yet.{% if uploads_blocked.is_none() %} <a href="/upload">Upload a CSV</a> to create one.{% endif %}</p>
+  {% else %}
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Table</th><th>Key</th><th>Values</th><th class="num">Rows</th><th>Caching</th><th class="num">Cached</th><th>Last upload (UTC)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tables %}
+      <tr>
+        <td>
+          <a href="/tables/{{ t.name }}"><code>{{ t.name }}</code></a>
+          {% if !t.description.is_empty() %}<div class="muted">{{ t.description }}</div>{% endif %}
+        </td>
+        <td>{% for c in t.key_columns %}<span class="badge badge--key">{{ c }}</span>{% endfor %}</td>
+        <td>{% for c in t.value_columns %}<span class="badge {% if c.is_default %}badge--default{% endif %}">{{ c.name }}</span>{% endfor %}</td>
+        <td class="num">{{ t.row_count }}</td>
+        <td>{% if t.preload %}<span class="badge badge--ok">preloaded</span>{% else %}TTL {{ t.ttl_text }}{% endif %}</td>
+        <td class="num">
+          {% if t.preload %}<span class="muted">all</span>{% else %}{{ t.cache_entries }}<div class="muted">{{ t.hits }} hit / {{ t.misses }} miss</div>{% endif %}
+        </td>
+        <td class="muted">
+          {% if let Some(at) = t.last_upload_at %}{{ at }}<div>{{ t.last_upload_file }} · {{ t.last_upload_by }}</div>{% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</section>
+
+<p class="muted footnote">API: <code>GET /api/v1/lookup/&lt;table&gt;?k=…</code> or <code>?key.&lt;part&gt;=…</code> · <code>GET /api/v1/tables</code> · <code>POST /api/v1/tables/&lt;table&gt;/uploads</code></p>
+{% endblock %}

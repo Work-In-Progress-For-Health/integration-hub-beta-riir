@@ -222,7 +222,7 @@ async fn two_frames_in_one_write_receive_two_acknowledgements() {
 }
 
 #[tokio::test]
-async fn an_oversized_frame_closes_the_connection_without_a_reply() {
+async fn an_oversized_frame_gets_a_generic_ae_and_the_connection_closes() {
     // spec/07-hl7-server.md §2.3 and §9.5.
     let server = start(&[("MAX_MESSAGE_SIZE_BYTES", "2048")]).await;
 
@@ -234,10 +234,12 @@ async fn an_oversized_frame_closes_the_connection_without_a_reply() {
     oversized.extend(std::iter::repeat_n(b'A', 4096));
     stream.write_all(&oversized).await.unwrap();
 
-    assert!(
-        read_frame(&mut stream).await.is_none(),
-        "§4.3 — an oversized message gets no reply at all"
-    );
+    let nack = read_frame(&mut stream)
+        .await
+        .expect("§4.3.2 — an oversized message gets a generic AE");
+    assert!(nack.contains("|ACK^^ACK|"), "{nack}");
+    assert!(nack.contains("MSA|AE|"), "{nack}");
+    assert!(nack.contains("exceeds maximum allowed size"), "{nack}");
     assert!(
         server.bus.all_sent(EGRESS).is_empty(),
         "and is not forwarded"
@@ -256,7 +258,7 @@ async fn a_connection_that_does_not_start_with_a_start_block_is_dropped() {
     stream.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
 
     assert!(read_frame(&mut stream).await.is_none(), "no reply");
-    assert!(server.bus.all_sent(EGRESS).is_empty());
+    assert_eq!(server.bus.all_sent(EGRESS), Vec::new());
 
     server.stop().await;
 }
@@ -274,8 +276,11 @@ async fn a_frame_that_is_not_utf8_is_refused() {
     bad.extend_from_slice(&[FS, b'\r']);
     stream.write_all(&bad).await.unwrap();
 
-    assert!(read_frame(&mut stream).await.is_none(), "no reply");
-    assert!(server.bus.all_sent(EGRESS).is_empty());
+    let nack = read_frame(&mut stream)
+        .await
+        .expect("§4.3.2 — a frame that is not UTF-8 gets a generic AE");
+    assert!(nack.contains("MSA|AE|"), "{nack}");
+    assert_eq!(server.bus.all_sent(EGRESS), Vec::new());
 
     server.stop().await;
 }
@@ -306,10 +311,10 @@ async fn a_message_split_across_writes_is_reassembled() {
 }
 
 #[tokio::test]
-async fn a_rejected_message_gets_no_reply_and_the_connection_closes() {
-    // spec/07-hl7-server.md §4.3, over the socket rather than in the
-    // pipeline: "no reply" has to survive all the way out to the peer,
-    // because that is what makes the source system retry.
+async fn a_rejected_message_gets_an_ar_echoing_its_header_and_the_connection_closes() {
+    // spec/07-hl7-server.md §4.3 and §4.3.1, over the socket rather than in
+    // the pipeline: the NACK has to survive all the way out to the peer,
+    // because that is how the source system learns not to retry.
     let server = start(&[]).await;
 
     let wrong_version = phw_sample().replace("|P|2.5|", "|P|2.4|");
@@ -317,8 +322,14 @@ async fn a_rejected_message_gets_no_reply_and_the_connection_closes() {
     let mut stream = TcpStream::connect(server.address).await.unwrap();
     stream.write_all(&frame(&wrong_version)).await.unwrap();
 
-    assert!(read_frame(&mut stream).await.is_none());
-    assert!(server.bus.all_sent(EGRESS).is_empty());
+    let nack = read_frame(&mut stream).await.expect("an AR");
+    assert!(nack.contains("MSA|AR|202505052323364444444444|"), "{nack}");
+    assert!(nack.contains("Message has wrong version"), "{nack}");
+    assert!(
+        read_frame(&mut stream).await.is_none(),
+        "and then the connection closes"
+    );
+    assert_eq!(server.bus.all_sent(EGRESS), Vec::new());
 
     server.stop().await;
 }

@@ -5,7 +5,14 @@
 //! A job: it runs to completion and exits 0 or 1. No health check, no
 //! signal handling, no backoff — a job that cannot do its work should stop
 //! and let an operator look at it.
+//!
+//! The loop here is §1.3's fetch, send, mark; the per-step retry rules
+//! (§5) and statements (§3, §6) are in the library, so this file is only
+//! configuration, connections and the order of the three steps.
 
+// Startup and the send call `azservicebus` through `ihb-bus`, whose futures
+// are ~32 KB. `ihb_bus::live` records why that is allowed rather than boxed
+// away.
 #![allow(clippy::large_futures)]
 
 use std::process::ExitCode;
@@ -34,7 +41,12 @@ fn main() -> ExitCode {
 struct Config {
     /// `REPLAY_BATCH_ID` — the one batch this execution replays (§1.2).
     batch_id: Uuid,
-    /// `REPLAY_BATCH_SIZE` — rows per page.
+    /// `REPLAY_BATCH_SIZE` — rows per page (default 100). `i32` because it
+    /// is bound as the `TOP (@P1)` parameter, which TDS types as `int`.
+    /// Read with `integer_or`, so `0` is accepted although
+    /// `spec/02-configuration.md` §7.2 says "must be a positive integer";
+    /// a `0` fetches nothing and the job reports success having replayed
+    /// nothing.
     batch_size: i32,
     /// `PRIORITY_QUEUE_NAME` — where replayed messages go.
     priority_queue_name: String,
@@ -46,7 +58,13 @@ struct Config {
     sql: SqlConfig,
 }
 
-/// Read everything, reporting every problem at once.
+/// Read everything, reporting every problem at once
+/// (`spec/02-configuration.md` §1.4).
+///
+/// # Errors
+///
+/// Every unusable variable, together; a `REPLAY_BATCH_ID` that is not a
+/// UUID is among them (§7.2 of that spec).
 fn config() -> Result<Config, ihb_config::ConfigErrors> {
     let mut reader = Reader::from_env();
 
@@ -73,6 +91,12 @@ fn config() -> Result<Config, ihb_config::ConfigErrors> {
 }
 
 /// Everything after the runtime exists.
+///
+/// The exit code is the job's whole result to the scheduler: `SUCCESS` only
+/// when a fetch returned no rows, which is how the loop knows every page of
+/// the batch was sent and marked `Loaded`. Any other exit leaves unmarked
+/// rows `Pending` or `Failed`, and re-running the job is the recovery
+/// (`spec/13-message-replay.md` §2.2).
 async fn run() -> ExitCode {
     let config = match config() {
         Ok(config) => config,
@@ -82,8 +106,9 @@ async fn run() -> ExitCode {
         }
     };
 
-    // The outcome is not inspected here: this is a batch job, and §6.2
-    // makes a telemetry failure non-fatal, so there is nothing to branch on.
+    // The outcome is not inspected here: this is a batch job, and
+    // `spec/04-observability.md` §6.2 makes a telemetry failure non-fatal,
+    // so there is nothing to branch on.
     let _telemetry = ihb_telemetry::otel::configure(&telemetry_config());
 
     // `spec/18-deployment.md` §4.3 — a configured CA bundle that cannot be
@@ -176,6 +201,9 @@ async fn run() -> ExitCode {
 }
 
 /// Telemetry configuration, read straight from the environment.
+///
+/// Outside the validated [`config`] so telemetry is up before the rest of
+/// the configuration can fail, and a bad value there can be logged.
 fn telemetry_config() -> ihb_telemetry::otel::Config {
     let read = |name: &str| {
         std::env::var(name)

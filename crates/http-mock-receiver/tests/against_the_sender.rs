@@ -184,7 +184,7 @@ async fn a_request_with_no_payload_is_faulted_rather_than_accepted() {
     let response = post(&mock.url, body).await;
 
     assert!(response.contains("Fault"), "{response}");
-    assert!(mock.bus.all_sent(QUEUE).is_empty());
+    assert_eq!(mock.bus.all_sent(QUEUE), Vec::new());
 
     mock.stop().await;
 }

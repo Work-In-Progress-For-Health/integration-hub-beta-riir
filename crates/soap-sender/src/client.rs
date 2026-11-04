@@ -13,7 +13,7 @@ use ihb_config::Secret;
 use ihb_sender::{Delivery, DeliveryError, Verdict};
 use tokio::net::TcpStream;
 
-use crate::envelope::{UNPARSEABLE_LOG_LIMIT, evaluate, wrap};
+use crate::envelope::{Format, UNPARSEABLE_LOG_LIMIT, evaluate};
 
 /// The content type §4.1 requires.
 pub const CONTENT_TYPE_VALUE: &str = "text/xml; charset=utf-8";
@@ -41,13 +41,25 @@ pub struct Endpoint {
 pub struct SoapClient {
     /// Where it posts.
     endpoint: Endpoint,
+    /// Which envelope (`spec/10-senders.md` §4.6).
+    format: Format,
 }
 
 impl SoapClient {
     /// A client for `endpoint`.
     #[must_use]
     pub const fn new(endpoint: Endpoint) -> Self {
-        Self { endpoint }
+        Self {
+            endpoint,
+            format: Format::Default,
+        }
+    }
+
+    /// Use another envelope (`spec/10-senders.md` §4.6).
+    #[must_use]
+    pub const fn with_format(mut self, format: Format) -> Self {
+        self.format = format;
+        self
     }
 
     /// Where this posts.
@@ -143,7 +155,11 @@ enum Attempt {
 impl Delivery for SoapClient {
     /// §4.2, §4.3 and §4.4.
     async fn deliver(&mut self, message: &str) -> Result<Verdict, DeliveryError> {
-        let body = wrap(message);
+        // §4.6.3 — a message that cannot be wrapped is not posted.
+        let body = self
+            .format
+            .wrap(message)
+            .map_err(DeliveryError::Unexpected)?;
 
         match self.post(body.clone()).await {
             Ok((status, response)) => return Ok(read(status, &response)),

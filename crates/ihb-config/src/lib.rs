@@ -45,7 +45,7 @@
 //! [`env_reader`] reads booleans strictly by default, for the good reason
 //! that "not false-ish, therefore true" is a footgun in new code. This
 //! workspace wants the lopsided rule, so every call site here uses
-//! [`Reader::lenient_bool_or`] and [`parse_bool_lenient`] — named, rather
+//! [`Reader::lenient_bool_or`] and [`parse_bool`] — named, rather
 //! than aliased back to `bool_or`, so the lopsidedness is visible where it
 //! is relied on.
 //!
@@ -81,9 +81,93 @@ pub use env_reader::{
     parse_csv, present,
 };
 
+/// What `MESSAGE_STORE_ENABLED` and `MESSAGE_STORE_QUEUE_NAME` add up to.
+///
+/// `spec/02-configuration.md` §2.1.2.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MessageStore {
+    /// The queue to write to: set only when the store is switched on **and**
+    /// a queue name is configured.
+    pub queue: Option<String>,
+    /// A queue name that is configured but ignored because the store is
+    /// switched off. §2.1.2c: the changed default makes this easy to produce
+    /// by accident, so a service warns about it at startup rather than
+    /// quietly writing no audit trail.
+    pub unused_queue: Option<String>,
+}
+
+/// Read the message-store settings.
+///
+/// `MESSAGE_STORE_ENABLED` defaults to **false** (upstream `387b20a`). Both
+/// variables are always read, so a blank or malformed one is reported
+/// alongside every other configuration problem rather than only when the
+/// store happens to be on.
+///
+/// # Examples
+///
+/// ```
+/// use ihb_config::{Reader, message_store};
+///
+/// let reader = Reader::from_pairs([("MESSAGE_STORE_QUEUE_NAME", "store")]);
+/// let store = message_store(&reader);
+/// assert_eq!(store.queue, None, "off by default");
+/// assert_eq!(store.unused_queue.as_deref(), Some("store"), "and worth a warning");
+///
+/// let reader = Reader::from_pairs([
+///     ("MESSAGE_STORE_QUEUE_NAME", "store"),
+///     ("MESSAGE_STORE_ENABLED", "true"),
+/// ]);
+/// assert_eq!(message_store(&reader).queue.as_deref(), Some("store"));
+/// ```
+#[must_use]
+pub fn message_store(reader: &Reader) -> MessageStore {
+    let enabled = reader.lenient_bool_or("MESSAGE_STORE_ENABLED", false);
+    let queue = reader.optional_string("MESSAGE_STORE_QUEUE_NAME");
+    if enabled {
+        MessageStore {
+            queue,
+            unused_queue: None,
+        }
+    } else {
+        MessageStore {
+            queue: None,
+            unused_queue: queue,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_store_is_off_unless_enabled() {
+        // spec/02-configuration.md §2.1.2 — the default flipped upstream.
+        let queue = ("MESSAGE_STORE_QUEUE_NAME", "store");
+        for (enabled, on) in [
+            (None, false),
+            (Some("false"), false),
+            (Some("0"), false),
+            (Some("true"), true),
+            (Some("TRUE"), true),
+            (Some("1"), true),
+        ] {
+            let mut pairs = vec![queue];
+            if let Some(value) = enabled {
+                pairs.push(("MESSAGE_STORE_ENABLED", value));
+            }
+            let store = message_store(&Reader::from_pairs(pairs));
+            assert_eq!(store.queue.is_some(), on, "{enabled:?}");
+            // §2.1.2c — exactly one of the two carries the name.
+            assert_eq!(store.unused_queue.is_some(), !on, "{enabled:?}");
+        }
+    }
+
+    #[test]
+    fn enabled_without_a_queue_is_no_store_and_no_warning() {
+        let store = message_store(&Reader::from_pairs([("MESSAGE_STORE_ENABLED", "true")]));
+        assert_eq!(store, MessageStore::default());
+    }
 
     #[test]
     fn blank_is_absent() {
@@ -165,6 +249,6 @@ mod tests {
             parse_csv(Some("245,212, 192 ,224")),
             ["245", "212", "192", "224"]
         );
-        assert!(parse_csv(Some(" , , ")).is_empty());
+        assert_eq!(parse_csv(Some(" , , ")), [] as [std::string::String; 0]);
     }
 }

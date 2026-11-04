@@ -145,6 +145,10 @@ enum Attempt {
 }
 
 impl Delivery for MllpClient {
+    fn endpoint(&self) -> String {
+        self.destination.address()
+    }
+
     /// §3.3, §3.4 and §3.5.
     async fn deliver(&mut self, message: &str) -> Result<Verdict, DeliveryError> {
         match self.exchange(message).await {

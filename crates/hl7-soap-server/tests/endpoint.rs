@@ -90,7 +90,7 @@ async fn start(extra: &[(&str, &str)]) -> Server {
         Arc::new(Processor::with_mint(
             config.clone(),
             bus.sender(EGRESS),
-            bus.sender(STORE),
+            Some(bus.sender(STORE)),
             FixedMint,
         ));
 
@@ -462,7 +462,7 @@ async fn an_external_entity_is_not_resolved() {
         "no file content may appear in the response: {}",
         answer.body
     );
-    assert!(server.bus.all_sent(EGRESS).is_empty());
+    assert_eq!(server.bus.all_sent(EGRESS), [] as [ihb_bus::Incoming; 0]);
 
     server.stop().await;
 }
@@ -523,7 +523,7 @@ async fn an_unauthorised_assigning_authority_is_forbidden() {
         "{}",
         answer.body
     );
-    assert!(server.bus.all_sent(EGRESS).is_empty());
+    assert_eq!(server.bus.all_sent(EGRESS), [] as [ihb_bus::Incoming; 0]);
 
     server.stop().await;
 }

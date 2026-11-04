@@ -199,6 +199,38 @@ services:
         aliases:
           - "hl7-soap-server"
 
+  # The REST ingress, configured as hl7-soap-server (spec/19-rest-servers.md
+  # §9). One profile, ingress only: its egress queue is the LIMS transformer's,
+  # so run it alone against the emulator rather than beside `lims-to-mpi`,
+  # which would put two servers on one queue.
+  rest-server:
+    container_name: "ihb-rs-rest-server"
+    image: "ihb-rs/rest-server:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: rest-server
+    env_file:
+      - ./rest-server-lims.env
+    ports:
+      - "8083:8080"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - rest-server
+    networks:
+      integration-hub:
+        aliases:
+          - "rest-server"
+
   phw-hl7-transformer:
     container_name: "ihb-rs-phw-hl7-transformer"
     image: "ihb-rs/hl7-phw-transformer:${IHB_TAG:-dev}"
@@ -247,14 +279,214 @@ services:
     profiles:
       - phw-to-mpi
       - lims-to-mpi
-      - paris-to-mpi
       - chemo-to-mpi
-      - pims-to-mpi
-      - mosaiq-to-mpi
     networks:
       integration-hub:
         aliases:
           - "mpi-hl7-sender"
+
+  # Dedicated senders for the flows that moved from the shared
+  # `local-inthub-mpi-sender-ingress` queue to a topic of their own
+  # (spec/01-architecture.md §2.1.3; upstream 9e797ac, 7157ee3, 2b26c7f).
+  # Each is `hl7-sender` with subscription ingress, delivering to the topic
+  # mock receiver, and reads nothing else, so two flows never contend for
+  # one session.
+  paris-mpi-hl7-sender:
+    container_name: "ihb-rs-paris-mpi-hl7-sender"
+    image: "ihb-rs/hl7-sender:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-sender
+    env_file:
+      - ./paris-mpi-hl7-sender.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - paris-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "paris-mpi-hl7-sender"
+
+  # PIMS moved from the shared queue to its own topic (spec/09-transformers.md
+  # §5.12; upstream 04b30e7, #427).
+  pims-mpi-hl7-sender:
+    container_name: "ihb-rs-pims-mpi-hl7-sender"
+    image: "ihb-rs/hl7-sender:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-sender
+    env_file:
+      - ./pims-mpi-hl7-sender.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - pims-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "pims-mpi-hl7-sender"
+
+  mosaiq-mpi-hl7-sender:
+    container_name: "ihb-rs-mosaiq-mpi-hl7-sender"
+    image: "ihb-rs/hl7-sender:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-sender
+    env_file:
+      - ./mosaiq-mpi-hl7-sender.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - mosaiq-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "mosaiq-mpi-hl7-sender"
+
+  # The RISP profile holds only its sender in this stack: the REST server
+  # and the core-reference transformer have env files (`rest-server-risp.env`)
+  # but no service yet, so nothing publishes to this topic locally.
+  risp-mpi-hl7-sender:
+    container_name: "ihb-rs-risp-mpi-hl7-sender"
+    image: "ihb-rs/hl7-sender:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-sender
+    env_file:
+      - ./risp-mpi-hl7-sender.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - risp-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "risp-mpi-hl7-sender"
+
+  # Generic db-sender configured for RISP -> WRRS (spec/10-senders.md section 7; upstream #422, #433).
+  # `.secrets` supplies MSSQL_SA_PASSWORD. The DRS database is created by
+  # `sql/init-drs-db.sql`, which nothing applies on start-up (no sqlcmd in Edge).
+  wrrs-stmsg-dbsender:
+    container_name: "ihb-rs-wrrs-stmsg-dbsender"
+    image: "ihb-rs/db-sender:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: db-sender
+    env_file:
+      - ./wrrs-stmsg-dbsender.env
+      - ./.secrets
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+      - sqledge
+    profiles:
+      - risp-to-wrrs
+    networks:
+      integration-hub:
+        aliases:
+          - "wrrs-stmsg-dbsender"
+
+  # Classifies LIMS A31/A40 and fans out one message per matching rule to
+  # local-inthub-lims-wrrs-classified (spec/09-transformers.md section 10). Its own profile:
+  # the LIMS topic it reads is not fed by this stack's lims-soap-hl7-server (a queue here).
+  lims-wrrs-hl7-transformer:
+    container_name: "ihb-rs-lims-wrrs-hl7-transformer"
+    image: "ihb-rs/hl7-lims-wrrs-transformer:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-lims-wrrs-transformer
+    env_file:
+      - ./lims-wrrs-hl7-transformer.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - lims-to-wrrs
+    networks:
+      integration-hub:
+        aliases:
+          - "lims-wrrs-hl7-transformer"
+
+  # Dedicated LIMS -> TRRR sender (upstream #429): a second subscription on the LIMS topic,
+  # delivering to the topic mock receiver locally. Same topic caveat as the transformer above.
+  lims-trrr-hl7-sender:
+    container_name: "ihb-rs-lims-trrr-hl7-sender"
+    image: "ihb-rs/hl7-sender:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-sender
+    env_file:
+      - ./lims-trrr-hl7-sender.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - lims-to-trrr
+    networks:
+      integration-hub:
+        aliases:
+          - "lims-trrr-hl7-sender"
 
   mpi-hl7-mock-receiver:
     container_name: "ihb-rs-mpi-hl7-mock-receiver"
@@ -280,18 +512,48 @@ services:
     profiles:
       - phw-to-mpi
       - lims-to-mpi
-      - paris-to-mpi
       - chemo-to-mpi
       - pims-to-mpi
-      - mosaiq-to-mpi
       - mpi-to-topic
     networks:
       integration-hub:
         aliases:
           - "mpi-hl7-mock-receiver"
 
-  paris-hl7-server:
-    container_name: "ihb-rs-paris-hl7-server"
+  # The topic mock receiver: where the dedicated senders deliver
+  # (spec/11-mock-receivers.md §5). Its port is not published, because
+  # `mpi-hl7-chemo-sender` publishes 2581 on the host; containers reach it
+  # by alias on the network.
+  mpi-hl7-topic-mock-receiver:
+    container_name: "ihb-rs-mpi-hl7-topic-mock-receiver"
+    image: "ihb-rs/hl7-topic-mock-receiver:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-topic-mock-receiver
+    env_file:
+      - ./mpi-hl7-topic-mock-receiver.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - paris-to-mpi
+      - mosaiq-to-mpi
+      - risp-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "mpi-hl7-topic-mock-receiver"
+
+  cav-paris-hl7-server:
+    container_name: "ihb-rs-cav-paris-hl7-server"
     image: "ihb-rs/hl7-server:${IHB_TAG:-dev}"
     build:
       context: ..
@@ -299,7 +561,7 @@ services:
       args:
         BIN: hl7-server
     env_file:
-      - ./paris-hl7-server.env
+      - ./cav-paris-hl7-server.env
     ports:
       - "2577:2577"
     restart: on-failure
@@ -316,7 +578,7 @@ services:
     networks:
       integration-hub:
         aliases:
-          - "paris-hl7-server"
+          - "cav-paris-hl7-server"
 
   mosaiq-hl7-server:
     container_name: "ihb-rs-mosaiq-hl7-server"
@@ -611,6 +873,47 @@ services:
       integration-hub:
         aliases:
           - "dashboard"
+
+  # spec/20-lookup-service.md §10.2 — Phase 1, not production ready. The
+  # Python's `lookup` profile also starts the Cosmos emulator; the Cosmos
+  # store is not ported (§1.4), so this one serves the seed data compiled
+  # into the binary, read-only: an upload is refused (`read_only`) until a
+  # writable store exists.
+  lookup-service:
+    container_name: "ihb-rs-lookup-service"
+    image: "ihb-rs/lookup-service:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: lookup-service
+    env_file:
+      - ./lookup-service.env
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+    volumes:
+      # The PIMS translation table (spec/20-lookup-service.md §7.5); replaces
+      # the compiled-in seed for local runs, as upstream mounts it.
+      - "./lookup-seed:/seed:ro"
+    ports:
+      - "127.0.0.1:8090:8080"
+    restart: on-failure
+    healthcheck:
+      # A web service on `PORT`; a distroless image has no `curl`, so the TCP
+      # probe stands in for `/health/ready`.
+      test: ["CMD", "/usr/local/bin/health-probe", "8080"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    profiles:
+      - lookup
+      - pims-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "lookup-service"
 
 
 networks:

@@ -130,6 +130,22 @@ MPI-outbound routing properties, added by `hl7-server` when
 | `DateDeath` | `PID-29.1` |
 | `ReasonDeath` | `PID-30` |
 
+Standard routing properties, added by `hl7-server` for **every** flow except
+`mosaiq` (`build_routing_properties`, upstream `d9cc216`); `mpi` and `wds`
+then add the MPI table above on top, and `mosaiq` carries only the first two
+rows (`07-hl7-server.md` §6.2):
+
+| Key | Value |
+| --- | --- |
+| `SendingApplication` | `MSH-3` |
+| `TriggerEvent` | `MSH-9.2` |
+| `MessageType` | `MSH-9.2` |
+| `UpdateSources` | Pipe-wrapped `PID-2` assigning authority codes |
+| `AssigningAuthorities` | Pipe-wrapped `PID-3` assigning authority codes |
+
+RISP (`hl7-rest-server`, `19-rest-servers.md` §7.2) adds `MessageType` and
+`MessageStructure` instead.
+
 §4.1 **Pipe wrapping.** A non-empty list of codes renders as
 `"|" + join("|") + "|"`; an empty list renders as `""`. The leading and
 trailing pipes exist so a SQL `LIKE '%|108|%'` cannot match inside `|1088|`.

@@ -23,3 +23,4 @@ pub mod ack;
 pub mod config;
 pub mod server;
 pub mod sink;
+pub mod topic;

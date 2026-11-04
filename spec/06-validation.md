@@ -763,3 +763,182 @@ Item 5 is resolved; items 1 to 4 are untouched. In particular §9.4's
 three behaviours whose change alters which messages reach MPI — is still
 the Hub team's to make. `xsd::validate` remains a **cross-check**, not the
 ingest path.
+
+---
+
+## §10 XSD-structure validation and the trigger/structure table
+
+Upstream `c17b134` and `15a751f` (Sep 2026). The Python gained
+`shared_libs/hl7_message_processor`, a second validation path that does not
+go through `hl7_validation`'s per-flow dictionaries: it resolves a standard
+HL7 XSD from `(version, structure)`, parses that XSD into a **grammar**, and
+checks the message's segment sequence against it. Implemented by
+`crates/ihb-validation::{trigger_map, grammar, resolver}`.
+
+§10.0 **Scope.** The grammar, the matcher, the resolver and the
+trigger/structure table are ported. The Python's hl7apy-based conversion
+(`converter.py`, `escaping.py`) is **not**: `ihb-validation` already converts
+through `hl7-2-from-er7-into-xml` (§4), and re-porting a second converter
+would give two that can disagree. See §10.7 for the hl7apy-native validation
+that `c17b134` added, which is also not ported.
+
+### §10.1 The trigger/structure table
+
+§10.1.1 `trigger_map::STRUCTURE_TRIGGERS` carries the team-supplied
+structure → trigger-events table, transcribed unchanged from
+`trigger_structure_map.py`: 193 structures, and the message code is the
+prefix of the structure name before the first `_`.
+
+§10.1.2 `resolve_structure_from_trigger(code, trigger)` strips surrounding
+whitespace from both arguments and returns the structure, or `None`. It is
+**version-agnostic**: the same answer whatever `MSH-12.1` says.
+
+§10.1.3 Where two structures claim one `(code, trigger)` pair the **first
+in table order wins**. The table has no such collision today, and a test
+fails if one is introduced, so the rule never has to be relied on.
+
+§10.1.4 The table has two upstream corrections that MUST be preserved:
+`BRP_O30` (letter O, not the digit zero) and `ORR_O02` (not `ORR_R02`).
+
+§10.1.5 **Relationship to §2.4.** §2.4's three-row mapping is the
+*flow-schema* override and is unchanged. §10.1 is the broader table for the
+standard-release path; the two are separate and neither extends the other.
+
+### §10.2 Grammar
+
+§10.2.1 A structure XSD parses to a recursive tree: a `Group` has a name,
+`min`/`max` occurrences and child items; a `Segment` has a name and
+occurrences. `max` is a count or *unbounded*.
+
+§10.2.2 **Group or segment is decided by the name**: a name containing `.`
+is a group, anything else is a segment (HL7 segment codes never contain a
+dot).
+
+§10.2.3 Two XSD shapes are accepted:
+
+- **Modular** — the file includes a `*_segments.xsd`. Each group is a
+  top-level `complexType` named `<GROUP>.CONTENT` whose `sequence` holds
+  `element ref=` entries. The root is `<STRUCTURE>.CONTENT`.
+- **Self-contained** — no such include. The root is the top-level
+  `element name=<STRUCTURE>`; children are `element name=` entries, and one
+  with no `type` and a dotted name is a group whose own inline
+  `complexType/sequence` is walked.
+
+§10.2.4 Occurrence defaults: `minOccurs` absent is 1; `maxOccurs` absent is
+1; `unbounded` is unbounded; a `maxOccurs` that is not an integer is 1
+(the Python's `except ValueError`). The root group is always 1..1.
+
+§10.2.5 A self-contained schema with no top-level element of the requested
+name yields an **empty** root group, not an error. (Python behaviour; the
+matcher then rejects any message with segments.)
+
+### §10.3 Matcher
+
+§10.3.1 The matcher consumes the message's segment tags in order against the
+grammar, greedily and recursively, so nesting depth is unbounded.
+
+§10.3.2 For a segment item: take the next tag if it equals the name, and
+keep taking while `max` allows repetition. For a group item: attempt the
+group's children at the current position; the attempt counts only if it
+succeeded **and consumed at least one segment**, and repeats while `max`
+allows. An item matched zero times with `min >= 1` fails the whole match.
+
+§10.3.3 The match is all-or-nothing: it fails if a required item is
+missing **or segments remain once the grammar is exhausted**. There is no
+best-effort fallback.
+
+§10.3.4 The matcher is greedy and does not backtrack. A message the grammar
+admits only by backtracking is rejected; this is the Python's behaviour and
+is kept, so the two accept the same messages.
+
+§10.3.5 A failure MUST name the structure and the **segment position and
+tag** at which matching stopped, never a field value (the tag is a
+three-character segment code, not patient data).
+
+### §10.4 Schema resolver
+
+§10.4.1 `version` is normalised by trimming and replacing `.` with `_`
+(`2.5.1` → `2_5_1`).
+
+§10.4.2 Two trees are indexed by directory scan, not by a formatted path,
+because they name files differently: standard `<ver>/<ver>_<STRUCT>.xsd`
+and custom `<ver>/<STRUCT>_<ver>.xsd`. Files whose structure part is
+`fields`, `segments` or `types` are not structures.
+
+§10.4.3 The custom index is consulted first, then the standard one. A
+custom schema is not an override tier; it is the signal that the standard
+one is not usable for that structure.
+
+§10.4.4 No match is an error naming the version, its normalised form, the
+structure and both directories. There is no fallback.
+
+### §10.5 The `2_5_1` custom schemas (`15a751f`)
+
+§10.5.1 `15a751f` moved the two self-contained schemas
+`OMG_O19_2_5_1.xsd` and `ORU_R01_2_5_1.xsd` from per-structure directories
+into a `2_5_1` directory in `hl7_validation/resources/`. They are copied
+unmodified to `crates/ihb-validation/schemas/2_5_1/`.
+
+§10.5.2 They are **not** a `Flow`. `Flow` (§3.1) is a per-sender dialect with
+a compiled dictionary; these are release-and-structure schemas used through
+§10.2. `cargo xtask build-dictionaries` enumerates its own group list and
+does not read this directory, so adding it changes no dictionary and
+`verify-dictionaries` is unaffected.
+
+§10.5.3 They exercise the self-contained shape of §10.2.3 with nesting four
+groups deep (`OMG_O19.SPECIMEN` → `OMG_O19.CONTAINER`), which the modular
+flow schemas do not, and are the grammar tests' golden inputs.
+
+### §10.6 Error text
+
+§10.6.1 Nothing in §10 reads a field value. The grammar and matcher see only
+segment tags, so §3.3.3 holds by construction.
+
+### §10.7 Not ported: hl7apy-native validation (`c17b134`)
+
+§10.7.1 `c17b134` added `validate_hl7_message`, which runs hl7apy's own
+reference-driven validator over the ER7 and raises on error-level findings
+(`Missing required child ADT_A05.EVN`). Its inputs are hl7apy's embedded
+HL7 reference tables; no Rust crate carries those, and `hl7-2`'s
+standard-release validation (§6) is the equivalent already in this
+workspace.
+
+§10.7.2 The behaviours that matter to this workspace are nonetheless
+recorded here so a later port has the contract:
+
+- error-level findings are raised, joined with `\n`, and carry only element
+  names and cardinality, never values;
+- warning-level findings (e.g. a table-value check) embed the raw value, so
+  they are logged but never put in the raised error — and the caller-supplied
+  `on_warning` callback receives them raw by explicit upstream decision (the
+  caller owns redaction). **Here that callback would be a PII risk and MUST
+  NOT be ported as written**: a warning crosses a boundary only after it has
+  been reduced to path and reason (§3.3.3);
+- a message that cannot be parsed at all is logged and **not** raised
+  (hl7apy's own text embeds the offending value);
+- the default level is *tolerant*; the temporary report file is always
+  removed.
+
+§10.7.3 The other half of `c17b134` — `log_message_failed` gaining a
+user-facing reason string, and `event_logger_lib` redaction — belongs to the
+rest-server and logging crates, not this one.
+
+---
+
+## §11 Additions for the REST servers
+
+[`19-rest-servers.md`](19-rest-servers.md) needs two things from this
+crate that §3 to §10 did not offer. Both are thin: none changes an
+existing behaviour.
+
+§11.1 `xsd::validate_file(xml, path)` — §9's two-engine validation against an
+**arbitrary XSD file** rather than a `Flow`'s. `rest-server`'s `xsd` validator
+(`VALIDATOR_TYPE=xsd`) names a partner schema by path. Same verdict rule as
+`xsd::validate` (the primary engine decides), same sanitised findings (§3.3.3).
+An unreadable path is a `ValidationError::Schema`, not a panic.
+
+§11.2 `resolver::custom_schema(version, structure)` — the two `2_5_1` custom
+schemas of §10.5 as `&'static str`, compiled in with `include_str!`. The
+resolver of §10.4 scans directories, which is right for a developer's tree and
+wrong for a container where `schemas/` is not present at run time (§9.6).
+`None` for any other `(version, structure)`.

@@ -58,6 +58,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use azservicebus::core::BasicRetryPolicy;
+use azservicebus::receiver::DeadLetterOptions;
 use azservicebus::{
     ServiceBusClient, ServiceBusClientOptions, ServiceBusMessage, ServiceBusPeekedMessage,
     ServiceBusReceivedMessage, ServiceBusReceiver, ServiceBusReceiverOptions, ServiceBusSender,
@@ -313,6 +314,69 @@ impl LiveBus {
             Inner::Session(receiver),
             queue.to_string(),
         ))
+    }
+
+    /// A receiver for whichever session of a subscription is next available.
+    ///
+    /// # Errors
+    ///
+    /// As [`LiveBus::next_session_receiver`].
+    pub async fn next_subscription_session_receiver(
+        &self,
+        topic: &str,
+        subscription: &str,
+    ) -> Result<LiveReceiver, BusError> {
+        let entity = format!("{topic}/{subscription}");
+
+        let receiver = self
+            .client
+            .lock()
+            .await
+            .accept_next_session_for_subscription(
+                topic,
+                subscription,
+                ServiceBusSessionReceiverOptions::default(),
+            )
+            .await
+            .map_err(|error| BusError::Receive {
+                entity: entity.clone(),
+                reason: error.to_string(),
+            })?;
+
+        Ok(LiveReceiver::new(Inner::Session(receiver), entity))
+    }
+
+    /// A receiver for a topic subscription, with no session.
+    ///
+    /// For a transformer whose `INGRESS_SESSION_ID` is unset
+    /// (`spec/02-configuration.md` §5.2).
+    ///
+    /// # Errors
+    ///
+    /// As [`LiveBus::queue_receiver`].
+    pub async fn plain_subscription_receiver(
+        &self,
+        topic: &str,
+        subscription: &str,
+    ) -> Result<LiveReceiver, BusError> {
+        let entity = format!("{topic}/{subscription}");
+
+        let receiver = self
+            .client
+            .lock()
+            .await
+            .create_receiver_for_subscription(
+                topic,
+                subscription,
+                ServiceBusReceiverOptions::default(),
+            )
+            .await
+            .map_err(|error| BusError::Connect {
+                namespace: self.namespace.clone(),
+                reason: error.to_string(),
+            })?;
+
+        Ok(LiveReceiver::new(Inner::Queue(receiver), entity))
     }
 
     /// A receiver for one session of a topic subscription.
@@ -719,6 +783,56 @@ impl LiveReceiver {
 
         result.map_err(|error| BusError::Disposition {
             action,
+            entity: self.entity.clone(),
+            reason: error.to_string(),
+        })
+    }
+
+    /// Move a received message to the dead-letter subqueue.
+    ///
+    /// For a message that will never succeed and must not be lost or
+    /// redelivered: the reason and description are visible to whoever
+    /// triages the dead-letter queue, so they carry identifiers and never
+    /// payload (`spec/index.md` §0.8).
+    ///
+    /// # Errors
+    ///
+    /// [`BusError::Disposition`].
+    pub async fn dead_letter(
+        &self,
+        message: &Incoming,
+        reason: &str,
+        description: &str,
+    ) -> Result<(), BusError> {
+        let mut state = self.state.lock().await;
+
+        let Some(index) = state
+            .in_flight
+            .iter()
+            .position(|(token, _)| *token == message.token)
+        else {
+            return Err(BusError::Disposition {
+                action: "dead-letter",
+                entity: self.entity.clone(),
+                reason: "the message is not in flight".to_string(),
+            });
+        };
+        let (_, held) = state.in_flight.remove(index);
+
+        let options = || DeadLetterOptions {
+            dead_letter_reason: Some(reason.to_string()),
+            dead_letter_error_description: Some(description.to_string()),
+            properties_to_modify: None,
+        };
+
+        let result = match &mut state.inner {
+            Inner::Queue(receiver) => receiver.dead_letter_message(&held, options()).await,
+            Inner::Session(receiver) => receiver.dead_letter_message(&held, options()).await,
+        };
+        drop(state);
+
+        result.map_err(|error| BusError::Disposition {
+            action: "dead-letter",
             entity: self.entity.clone(),
             reason: error.to_string(),
         })

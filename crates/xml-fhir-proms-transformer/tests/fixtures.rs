@@ -22,9 +22,13 @@ fn fixtures() -> BTreeMap<String, String> {
 
 #[test]
 fn every_fixture_parses() {
-    // §2.5 — eleven real payloads, including the nested and legacy shapes.
+    // §2.5 — nineteen real payloads, including the nested and legacy shapes.
     let fixtures = fixtures();
-    assert_eq!(fixtures.len(), 11, "the corpus should hold eleven fixtures");
+    assert_eq!(
+        fixtures.len(),
+        19,
+        "the corpus should hold nineteen fixtures"
+    );
 
     for (name, xml) in &fixtures {
         let message = parse(xml).unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -47,7 +51,8 @@ fn every_fixture_parses() {
 
 #[test]
 fn every_routable_fixture_yields_its_event_code() {
-    // §2.2's six codes, plus §2.3's unknown one.
+    // §2.2's codes (the bare legacy ones and the #370 suffixed ones),
+    // plus §2.3's unknown one.
     let expected: BTreeMap<&str, Option<&str>> = [
         ("REFERRAL_MESSAGE", Some("REFERRAL")),
         ("SURGERY_MESSAGE", Some("SURGERY")),
@@ -62,6 +67,15 @@ fn every_routable_fixture_yields_its_event_code() {
         ("UNROUTABLE_MESSAGE", Some("UNKNOWN_TYPE")),
         // §2.5.7's legacy alias.
         ("LEGACY_MESSAGE_TYPE_MESSAGE", Some("REFERRAL")),
+        ("LEGACY_MESSAGE_TYPE_SURGERY_MESSAGE", Some("SURGERY")),
+        ("LEGACY_MESSAGE_TYPE_PREOP_MESSAGE", Some("PREOP")),
+        // Upstream #370's suffixed codes (§10.2).
+        ("SURGERY_PROC_MESSAGE", Some("SURGERY-PROC")),
+        ("SURGERY_PERF_MESSAGE", Some("SURGERY-PERF")),
+        ("DISCHARGE_MESSAGE", Some("SURGERY-DN")),
+        ("PREOP_AS_MESSAGE", Some("PREOP-AS")),
+        ("OUTPATIENT_MESSAGE", Some("PREOP-VIS")),
+        ("RESCHEDULE_MESSAGE", Some("PREOP-AR")),
     ]
     .into_iter()
     .collect();
@@ -275,15 +289,12 @@ fn the_date_helpers_reproduce_every_date_in_the_goldens() {
 }
 
 #[test]
-fn the_name_helper_reproduces_every_name_in_the_goldens() {
-    // §6.1.3 — the two opposite conventions, against real values.
-    use xml_fhir_proms_transformer::mapping::split_person_name;
-
-    let goldens = goldens();
-
-    // Collect every `Practitioner.name` the Python emitted.
+fn practitioner_names_are_the_raw_field_as_free_text() {
+    // §6.9 and §6.9.2 — upstream #423 stopped parsing the name, so the
+    // golden's `Practitioner.name.text` must equal the raw WPAS field.
+    // (`split_person_name` itself is still unit-tested in `mapping`.)
     let mut checked = 0;
-    for (name, bundle) in &goldens {
+    for (name, bundle) in &goldens() {
         if bundle.get("__error__").is_some() {
             continue;
         }
@@ -305,19 +316,8 @@ fn the_name_helper_reproduces_every_name_in_the_goldens() {
             };
             let Some(raw) = raw else { continue };
 
-            let split = split_person_name(&raw);
-
-            assert_eq!(
-                split.family,
-                emitted["family"].as_str().unwrap_or_default(),
-                "{name}: family from {raw:?}"
-            );
-            let emitted_given: Vec<&str> = emitted["given"]
-                .as_array()
-                .map(|g| g.iter().filter_map(serde_json::Value::as_str).collect())
-                .unwrap_or_default();
-            assert_eq!(split.given, emitted_given, "{name}: given from {raw:?}");
-
+            assert_eq!(emitted["text"].as_str(), Some(raw.as_str()), "{name}");
+            assert!(emitted.get("family").is_none(), "{name}: name was parsed");
             checked += 1;
         }
     }

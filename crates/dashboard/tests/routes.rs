@@ -32,7 +32,7 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 /// Every page and every API route of §2.
-const ROUTES: [&str; 14] = [
+const ROUTES: [&str; 22] = [
     "/",
     "/flows",
     "/exceptions",
@@ -47,6 +47,16 @@ const ROUTES: [&str; 14] = [
     "/api/flows",
     "/api/servicebus-metrics",
     "/api/hl7-throughput",
+    // spec/15-dashboard.md §10 -- the upstream sync's pages, which §1.2
+    // requires to render with nothing configured and nothing persisted.
+    "/alarms/pauses",
+    "/api/alarm-pauses",
+    "/api/alarm-pauses/options",
+    "/contacts",
+    "/network-test",
+    "/network-test/config",
+    "/api/network-test/list",
+    "/api/network-test/sources",
 ];
 
 /// An application over an observatory, and optionally an alarm store.
@@ -105,6 +115,20 @@ impl Observatory for Live {
                 )
             })
             .collect()
+    }
+
+    async fn topics(&self) -> Option<Vec<dashboard::topics::Topic>> {
+        use dashboard::topics::{Subscription, Topic};
+        Some(vec![Topic {
+            name: "sbt-mpi".to_string(),
+            depths: QueueDepths::known(1, 0),
+            subscriptions: vec![Subscription {
+                name: "sub-a".to_string(),
+                topic: "sbt-mpi".to_string(),
+                depths: QueueDepths::known(0, 2),
+            }],
+            subscriptions_read: true,
+        }])
     }
 
     async fn containers(&self) -> Vec<Container> {
@@ -880,4 +904,44 @@ async fn the_stylesheet_carries_the_brand() {
         css.contains("--unknown:"),
         "unknown has no colour of its own"
     );
+}
+
+#[tokio::test]
+async fn topics_and_subscriptions_reach_the_page_and_the_api() {
+    // spec/15-dashboard.md §10.5.5.
+    let app = app_with(Live);
+
+    let (_, page) = app.get("/service-bus").await;
+    assert!(page.contains("sbt-mpi") && page.contains("sub-a"), "{page}");
+
+    let metrics = app.json("/api/servicebus-metrics").await;
+    assert_eq!(
+        metrics["topics"][0]["subscriptions"][0]["entity_name"],
+        "sbt-mpi/sub-a"
+    );
+    assert_eq!(
+        metrics["topics"][0]["subscriptions"][0]["health"],
+        "critical"
+    );
+    assert_eq!(
+        metrics["namespace_kpis"]["subscription_dead_letter_messages"],
+        2
+    );
+    assert!(
+        metrics["queues"].is_array(),
+        "the existing fields are unchanged (§2.3.2)"
+    );
+}
+
+#[tokio::test]
+async fn unreadable_topics_are_said_not_shown_as_none() {
+    // §10.5.2 -- Unconfigured cannot ask.
+    let app = app_with(Unconfigured);
+
+    let (_, page) = app.get("/service-bus").await;
+    assert!(page.contains("could not be read"), "{page}");
+
+    let metrics = app.json("/api/servicebus-metrics").await;
+    assert_eq!(metrics["topics_known"], false);
+    assert!(metrics["namespace_kpis"].is_null());
 }

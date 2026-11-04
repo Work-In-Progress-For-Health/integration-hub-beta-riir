@@ -20,8 +20,9 @@
 //! # What it does not do
 //!
 //! It does not renew *message* locks, only the session's. Within a session
-//! the session lock is what governs, and the estate's queues are all
-//! session-enabled (`spec/01-architecture.md` §2.3.1).
+//! the session lock is what governs, and every pipeline queue is
+//! session-enabled (`spec/01-architecture.md` §2.3.1). The message-store
+//! queue is the exception and has no session to renew (§2.3.3).
 
 use std::future::Future;
 use std::time::Duration;

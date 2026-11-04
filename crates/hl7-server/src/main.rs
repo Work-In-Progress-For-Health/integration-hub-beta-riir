@@ -64,6 +64,9 @@ fn main() -> ExitCode {
 }
 
 /// Everything after the runtime exists.
+// A start-up sequence whose order is the contract (config, then telemetry,
+// then bind, then serve); splitting it would scatter that order.
+#[allow(clippy::too_many_lines)]
 async fn run(local_offset_found: bool) -> ExitCode {
     // Step 2 — before any socket is bound (`spec/02-configuration.md` §1.3).
     let config = match Config::from_env() {
@@ -140,10 +143,20 @@ async fn run(local_offset_found: bool) -> ExitCode {
         tracing::info!(topic = %name, "egress is a topic");
     }
 
+    if let Some(queue) = config.message_store_unused_queue.as_deref() {
+        // spec/02-configuration.md §2.1.2c — the default changed upstream, so
+        // a queue name with the store off is the silent failure to avoid.
+        tracing::warn!(
+            queue,
+            "MESSAGE_STORE_QUEUE_NAME is set but MESSAGE_STORE_ENABLED is not true; \
+             no message will be stored"
+        );
+    }
+
     let store: Option<LiveSender> = match config.message_store_queue.as_deref() {
         None => {
             // Not a warning: several flows run without one by design.
-            tracing::info!("no MESSAGE_STORE_QUEUE_NAME; messages will not be stored");
+            tracing::info!("message store off; messages will not be stored");
             None
         }
         Some(queue) => match bus.sender(queue).await {

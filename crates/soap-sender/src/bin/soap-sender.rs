@@ -7,9 +7,12 @@ use std::time::Duration;
 
 use ihb_config::Secret;
 use ihb_sender::config::Variant;
+use soap_sender::envelope::Format;
 use soap_sender::{Endpoint, SoapClient};
 
 fn main() -> ExitCode {
+    // Before Tokio spawns any thread: the local UTC offset can only be read
+    // reliably while the process is single-threaded (`ihb_fields::timestamp`).
     ihb_fields::timestamp::capture_local_offset();
 
     let runtime = match tokio::runtime::Runtime::new() {
@@ -58,11 +61,15 @@ fn main() -> ExitCode {
                 ),
             };
 
+            // §4.6.1 — anything but `wis` is the default envelope.
+            let format = read("SOAP_ENVELOPE_FORMAT").map_or(Format::Default, |value| Format::parse(&value));
+
             Ok(SoapClient::new(Endpoint {
                 url,
                 timeout,
                 api_key: read("SOAP_API_KEY").map(Secret::new),
-            }))
+            })
+            .with_format(format))
         },
     ))
 }

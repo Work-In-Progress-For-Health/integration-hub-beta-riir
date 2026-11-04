@@ -96,6 +96,14 @@ fn unique_sample(marker: &str) -> String {
     sample().replace("202505052323364444444444", marker)
 }
 
+/// Connect to the local emulator, or fail the test saying how to start it.
+///
+/// Panics rather than skipping: this file is behind the `emulator` feature,
+/// so reaching here means the caller asked for the broker, and a silent
+/// pass with no broker is the failure mode `AGENTS.md` warns about. The
+/// emulator's port opens before its broker answers
+/// (`spec/17-testing-and-quality.md` §9.2.1e), so a failure here right
+/// after `compose up` may just mean "not ready yet".
 async fn bus() -> LiveBus {
     let endpoint = Endpoint::from_config(Some(EMULATOR), None).expect("the endpoint parses");
     LiveBus::connect(&endpoint)
@@ -107,6 +115,10 @@ async fn bus() -> LiveBus {
 ///
 /// Everything received on the way is settled, so a queue left dirty by an
 /// earlier run is cleaned up rather than getting in the way.
+///
+/// Gives up after three receives (each up to the bus's own sixty-second
+/// window on an idle queue, `spec/03-message-bus.md` §5.1.2), panicking
+/// with `what` so the failure names the hop that never delivered.
 ///
 /// # Why there is no timeout around the receive
 ///
@@ -158,6 +170,8 @@ async fn receive_until(
 /// clearest way to write it, rather than a defect in the services.
 const FLOW_STACK: usize = 32 * 1024 * 1024;
 
+/// The whole PHW chain in one test; the body is [`flow`], run on a thread
+/// with a large stack (see [`FLOW_STACK`]).
 #[test]
 fn a_phw_message_travels_from_a_socket_to_the_mock_receiver() {
     // Its own thread, with a stack big enough for the whole flow. See
@@ -325,7 +339,10 @@ async fn flow() {
     let mut throttle = Throttle::per_minute(None).unwrap();
 
     let handled = process_one(&mut client, &batch[0], &mut throttle, &context).await;
-    assert!(handled, "the mock receiver acknowledged the message");
+    assert!(
+        handled.is_delivered(),
+        "the mock receiver acknowledged the message"
+    );
 
     for message in &batch {
         post.settle(message, Outcome::Accepted).await.unwrap();

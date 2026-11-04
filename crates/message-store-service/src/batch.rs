@@ -46,7 +46,7 @@ pub enum BatchOutcome {
 }
 
 impl BatchOutcome {
-    /// Whether the messages may be completed.
+    /// Whether the messages may be completed. `false` means abandon them all.
     #[must_use]
     pub const fn is_committed(&self) -> bool {
         matches!(self, Self::Committed { .. })
@@ -73,6 +73,11 @@ pub fn build_all(batch: &[Incoming]) -> Result<Vec<Record>, String> {
 }
 
 /// Report a failed batch, per §4.2.
+///
+/// `count` is the size of the whole batch, not the number of bad records:
+/// the batch fails as a unit (§4.2), so the count says how many messages
+/// are about to be redelivered. `reason` is already free of payloads (see
+/// `record`), so it may be logged and put in the event.
 ///
 /// Three things happen, and the wording of each is normative — operators
 /// match on all of it.

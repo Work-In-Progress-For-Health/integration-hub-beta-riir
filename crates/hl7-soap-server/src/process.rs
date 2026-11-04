@@ -38,10 +38,14 @@ const REJECTED: &str = "SOAP request rejected";
 const UNHANDLED: &str = "Unhandled SOAP server error";
 
 /// Mints the per-message values, so a test can fix them.
+///
+/// The two values are the only non-determinism in [`Processor::process`];
+/// pulling them behind a trait lets the integration tests assert on whole
+/// events and stored messages rather than patterns.
 pub trait Mint: Send + Sync {
-    /// A fresh correlation id.
+    /// A fresh correlation id, unique per request (a v4 UUID in production).
     fn correlation_id(&self) -> String;
-    /// Now, per `spec/index.md` §0.7.
+    /// Now, as the ISO 8601 string `spec/index.md` §0.7 prescribes.
     fn received_at(&self) -> String;
 }
 
@@ -66,16 +70,25 @@ pub struct Accepted {
 }
 
 /// One request's journey, minus HTTP.
+///
+/// `E` is the egress sink, `S` the message-store sink and `M` the [`Mint`];
+/// all generic so the tests substitute in-memory sinks and a fixed clock
+/// without any dynamic dispatch (`MessageSink` is not dyn-compatible).
+/// Shared across connections behind an `Arc`, so it holds no per-request
+/// state.
 pub struct Processor<E, S, M = RealMint> {
     /// This deployment.
     config: Config,
     /// Where a validated message goes.
     egress: E,
-    /// Where the audit copy goes. Required for this service.
-    store: S,
-    /// Events.
+    /// Where the audit copy goes. `None` when `MESSAGE_STORE_ENABLED` is not
+    /// true (`spec/02-configuration.md` §2.1.2).
+    store: Option<S>,
+    /// Structured events (`MESSAGE_RECEIVED` and so on), redacting message
+    /// content when `HL7_LOG_REDACTION_ENABLED` is true.
     events: EventLogger,
-    /// Counters.
+    /// Counters, dimensioned by health board and peer service only; never by
+    /// anything taken from the message.
     metrics: Metrics,
     /// Correlation ids and timestamps.
     mint: M,
@@ -83,14 +96,14 @@ pub struct Processor<E, S, M = RealMint> {
 
 impl<E: MessageSink, S: MessageSink> Processor<E, S, RealMint> {
     /// A processor using the real clock.
-    pub fn new(config: Config, egress: E, store: S) -> Self {
+    pub fn new(config: Config, egress: E, store: Option<S>) -> Self {
         Self::with_mint(config, egress, store, RealMint)
     }
 }
 
 impl<E: MessageSink, S: MessageSink, M: Mint> Processor<E, S, M> {
     /// A processor with an explicit [`Mint`].
-    pub fn with_mint(config: Config, egress: E, store: S, mint: M) -> Self {
+    pub fn with_mint(config: Config, egress: E, store: Option<S>, mint: M) -> Self {
         let events = EventLogger::new(&config.workflow_id, &config.microservice_id)
             .with_redaction(config.redaction_enabled);
         let metrics = Metrics::new(
@@ -301,6 +314,9 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Processor<E, S, M> {
 
     /// Step 12 — the audit copy. Never fatal (§3.4).
     async fn store_message(&self, request: &str, payload_xml: &str, tracking: &Tracking) {
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
         let event = StoreEvent {
             message_received_at: tracking.received_at.clone(),
             correlation_id: tracking.correlation_id.clone(),
@@ -324,7 +340,7 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Processor<E, S, M> {
             .with_message_id(tracking.correlation_id.clone())
             .with_session(self.config.egress_session_id.clone());
 
-        if let Err(error) = self.store.send(outgoing).await {
+        if let Err(error) = store.send(outgoing).await {
             tracing::error!(%error, "Failed to send SOAP message to message store: {error}");
         }
     }

@@ -263,7 +263,7 @@ mod tests {
         let original = phw_without(&[]);
         let (repaired, added) = supply_required_segments(&original, Flow::Phw, "ADT_A05");
 
-        assert!(added.is_empty());
+        assert_eq!(added, [] as [std::string::String; 0]);
         assert_eq!(
             repaired.get("EVN-2").unwrap().as_deref(),
             Some("20250502092900"),
@@ -331,7 +331,7 @@ mod tests {
     #[test]
     fn an_unknown_structure_repairs_nothing() {
         let (_, added) = supply_required_segments(&phw_without(&["EVN"]), Flow::Phw, "ADT_A99");
-        assert!(added.is_empty());
+        assert_eq!(added, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -341,7 +341,7 @@ mod tests {
         let (repaired, added) =
             supply_required_segments(&phw_without(&["PID"]), Flow::Phw, "ADT_A05");
 
-        assert!(added.is_empty());
+        assert_eq!(added, [] as [std::string::String; 0]);
         assert!(repaired.segment("PID").is_none());
     }
 }

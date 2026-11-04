@@ -11,6 +11,10 @@ use crate::retry::classify;
 use crate::sql::{FETCH_SQL, Status, identifier_chunks, mark_sql};
 
 /// Why the job stopped.
+///
+/// Each variant means "exit 1": the job never carries on past an error
+/// (`spec/13-message-replay.md` §1.1). Reasons are driver or bus text and
+/// carry no row content (§7.3).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum JobError {
     /// A fetch failed twice (§5.1).
@@ -32,6 +36,12 @@ pub enum JobError {
 }
 
 /// Fetch one page of rows.
+///
+/// `size` is the page size; rows come back in `ReplayId` order and only
+/// those still `Pending` or `Failed` (§3), so as pages are marked `Loaded`
+/// the next fetch naturally moves on, and an empty page means the batch is
+/// done. `READPAST` means rows locked by another worker are skipped rather
+/// than waited for.
 ///
 /// # Errors
 ///
@@ -58,6 +68,13 @@ pub async fn fetch(
 }
 
 /// One fetch attempt.
+///
+/// Takes the connection out of `sql` and only puts it back on success: a
+/// failure leaves `sql` without a client, so the retry in [`fetch`]
+/// reconnects instead of reusing a connection in an unknown state
+/// (`spec/12-message-store.md` §5.2). Missing or `NULL` columns read as
+/// empty/zero rather than failing; the `INNER JOIN` in the fetch means a
+/// row whose message was purged from `monitoring.Message` is simply absent.
 async fn fetch_once(
     sql: &mut SqlConnection,
     batch_id: Uuid,
@@ -140,6 +157,14 @@ pub async fn send<S: MessageSink>(sink: &S, page: &[Row]) -> Result<(), JobError
 }
 
 /// One send attempt: every row of the page, in order.
+///
+/// Rows go one `send` at a time, stopping at the first failure. Note that
+/// `spec/13-message-replay.md` §4.2 says the page is sent as a size-split
+/// batch (the Python builds one `ServiceBus` batch per attempt, so a failed
+/// attempt delivers nothing). Sent singly, a failure part-way leaves the
+/// earlier rows on the queue and the retry in [`send`] sends them again,
+/// so a retry of any kind can duplicate rows; §5.3's duplicate warning is
+/// only given for timeouts.
 async fn send_once<S: MessageSink>(sink: &S, page: &[Row]) -> Result<(), ihb_bus::error::BusError> {
     for row in page {
         sink.send(message_for(row)).await?;
@@ -147,7 +172,9 @@ async fn send_once<S: MessageSink>(sink: &S, page: &[Row]) -> Result<(), ihb_bus
     Ok(())
 }
 
-/// Mark a page's rows (§6).
+/// Mark a page's rows (§6), returning how many were submitted.
+///
+/// An empty page is a no-op returning `0` (§6.3).
 ///
 /// # Errors
 ///
@@ -182,6 +209,10 @@ pub async fn mark(
 }
 
 /// One mark attempt.
+///
+/// Returns the number of identifiers submitted, not the server's affected
+/// row count: the statement is keyed on `ReplayId`, the identity column, so
+/// the two agree unless a row vanished in between.
 async fn mark_once(
     sql: &mut SqlConnection,
     identifiers: &[i64],
@@ -212,6 +243,10 @@ async fn mark_once(
 
 /// Mark a page `Failed`, without letting that failure mask the original
 /// (§5.2.2).
+///
+/// Infallible by design: it is called while another error is already on
+/// its way out. If the mark fails the rows stay `Pending`, which a re-run
+/// selects just as it selects `Failed` (§2.2), so nothing is lost.
 pub async fn mark_failed(sql: &mut SqlConnection, rows: &[Row]) {
     if let Err(error) = mark(sql, rows, Status::Failed).await {
         // Logged at warn, not returned. Whatever brought us here is the
@@ -336,7 +371,7 @@ mod tests {
         let error = send(&sink, &rows(1)).await.unwrap_err();
 
         assert!(matches!(error, JobError::Send(_)), "{error:?}");
-        assert!(bus.all_sent(QUEUE).is_empty());
+        assert_eq!(bus.all_sent(QUEUE), Vec::new());
     }
 
     #[tokio::test]

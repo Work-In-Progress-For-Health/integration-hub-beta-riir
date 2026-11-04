@@ -26,7 +26,7 @@ fn main() -> ExitCode {
     };
 
     runtime.block_on(ihb_sender::main_loop::run(
-        Variant::Queue,
+        Variant::Hl7,
         "hl7-sender",
         |_config| {
             // The MLLP destination is this service's own configuration

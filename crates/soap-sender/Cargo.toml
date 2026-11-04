@@ -33,6 +33,7 @@ ihb-health.workspace = true
 ihb-runtime.workspace = true
 ihb-sender.workspace = true
 ihb-telemetry.workspace = true
+ihb-validation.workspace = true
 rustls-pki-types.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
@@ -40,6 +41,7 @@ tokio-rustls.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+roxmltree.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tokio-test.workspace = true
 

@@ -37,6 +37,17 @@ pub const MESSAGES_RECEIVED: &str = "messages_received";
 /// The counter incremented when a sender gets a positive acknowledgement.
 pub const MESSAGES_SENT: &str = "messages_sent";
 
+/// A recoverable negative acknowledgement (`MSA-1 = AE`); the message will
+/// be retried (`spec/04-observability.md` §3.1).
+pub const MESSAGES_NACK_AE: &str = "messages_nack_ae";
+
+/// A non-recoverable negative acknowledgement (`MSA-1 = AR`); the message is
+/// dead-lettered.
+pub const MESSAGES_NACK_AR: &str = "messages_nack_ar";
+
+/// A delivery that will be attempted again after a recoverable NACK.
+pub const MESSAGES_RETRY_ATTEMPT: &str = "messages_retry_attempt";
+
 /// The histogram recording how long a failing receive will wait before its
 /// next attempt. Unit: seconds.
 pub const RETRY_DELAY_SECONDS: &str = "retry_delay_seconds";

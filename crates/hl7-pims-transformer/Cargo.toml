@@ -25,6 +25,10 @@ ihb-fields.workspace = true
 ihb-health.workspace = true
 ihb-runtime.workspace = true
 ihb-telemetry.workspace = true
+ihb-tls.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio-rustls.workspace = true
 ihb-transformer.workspace = true
 ihb-validation.workspace = true
 time.workspace = true
@@ -32,7 +36,6 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync
 tracing.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tokio-test.workspace = true
 
 [lints]

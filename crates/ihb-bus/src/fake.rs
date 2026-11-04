@@ -372,7 +372,7 @@ mod tests {
 
     #[test]
     fn receiving_from_an_unknown_entity_is_empty_rather_than_an_error() {
-        assert!(FakeBus::new().receive("nothing", 10).is_empty());
+        assert_eq!(FakeBus::new().receive("nothing", 10), Vec::new());
     }
 
     #[test]
@@ -383,10 +383,10 @@ mod tests {
 
         let received = bus.receive("q", 10);
         assert_eq!(bus.in_flight("q").len(), 1);
-        assert!(bus.pending("q").is_empty());
+        assert_eq!(bus.pending("q"), Vec::new());
 
         bus.settle(&received[0], Outcome::Accepted).unwrap();
-        assert!(bus.in_flight("q").is_empty());
+        assert_eq!(bus.in_flight("q"), Vec::new());
         assert_eq!(bus.completed("q").len(), 1);
     }
 
@@ -432,7 +432,7 @@ mod tests {
         let received = bus.receive("q", 10);
         bus.settle(&received[0], Outcome::Rejected).unwrap();
 
-        assert!(bus.pending("q").is_empty());
+        assert_eq!(bus.pending("q"), Vec::new());
         assert_eq!(bus.completed("q").len(), 1);
     }
 
@@ -456,7 +456,7 @@ mod tests {
         bus.dead_letter(&received[0]).unwrap();
 
         assert_eq!(bus.dead_lettered("q").len(), 1);
-        assert!(bus.in_flight("q").is_empty());
+        assert_eq!(bus.in_flight("q"), Vec::new());
     }
 
     #[test]

@@ -9,7 +9,8 @@ use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 use crate::config::{Auth, SqlConfig};
 use crate::error::SqlError;
 
-/// A `tiberius` client over a Tokio socket.
+/// A `tiberius` client over a Tokio socket. The `Compat` adapter is needed
+/// because `tiberius` speaks `futures::io`, not `tokio::io`.
 type Connected = Client<Compat<TcpStream>>;
 
 /// A lazily-opened, long-lived connection.

@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}{{ t.name }}{% endblock %}
+{% block content %}
+<div class="page-header page-header--split">
+  <div>
+    <p class="breadcrumb"><a href="/">Tables</a> /</p>
+    <h1 class="page-title"><code>{{ t.name }}</code></h1>
+    {% if !t.description.is_empty() %}<p class="page-subtitle">{{ t.description }}</p>{% endif %}
+  </div>
+  {% if uploads_blocked.is_none() %}
+  <a class="btn-dash btn-dash--primary" href="/upload?table={{ t.name }}">Replace data</a>
+  {% endif %}
+</div>
+
+{% if let Some(rows) = uploaded %}
+<div class="alert alert--ok">Upload complete: {{ rows }} row(s) loaded.</div>
+{% endif %}
+{% if saved %}
+<div class="alert alert--ok">Cache settings saved.</div>
+{% endif %}
+
+<section class="kpi-strip">
+  <div class="kpi-card"><div class="kpi-card__value">{{ t.row_count }}</div><div class="kpi-card__label">Rows</div></div>
+  <div class="kpi-card">
+    <div class="kpi-card__value">{% if t.preload %}Preloaded{% else %}{{ t.ttl_text }}{% endif %}</div>
+    <div class="kpi-card__label">{% if t.preload %}Whole table in memory{% else %}Cache TTL{% endif %}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-card__value">{{ t.cache_entries }}</div>
+    <div class="kpi-card__label">{% if t.preload %}Rows in memory{% else %}Cached entries · {{ t.hits }} hit / {{ t.misses }} miss{% endif %}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-card__value kpi-card__value--small">{% if let Some(at) = t.last_upload_at %}{{ at }}{% else %}—{% endif %}</div>
+    <div class="kpi-card__label">Last upload (UTC){% if let Some(by) = t.last_upload_by %} · {{ by }}{% endif %}</div>
+  </div>
+</section>
+
+{% if uploads_blocked.is_none() %}
+<section id="settings" class="dash-card {% if settings_error.is_some() %}dash-card--error{% endif %}">
+  <h2 class="dash-card__title">Cache settings</h2>
+  {% if let Some(error) = settings_error %}
+    <p class="result-error"><span class="badge badge--error">{{ error.code }}</span> {{ error.detail }}</p>
+    {% if !error.errors.is_empty() %}<ul class="error-list">{% for message in error.errors %}<li>{{ message }}</li>{% endfor %}</ul>{% endif %}
+  {% endif %}
+  <form class="tester-form" method="post" action="/tables/{{ t.name }}/settings">
+    <input type="hidden" name="csrf_token" value="{{ chrome.csrf_token }}" />
+    <label class="cfg-label">Cache TTL (blank = service default, {{ default_ttl_text }})
+      <span class="ttl-input">
+        <input class="dash-input" type="number" min="1" name="ttl_value" value="{{ ttl_value }}" />
+        <select class="dash-input" name="ttl_unit" aria-label="TTL unit">
+          {% for unit in ttl_units %}<option value="{{ unit.name }}"{% if unit.selected %} selected{% endif %}>{{ unit.name }}</option>{% endfor %}
+        </select>
+      </span>
+    </label>
+    <label class="cfg-check"><input type="checkbox" name="preload"{% if preload_on %} checked{% endif %} /> Preload whole table into memory (TTL is not used while preloaded)</label>
+    <button class="btn-dash btn-dash--primary" type="submit">Save</button>
+  </form>
+</section>
+{% endif %}
+
+<div class="grid-2">
+  <section class="dash-card">
+    <h2 class="dash-card__title">Definition</h2>
+    <dl class="result-grid">
+      <dt>Key</dt>
+      <dd>
+        {% for c in t.key_columns %}
+          <span class="badge badge--key">{{ c.name }}</span>
+          {% if let Some(case) = c.case %}<span class="muted">({{ case }})</span>{% endif %}
+        {% endfor %}
+      </dd>
+      <dt>Values</dt>
+      <dd>{% for c in t.value_columns %}<span class="badge {% if c.is_default %}badge--default{% endif %}">{{ c.name }}</span>{% endfor %}</dd>
+      <dt>Default value</dt><dd><code>{{ t.default_value_column }}</code></dd>
+      <dt>Source</dt><dd>{{ t.source }}</dd>
+      <dt>Last file</dt><dd>{% if let Some(file) = t.last_upload_file %}{{ file }}{% else %}—{% endif %}</dd>
+    </dl>
+  </section>
+
+  <section id="tester" class="dash-card {% if tester_error.is_some() %}dash-card--error{% else if tester_result.is_some() %}dash-card--ok{% endif %}">
+    <h2 class="dash-card__title">Try a lookup</h2>
+    <form class="tester-form" method="get" action="/tables/{{ t.name }}#tester">
+      {% for field in tester_fields %}
+      <label class="cfg-label">{{ field.name }}
+        <input class="dash-input" type="text" name="key.{{ field.name }}" required value="{{ field.value }}" />
+      </label>
+      {% endfor %}
+      <button class="btn-dash btn-dash--primary" type="submit">Look up</button>
+    </form>
+    {% if let Some(error) = tester_error %}
+      <p class="result-error"><span class="badge badge--error">{{ error.code }}</span> {{ error.detail }}</p>
+    {% else if let Some(result) = tester_result %}
+      <dl class="result-grid">
+        <dt>Canonical key</dt><dd><code>{{ result.key_text }}</code></dd>
+        <dt>Value</dt><dd><strong>{{ result.value }}</strong></dd>
+        {% for pair in result.values %}<dt>{{ pair.0 }}</dt><dd>{{ pair.1 }}</dd>{% endfor %}
+        <dt>Served</dt><dd>{{ result.served }}</dd>
+      </dl>
+    {% endif %}
+  </section>
+</div>
+
+<section class="dash-card">
+  <div class="dash-card__header">
+    <h2 class="dash-card__title">Rows</h2>
+    <form class="search-form" method="get" action="/tables/{{ t.name }}">
+      <input class="dash-input" type="search" name="search" value="{{ search }}" placeholder="Search keys…" maxlength="200" />
+      <button class="btn-dash" type="submit">Search</button>
+      {% if !search.is_empty() %}<a class="btn-dash" href="/tables/{{ t.name }}">Clear</a>{% endif %}
+    </form>
+  </div>
+  {% if rows.is_empty() %}
+    <p class="empty-state">{% if !search.is_empty() %}No rows match “{{ search }}”.{% else %}No rows.{% endif %}</p>
+  {% else %}
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead>
+      <tr>
+        {% for c in t.key_columns %}<th class="key-col">{{ c.name }}</th>{% endfor %}
+        {% for c in t.value_columns %}<th>{{ c.name }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        {% for part in row.key %}<td><code>{{ part }}</code></td>{% endfor %}
+        {% for cell in row.cells %}<td>{{ cell }}</td>{% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="pager">
+    <span class="muted">{{ total }} row(s){% if !search.is_empty() %} matching{% endif %} · page {{ page }} of {{ pages }}</span>
+    {% if let Some(href) = previous_href %}<a class="btn-dash" href="{{ href }}">Previous</a>{% endif %}
+    {% if let Some(href) = next_href %}<a class="btn-dash" href="{{ href }}">Next</a>{% endif %}
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

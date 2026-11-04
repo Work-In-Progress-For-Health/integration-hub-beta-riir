@@ -14,16 +14,18 @@ pub const DEFAULT_PORT: u16 = 8080;
 /// Default endpoint path.
 pub const DEFAULT_PATH: &str = "/soap";
 
-/// Default payload roots.
+/// Default `ALLOWED_HL7_STRUCTURES`: the root element names (`ADT_A05`,
+/// `ADT_A39`) the LIMS flow accepts.
 pub const DEFAULT_STRUCTURES: &str = "ADT_A05,ADT_A39";
 
-/// Default accepted assigning authority.
+/// Default `ALLOWED_ASSIGNING_AUTHORITIES`: a single authority code, `328`.
+/// A sender asserting any other is refused with a 403 (`spec/08` §4).
 pub const DEFAULT_AUTHORITIES: &str = "328";
 
-/// Default request-body limit.
+/// Default request-body limit, in bytes (1 MiB).
 pub const DEFAULT_MAX_REQUEST_SIZE: usize = 1_048_576;
 
-/// The ceiling on `MAX_REQUEST_SIZE_BYTES`, as `hl7-server`'s
+/// The ceiling on `MAX_REQUEST_SIZE_BYTES`, in bytes (100 MiB), as `hl7-server`'s
 /// (`spec/02-configuration.md` §3.2, referenced by §4).
 pub const MAX_REQUEST_SIZE_CEILING: usize = 104_857_600;
 
@@ -86,7 +88,8 @@ pub struct Tls {
 /// ```
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// `WORKFLOW_ID`.
+    /// `WORKFLOW_ID`, the name of the flow; a dimension on every event and
+    /// metric.
     pub workflow_id: String,
     /// `MICROSERVICE_ID`.
     pub microservice_id: String,
@@ -98,26 +101,35 @@ pub struct Config {
     pub listen: SocketAddr,
     /// Where the health check binds.
     pub health_check: SocketAddr,
-    /// `SOAP_ENDPOINT_PATH`.
+    /// `SOAP_ENDPOINT_PATH`: the only path served. Any other path is a 404
+    /// whatever the method (`spec/08` §1).
     pub endpoint_path: String,
     /// Where a validated message goes.
     pub egress: Egress,
-    /// `EGRESS_SESSION_ID`.
+    /// `EGRESS_SESSION_ID`, required: the downstream transformer queue is
+    /// session-enabled, so a message without one cannot be sent.
     pub egress_session_id: String,
     /// `MESSAGE_STORE_QUEUE_NAME`. **Required** for this service, unlike
     /// `hl7-server` — the SOAP flow has no other audit trail.
     pub message_store_queue: String,
-    /// `SERVICE_BUS_CONNECTION_STRING`.
+    /// `MESSAGE_STORE_ENABLED`, default **false** (`spec/02-configuration.md`
+    /// §2.1.2). The queue name is still required, as upstream requires it,
+    /// but nothing is written unless this is true.
+    pub message_store_enabled: bool,
+    /// `SERVICE_BUS_CONNECTION_STRING`, a [`Secret`] so it never reaches a
+    /// log line.
     pub connection_string: Option<Secret>,
     /// `SERVICE_BUS_NAMESPACE`.
     pub namespace: Option<String>,
     /// `HL7_SCHEMA_GROUP`, resolved.
     pub schema_group: Flow,
-    /// `ALLOWED_HL7_STRUCTURES`.
+    /// `ALLOWED_HL7_STRUCTURES`: payload root element names that pass step 4
+    /// of `spec/08` §3. Compared exactly, case-sensitively.
     pub allowed_structures: Vec<String>,
     /// `ALLOWED_ASSIGNING_AUTHORITIES`.
     pub allowed_authorities: Vec<String>,
-    /// `MAX_REQUEST_SIZE_BYTES`.
+    /// `MAX_REQUEST_SIZE_BYTES`, in bytes, checked against the declared
+    /// `Content-Length` before the body is read (`spec/08` §2.1).
     pub max_request_size: usize,
     /// TLS, when both files are configured.
     pub tls: Option<Tls>,
@@ -162,6 +174,7 @@ impl Config {
         let egress = read_egress(&mut reader);
         let egress_session_id = reader.required_string("EGRESS_SESSION_ID");
         let message_store_queue = reader.required_string("MESSAGE_STORE_QUEUE_NAME");
+        let message_store_enabled = reader.lenient_bool_or("MESSAGE_STORE_ENABLED", false);
 
         let config = Self {
             workflow_id,
@@ -174,6 +187,7 @@ impl Config {
             egress,
             egress_session_id,
             message_store_queue,
+            message_store_enabled,
             connection_string: reader.optional_secret("SERVICE_BUS_CONNECTION_STRING"),
             namespace: reader.optional_string("SERVICE_BUS_NAMESPACE"),
             schema_group: read_schema_group(&mut reader),

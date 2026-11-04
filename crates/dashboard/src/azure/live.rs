@@ -203,6 +203,21 @@ impl Observatory for LiveObservatory {
         }
     }
 
+    async fn topics(&self) -> Option<Vec<crate::topics::Topic>> {
+        let (Some(scope), Some(namespace)) = (&self.scope, &self.namespace) else {
+            return None;
+        };
+        let token = self.arm_token("topics").await?;
+
+        match arm::topics(&self.client, &token, scope, namespace).await {
+            Ok(topics) => Some(topics),
+            Err(error) => {
+                tracing::warn!(%error, %namespace, "could not read the topics");
+                None
+            }
+        }
+    }
+
     async fn containers(&self) -> Vec<Container> {
         let Some(scope) = &self.scope else {
             return Vec::new();

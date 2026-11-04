@@ -23,12 +23,18 @@
 use std::cell::Cell;
 
 /// A source of fresh resource identifiers (§4.1, §4.4).
+///
+/// A trait so a golden test can supply [`SequentialUuids`] and compare the
+/// whole bundle byte for byte; production uses [`RandomUuids`]. Takes `&self`
+/// (interior mutability for the sequential case), so one factory is shared by
+/// reference across the builders.
 pub trait UuidFactory {
-    /// A new UUID, as its hyphenated text form.
+    /// A new UUID, as its lowercase hyphenated text form (36 characters).
+    /// Every call returns a value not returned before by this factory.
     fn next(&self) -> String;
 }
 
-/// Real UUIDs, for production.
+/// Real UUIDs, for production: version 4, from the operating system's RNG.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RandomUuids;
 
@@ -67,7 +73,8 @@ impl SequentialUuids {
         Self { next: Cell::new(1) }
     }
 
-    /// How many have been handed out.
+    /// How many have been handed out; lets a test assert the slot count
+    /// (including slots that ended up unfilled).
     #[must_use]
     pub fn issued(&self) -> u64 {
         self.next.get() - 1

@@ -293,9 +293,34 @@ impl Report {
 /// ```
 pub fn validate(xml: &str, flow: Flow, structure: &str) -> Result<Report, ValidationError> {
     let path = schema_path(flow, structure)?;
+    validate_path(xml, &path)
+}
 
-    let primary = validate_with_xsd_schema(xml, &path)?;
-    let secondary = validate_with_uppsala(xml, &path)?;
+/// Validate a v2.xml document against an arbitrary XSD file, with both
+/// engines.
+///
+/// Implements `spec/06-validation.md` §11.1. [`validate`] is for a flow's own
+/// schemas; this is for a partner's, named by a deployment
+/// (`VALIDATOR_TYPE=xsd`).
+///
+/// # Errors
+///
+/// [`ValidationError::Schema`] if the file does not exist, otherwise as
+/// [`validate`].
+pub fn validate_file(xml: &str, schema: &Path) -> Result<Report, ValidationError> {
+    if !schema.is_file() {
+        return Err(ValidationError::schema(
+            schema.display().to_string(),
+            "the schema file could not be read",
+        ));
+    }
+    validate_path(xml, schema)
+}
+
+/// Both engines over one schema path; the body of [`validate`].
+fn validate_path(xml: &str, path: &Path) -> Result<Report, ValidationError> {
+    let primary = validate_with_xsd_schema(xml, path)?;
+    let secondary = validate_with_uppsala(xml, path)?;
 
     let verdict = if primary.0.is_empty() {
         Verdict::Valid
@@ -542,6 +567,21 @@ fn with_uppsala_validator<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `spec/06-validation.md` §11.1.
+    #[test]
+    fn a_file_schema_is_used_like_a_flow_schema_and_a_missing_one_is_an_error() {
+        let schema = schemas_root().join("phw").join("ADT_A05.xsd");
+        let report = validate_file(
+            r#"<ADT_A05 xmlns="urn:hl7-org:v2xml"><ZZZ/></ADT_A05>"#,
+            &schema,
+        )
+        .unwrap();
+        assert!(!report.is_valid());
+
+        let missing = validate_file("<a/>", &schemas_root().join("nope.xsd")).unwrap_err();
+        assert!(matches!(missing, ValidationError::Schema { .. }));
+    }
 
     /// A PHW message that conforms.
     const PHW: &str = concat!(

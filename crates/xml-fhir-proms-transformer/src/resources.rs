@@ -1,6 +1,7 @@
 //! The nine resource mappers.
 //!
-//! Implements `spec/16-proms-transformer.md` §6.2 to §6.11.
+//! Implements `spec/16-proms-transformer.md` §6.2 to §6.11, as revised by
+//! upstream #346, #370 and #423 (§10).
 //!
 //! # Everything here can decline
 //!
@@ -14,20 +15,21 @@
 //!
 //! §6.0.1. An absent or unparseable source leaves its element unset. The
 //! exceptions are all §9's findings rather than choices made here:
-//! §5.2.2's placeholder endpoint, §6.6's `end` equal to `start`, and the
+//! §5.2.2's id-derived endpoint, §6.6's `end` equal to `start`, and the
 //! fixed statuses of §9.5.
 
 use serde_json::{Map, Value, json};
 
 use crate::bundle::{Identities, Slot};
 use crate::fhir;
-use crate::mapping::{join_display, split_person_name, to_fhir_date, to_fhir_datetime};
+use crate::mapping::{join_display, to_fhir_date, to_fhir_datetime};
 use crate::message_type::{Clinical, MessageType};
 use crate::parse::PromsMessage;
 use crate::reference_data::{ReferenceDataResolver, dha_code_name, nhs_certification_display};
 use crate::source_system::{endpoint_for, lookup, pas_identifier_system};
 
-/// A resource's `meta.profile`.
+/// A resource's `meta.profile`: the single FHIR profile URL it claims
+/// conformance to (the constants live in [`crate::fhir`]).
 fn profile_meta(profile: &str) -> Value {
     json!({ "profile": [profile] })
 }
@@ -40,7 +42,9 @@ fn put(object: &mut Map<String, Value>, key: &str, value: Option<Value>) {
     }
 }
 
-/// A `Reference` to another entry (§4.3).
+/// A `Reference` to another entry (§4.3), or `None` when that slot has no
+/// identity in this bundle shape. Callers also test the slot is *present*,
+/// so a reference never points at an omitted entry.
 fn reference(identities: &Identities, slot: Slot, resource_type: &str) -> Option<Value> {
     Some(json!({
         "reference": identities.reference(slot)?,
@@ -48,9 +52,52 @@ fn reference(identities: &Identities, slot: Slot, resource_type: &str) -> Option
     }))
 }
 
+/// The sending health board's name (§6.10, §6.2 `sender.display`).
+///
+/// Mirrors upstream `health_board_name` (#423): no `hb_code` means no name;
+/// otherwise the board named by `system_id` — **only** `system_id`, not the
+/// `hbCode` fallback `system_id_of` uses for `source` — and failing that
+/// the ODS-code lookup. [`dha_code_name`] echoes an unknown code back
+/// (§7.1.2), so a result equal to the code is discarded rather than
+/// published as a name (§9.10).
+///
+/// # Examples
+///
+/// ```
+/// use xml_fhir_proms_transformer::parse::parse;
+/// use xml_fhir_proms_transformer::resources::health_board_name;
+///
+/// let message = parse(
+///     "<R><system_id>149</system_id><hbCode>X98</hbCode></R>",
+/// ).unwrap();
+/// assert_eq!(
+///     health_board_name(&message).as_deref(),
+///     Some("Hywel Dda University Health Board")
+/// );
+///
+/// // No hbCode, no name.
+/// let bare = parse("<R><system_id>149</system_id></R>").unwrap();
+/// assert_eq!(health_board_name(&bare), None);
+/// ```
+#[must_use]
+pub fn health_board_name(message: &PromsMessage) -> Option<String> {
+    let hb_code = message.get(&["hb_code", "hbCode", "HB_CODE"])?;
+
+    let name = match lookup(message.get_or_empty(&["system_id", "SYSTEM_ID", "systemId"])) {
+        Some(board) => Some(board.name.to_string()),
+        None => dha_code_name(hb_code),
+    };
+
+    name.filter(|n| !n.is_empty() && n != hb_code)
+}
+
 /// §6.2's `MessageHeader`.
 ///
 /// Always present — FHIR requires it of a `message` bundle (§3.1).
+///
+/// `destination_endpoint` is the `PROMPTLY_DESTINATION_ENDPOINT` value
+/// (§10.3), read once by the caller so this function stays pure; `None`
+/// uses [`fhir::PROMPTLY_ENDPOINT`].
 #[must_use]
 pub fn message_header(
     message: &PromsMessage,
@@ -58,6 +105,7 @@ pub fn message_header(
     identities: &Identities,
     present: &[Slot],
     endpoint_override: &dyn Fn(&str) -> Option<String>,
+    destination_endpoint: Option<&str>,
 ) -> Value {
     let system_id = system_id_of(message);
 
@@ -66,9 +114,9 @@ pub fn message_header(
         "endpoint".to_string(),
         json!(endpoint_for(&system_id, endpoint_override)),
     );
-    // §5.2.1 — omitted for an undocumented board, unlike the endpoint.
-    if let Some(name) = lookup(&system_id).and_then(|board| board.name) {
-        source.insert("name".to_string(), json!(name));
+    // §5.2.1 — the name only for a known board, unlike the endpoint.
+    if let Some(board) = lookup(&system_id) {
+        source.insert("name".to_string(), json!(board.name));
     }
 
     // §6.2's focus: the patient first, then whichever of the other slots
@@ -111,8 +159,14 @@ pub fn message_header(
         "eventCoding".to_string(),
         json!({
             "system": crate::message_type::EVENT_SYSTEM,
+            // Upstream #346: the raw routing field, aliases included, so a
+            // legacy bare `SURGERY` stays `SURGERY` rather than becoming
+            // the canonical `SURGERY-PROC` (§10.2).
             "code": message
-                .get(&["eventCode", "event_code", "EVENT_CODE"])
+                .get(&[
+                    "eventCode", "event_code", "EVENT_CODE",
+                    "MESSAGE_TYPE", "messageType", "MSG_TYPE", "msgType",
+                ])
                 .unwrap_or(message_type.event_code),
             "display": message_type.event_display,
         }),
@@ -122,7 +176,7 @@ pub fn message_header(
         "destination".to_string(),
         json!([{
             "name": fhir::PROMPTLY_DESTINATION_NAME,
-            "endpoint": fhir::PROMPTLY_ENDPOINT,
+            "endpoint": destination_endpoint.unwrap_or(fhir::PROMPTLY_ENDPOINT),
         }]),
     );
     header.insert(
@@ -142,12 +196,12 @@ pub fn message_header(
             json!(identities.reference(Slot::Organization).unwrap_or_default()),
         );
         sender.insert("type".to_string(), json!("Organization"));
+        // #423: the health board's name (the same as `Organization.name`),
+        // no longer the free-text `referrer_org`.
         put(
             &mut sender,
             "display",
-            message
-                .get(&["referrer_org", "referrerOrg"])
-                .map(|v| json!(v)),
+            health_board_name(message).map(|n| json!(n)),
         );
         header.insert("sender".to_string(), Value::Object(sender));
     }
@@ -216,6 +270,7 @@ pub fn patient(
         json!(identities.get(Slot::Patient).unwrap_or_default()),
     );
     patient.insert("meta".to_string(), profile_meta(fhir::PATIENT_PROFILE));
+    patient.insert("active".to_string(), json!(true));
 
     if !identifiers.is_empty() {
         patient.insert("identifier".to_string(), json!(identifiers));
@@ -247,33 +302,26 @@ pub fn patient(
         patient_address(message).map(|a| json!([a])),
     );
 
-    // §6.3.2 — the resolved code when there is one, the raw display text
-    // otherwise, so a language is not silently lost. §9.9: with the static
-    // resolver this never produces anything.
-    let language_code = resolver.resolve_language(
-        message.get_or_empty(&[
-            "preferred_spoken_language_code",
-            "PREFERRED_LANGUAGE",
-            "preferredLanguage",
-        ]),
-        &system_id,
-    );
-    let language_display = message.get(&["spoken_language", "spokenLanguage"]);
+    put(&mut patient, "telecom", patient_telecom(message));
 
-    if language_code.is_some() || language_display.is_some() {
-        let mut coding = Map::new();
-        coding.insert("system".to_string(), json!(fhir::HUMAN_LANGUAGE_SYSTEM));
-        put(&mut coding, "code", language_code.map(|c| json!(c)));
-        put(&mut coding, "display", language_display.map(|d| json!(d)));
-
-        patient.insert(
-            "communication".to_string(),
-            json!([{
-                "language": { "coding": [Value::Object(coding)] },
-                "preferred": true,
-            }]),
-        );
+    // §6.3 — `deceased*` is always considered since #423 (the Python's
+    // `include_deceased` switch is gone).
+    match deceased(message) {
+        Some(Deceased::At(date_time)) => {
+            patient.insert("deceasedDateTime".to_string(), json!(date_time));
+        }
+        Some(Deceased::Unknown) => {
+            patient.insert("deceasedBoolean".to_string(), json!(true));
+        }
+        None => {}
     }
+
+    put(&mut patient, "extension", ethnic_category(message));
+
+    // §6.3.2 — spoken language as sent, under the WPAS system; the
+    // reference-data resolver is no longer consulted for it (upstream
+    // #423), only for gender.
+    put(&mut patient, "communication", communication(message));
 
     Value::Object(patient)
 }
@@ -281,38 +329,47 @@ pub fn patient(
 /// §6.3's `Patient.name`.
 ///
 /// Omitted entirely unless a family **or** a first given name is present
-/// (§6.3.1) — a name carrying only a title is not a name.
+/// (§6.3.1). Upstream #423: first and middle names are **one**
+/// space-joined `given` value, and the title is no longer a prefix.
 fn patient_name(message: &PromsMessage) -> Option<Value> {
     let family = message.get(&["patientSurname", "SURNAME", "surname"]);
     let first = message.get(&["patientFirstname", "FORENAME", "forename"]);
     let middle = message.get(&["patientMiddlename", "patientMiddleName"]);
-    let title = message.get(&["patientTitle", "TITLE", "title"]);
 
     if family.is_none() && first.is_none() {
         return None;
     }
 
+    // `" ".join(p for p in (first, middle) if p)` upstream.
     let given: Vec<&str> = [first, middle].into_iter().flatten().collect();
+    let given = given.join(" ");
 
     let mut name = Map::new();
     name.insert("use".to_string(), json!("official"));
     put(&mut name, "family", family.map(|f| json!(f)));
     if !given.is_empty() {
-        name.insert("given".to_string(), json!(given));
+        name.insert("given".to_string(), json!([given]));
     }
-    put(&mut name, "prefix", title.map(|t| json!([t])));
 
     Some(Value::Object(name))
 }
 
-/// §6.3's `Patient.address`.
+/// §6.3's `Patient.address`: `None` unless at least one address part is
+/// present, so a patient with no address has no `address` element at all.
 fn patient_address(message: &PromsMessage) -> Option<Value> {
     let postal_code = message.get(&["postCode", "POSTCODE", "postalCode"]);
     let building = message.get(&["buildingName", "ADDRESS_1"]);
     let street = message.get(&["streetRoadName", "streetroadname"]);
     let city = message.get(&["postTown", "ADDRESS_2"]);
+    // Upstream #346: `postalCounty` is the FHIR `district`.
+    let district = message.get(&["postalCounty", "postal_county"]);
 
-    if postal_code.is_none() && building.is_none() && street.is_none() && city.is_none() {
+    if postal_code.is_none()
+        && building.is_none()
+        && street.is_none()
+        && city.is_none()
+        && district.is_none()
+    {
         return None;
     }
 
@@ -325,12 +382,121 @@ fn patient_address(message: &PromsMessage) -> Option<Value> {
     }
 
     put(&mut address, "city", city.map(|c| json!(c)));
+    put(&mut address, "district", district.map(|d| json!(d)));
     put(&mut address, "postalCode", postal_code.map(|p| json!(p)));
 
     Some(Value::Object(address))
 }
 
-/// §6.4's `ServiceRequest`.
+/// What §6.3.3 makes of a death date. The `Unknown` arm exists so a patient
+/// recorded as deceased is never silently emitted as alive just because the
+/// date text was unreadable.
+enum Deceased {
+    /// A parseable date: `deceasedDateTime`.
+    At(String),
+    /// Non-empty but unparseable: deceased, date unknown.
+    Unknown,
+}
+
+/// §6.3.3's `deceased`.
+///
+/// `DOD`, then the legacy `DEATHDATE`. Absent (which §2.5.2 makes the same
+/// as empty) yields nothing. A non-empty value that does not parse is
+/// `Unknown` — `deceasedBoolean = true` — so a patient is never silently
+/// alive because of a date format (upstream `_deceased`).
+fn deceased(message: &PromsMessage) -> Option<Deceased> {
+    let raw = message.get(&["DOD", "dod", "DEATHDATE", "deathDate"])?;
+
+    Some(to_fhir_datetime(raw).map_or(Deceased::Unknown, Deceased::At))
+}
+
+/// One `Patient.telecom` source: WPAS aliases, `system`, optional `use`.
+type TelecomField = (&'static [&'static str], &'static str, Option<&'static str>);
+
+/// §6.3's `Patient.telecom`: one `ContactPoint` per populated field.
+///
+/// The table's order is upstream's `_TELECOM_FIELDS` and is the output
+/// order. `email` carries no `use`.
+fn patient_telecom(message: &PromsMessage) -> Option<Value> {
+    const FIELDS: [TelecomField; 4] = [
+        (
+            &["home_phone", "homePhone", "TELEPHONE_DAY"],
+            "phone",
+            Some("home"),
+        ),
+        (&["work_phone", "workPhone"], "phone", Some("work")),
+        (&["mobile_phone", "mobilePhone"], "phone", Some("mobile")),
+        (&["email", "EMAIL"], "email", None),
+    ];
+
+    let telecom: Vec<Value> = FIELDS
+        .iter()
+        .filter_map(|(aliases, system, usage)| {
+            let value = message.get(aliases)?;
+            let mut point = Map::new();
+            point.insert("system".to_string(), json!(system));
+            point.insert("value".to_string(), json!(value));
+            put(&mut point, "use", usage.map(|u| json!(u)));
+            Some(Value::Object(point))
+        })
+        .collect();
+
+    (!telecom.is_empty()).then(|| json!(telecom))
+}
+
+/// §6.3's ethnic-category extension (a one-element `extension` array).
+fn ethnic_category(message: &PromsMessage) -> Option<Value> {
+    let code = message.get(&["ethnic_origin_code", "ethnicOriginCode"]);
+    let display = message.get(&["ethnic_origin", "ethnicOrigin"]);
+
+    if code.is_none() && display.is_none() {
+        return None;
+    }
+
+    let mut coding = Map::new();
+    coding.insert("system".to_string(), json!(fhir::ETHNICITY_SYSTEM));
+    put(&mut coding, "code", code.map(|c| json!(c)));
+    put(&mut coding, "display", display.map(|d| json!(d)));
+
+    let mut concept = Map::new();
+    concept.insert("coding".to_string(), json!([Value::Object(coding)]));
+    put(&mut concept, "text", display.map(|d| json!(d)));
+
+    Some(json!([{
+        "url": fhir::ETHNIC_CATEGORY_EXTENSION,
+        "valueCodeableConcept": Value::Object(concept),
+    }]))
+}
+
+/// §6.3.2's `Patient.communication`: the spoken language as sent.
+///
+/// `PREFERRED_LANGUAGE` and `preferredLanguage` are legacy aliases kept by
+/// upstream for older payloads. There is no `preferred` flag.
+fn communication(message: &PromsMessage) -> Option<Value> {
+    let code = message.get(&[
+        "preferred_spoken_language_code",
+        "preferredSpokenLanguageCode",
+        "PREFERRED_LANGUAGE",
+        "preferredLanguage",
+    ]);
+    let display = message.get(&["spoken_language", "spokenLanguage"]);
+
+    if code.is_none() && display.is_none() {
+        return None;
+    }
+
+    let mut coding = Map::new();
+    coding.insert("system".to_string(), json!(fhir::SPOKEN_LANGUAGE_SYSTEM));
+    put(&mut coding, "code", code.map(|c| json!(c)));
+    put(&mut coding, "display", display.map(|d| json!(d)));
+
+    Some(json!([{ "language": { "coding": [Value::Object(coding)] } }]))
+}
+
+/// §6.4's `ServiceRequest`: the clinical resource of a Referral bundle.
+///
+/// `present` lists the slots actually filled, so a `requester`/`performer`
+/// reference is emitted only when its target resource is in the bundle.
 #[must_use]
 pub fn service_request(message: &PromsMessage, identities: &Identities, present: &[Slot]) -> Value {
     let mut request = Map::new();
@@ -345,6 +511,8 @@ pub fn service_request(message: &PromsMessage, identities: &Identities, present:
     );
     request.insert("status".to_string(), json!(fhir::SERVICE_REQUEST_STATUS));
     request.insert("intent".to_string(), json!(fhir::SERVICE_REQUEST_INTENT));
+    // #423: always `false`; the mapping fixes it rather than reading it.
+    request.insert("doNotPerform".to_string(), json!(false));
     put(
         &mut request,
         "subject",
@@ -362,10 +530,41 @@ pub fn service_request(message: &PromsMessage, identities: &Identities, present:
         );
     }
 
+    // §6.4 `code` — the WPAS event code, no longer the pathway (#423).
+    // The aliases are `get_message_type()`'s routing ones. This mapper runs
+    // only for a Referral, so when the type was routed from the root tag
+    // alone there is no field to read and `REFERRAL` is the answer.
+    let event_code = message
+        .get(&[
+            "eventCode",
+            "event_code",
+            "EVENT_CODE",
+            "MESSAGE_TYPE",
+            "messageType",
+            "MSG_TYPE",
+            "msgType",
+        ])
+        .map(|c| c.trim().to_ascii_uppercase())
+        .filter(|c| !c.is_empty())
+        .unwrap_or_else(|| "REFERRAL".to_string());
+    request.insert(
+        "code".to_string(),
+        json!({ "coding": [{
+            "system": fhir::SERVICE_REQUEST_CODE_SYSTEM,
+            "code": event_code,
+            "display": fhir::SERVICE_REQUEST_CODE_DISPLAY,
+        }] }),
+    );
+
+    // §6.4 `reasonCode` — the pathway, deliberately without a display
+    // until WPAS ServicePoint can supply one.
     if let Some(pathway) = message.get(&["eventPathway", "event_pathway"]) {
         request.insert(
-            "code".to_string(),
-            json!({ "coding": [{ "code": pathway, "display": "Referral" }] }),
+            "reasonCode".to_string(),
+            json!([{ "coding": [{
+                "system": fhir::SERVICE_REQUEST_REASON_SYSTEM,
+                "code": pathway,
+            }] }]),
         );
     }
 
@@ -386,7 +585,8 @@ pub fn service_request(message: &PromsMessage, identities: &Identities, present:
     Value::Object(request)
 }
 
-/// §6.5's `Procedure`.
+/// §6.5's `Procedure`: the clinical resource of the surgery and pre-op
+/// bundles. `status` is the fixed `completed` of §9.5.
 #[must_use]
 pub fn procedure(message: &PromsMessage, identities: &Identities) -> Value {
     let mut procedure = Map::new();
@@ -420,7 +620,26 @@ pub fn procedure(message: &PromsMessage, identities: &Identities) -> Value {
     Value::Object(procedure)
 }
 
-/// §6.6's `Appointment`.
+/// §6.6's `Appointment.participant[0].status` for the patient.
+///
+/// The one confirmed business rule in the mapping (upstream
+/// `_patient_participant_status`, #346): `CONFIRM_APPT` `Y` is `accepted`,
+/// `N` is `declined`, and anything else — including absent — is
+/// `tentative`, never `accepted`, so an unconfirmed appointment is not
+/// presented as confirmed.
+fn patient_participant_status(message: &PromsMessage) -> &'static str {
+    let confirm = message.get_or_empty(&["CONFIRM_APPT", "confirmAppt", "confirm_appt"]);
+
+    match confirm.trim().to_ascii_uppercase().as_str() {
+        "Y" => "accepted",
+        "N" => "declined",
+        _ => "tentative",
+    }
+}
+
+/// §6.6's `Appointment`: scheduled, rescheduled or cancelled, selected by
+/// `message_type.appointment_status`. `present` gates the practitioner
+/// participant, as for [`service_request`].
 #[must_use]
 pub fn appointment(
     message: &PromsMessage,
@@ -430,7 +649,7 @@ pub fn appointment(
 ) -> Value {
     let mut participants = vec![json!({
         "actor": reference(identities, Slot::Patient, "Patient"),
-        "status": fhir::APPOINTMENT_PARTICIPANT_STATUS,
+        "status": patient_participant_status(message),
     })];
 
     if present.contains(&Slot::Practitioner) {
@@ -453,6 +672,14 @@ pub fn appointment(
     );
     appointment.insert("participant".to_string(), json!(participants));
 
+    // Upstream #346: `activityNotekey` identifies the appointment.
+    if let Some(key) = message.get(&["activityNotekey", "activity_note_key"]) {
+        appointment.insert(
+            "identifier".to_string(),
+            json!([{ "system": fhir::APPOINTMENT_IDENTIFIER_SYSTEM, "value": key }]),
+        );
+    }
+
     if let Some(service_type) =
         message.get(&["main_specialty_name", "mainSpecialtyName", "specialty_name"])
     {
@@ -472,9 +699,15 @@ pub fn appointment(
     Value::Object(appointment)
 }
 
-/// §6.7's `Encounter`.
+/// §6.7's `Encounter`: the class and status come from
+/// [`fhir::ENCOUNTER_CLASSES`] by message type name, falling back to the
+/// `AMB` default for a type the table does not name.
 #[must_use]
-pub fn encounter(message_type: &MessageType, identities: &Identities) -> Value {
+pub fn encounter(
+    message: &PromsMessage,
+    message_type: &MessageType,
+    identities: &Identities,
+) -> Value {
     let (code, display, status) = fhir::ENCOUNTER_CLASSES
         .iter()
         .find(|(name, ..)| *name == message_type.name)
@@ -501,15 +734,30 @@ pub fn encounter(message_type: &MessageType, identities: &Identities) -> Value {
         reference(identities, Slot::Patient, "Patient"),
     );
 
+    // Upstream #346: `activityNotekey` identifies the encounter.
+    if let Some(key) = message.get(&["activityNotekey", "activity_note_key"]) {
+        encounter.insert(
+            "identifier".to_string(),
+            json!([{ "system": fhir::ENCOUNTER_IDENTIFIER_SYSTEM, "value": key }]),
+        );
+    }
+
     Value::Object(encounter)
 }
 
 /// §6.8's `PractitionerRole`.
+///
+/// `is_referral` selects the identifier: the referrer's code under the GMC
+/// system for a Referral, `consultant_code` under the WPAS
+/// practitioner-role system otherwise. Upstream's only caller never passes
+/// it (default `True`), so [`crate::transform`] always passes `true`; the
+/// other arm exists because the mapper has it and upstream tests it.
 #[must_use]
 pub fn practitioner_role(
     message: &PromsMessage,
     identities: &Identities,
     present: &[Slot],
+    is_referral: bool,
 ) -> Value {
     let mut role = Map::new();
     role.insert("resourceType".to_string(), json!("PractitionerRole"));
@@ -522,14 +770,21 @@ pub fn practitioner_role(
         profile_meta(fhir::PRACTITIONER_ROLE_PROFILE),
     );
 
-    // §9.5 — no source field was specified.
-    if let Some(identifier) = message.get(&["activityNotekey", "activity_notekey"]) {
+    let (system, identifier) = if is_referral {
+        (
+            fhir::PRACTITIONER_ROLE_REFERRAL_IDENTIFIER_SYSTEM,
+            message.get(&["referrer_code", "referrerCode"]),
+        )
+    } else {
+        (
+            fhir::PRACTITIONER_ROLE_IDENTIFIER_SYSTEM,
+            message.get(&["consultant_code", "consultantCode"]),
+        )
+    };
+    if let Some(identifier) = identifier {
         role.insert(
             "identifier".to_string(),
-            json!([{
-                "system": fhir::PRACTITIONER_ROLE_IDENTIFIER_SYSTEM,
-                "value": identifier,
-            }]),
+            json!([{ "system": system, "value": identifier }]),
         );
     }
 
@@ -548,12 +803,20 @@ pub fn practitioner_role(
         );
     }
 
-    let specialty_code = message.get(&["consultant_specialty", "consultantSpecialty"]);
+    // §6.8: only the first three characters of `consultant_specialty` are
+    // the specialty code (#423). Characters, not bytes, as Python slices.
+    let specialty_code: String = message
+        .get_or_empty(&["consultant_specialty", "consultantSpecialty"])
+        .chars()
+        .take(3)
+        .collect();
     let specialty_name = message.get(&["specialty_name", "specialtyName", "main_specialty_name"]);
 
-    if specialty_code.is_some() || specialty_name.is_some() {
+    if !specialty_code.is_empty() || specialty_name.is_some() {
         let mut coding = Map::new();
-        put(&mut coding, "code", specialty_code.map(|c| json!(c)));
+        if !specialty_code.is_empty() {
+            coding.insert("code".to_string(), json!(specialty_code));
+        }
         put(&mut coding, "display", specialty_name.map(|d| json!(d)));
         role.insert(
             "specialty".to_string(),
@@ -573,28 +836,37 @@ pub fn practitioner_role(
 
 /// §6.9's `Practitioner`.
 ///
-/// `None` when neither an identifier nor a name is available (§6.9.1).
+/// `None` when there is neither an identifier nor a name (§6.9.1).
+///
+/// Upstream #423: `consultant_code` is always the base identifier (WPAS
+/// practitioner system); a Referral adds the referrer's code as a second,
+/// GMC-system identifier. The name is **free text** (`name.text`), no
+/// longer split into family and given (§6.9.2).
 #[must_use]
 pub fn practitioner(
     message: &PromsMessage,
     message_type: &MessageType,
     identities: &Identities,
 ) -> Option<Value> {
-    // §6.9 — the source fields depend on the bundle.
     let is_referral = message_type.code == "REFERRAL";
 
-    let identifier = if is_referral {
-        message.get(&["referrer_code", "referrerCode"])
-    } else {
-        message.get(&["consultant_code", "consultantCode"])
-    };
+    let consultant_code = message.get(&["consultant_code", "consultantCode"]);
     let name_source = if is_referral {
         message.get(&["referrer_name", "referrerName"])
     } else {
         message.get(&["clinicianName", "clinician_name", "CONS_NAME"])
     };
 
-    if identifier.is_none() && name_source.is_none() {
+    let mut identifiers = Vec::new();
+    if let Some(code) = consultant_code {
+        identifiers.push(json!({ "system": fhir::WPAS_PRACTITIONER_SYSTEM, "value": code }));
+    }
+    if is_referral && let Some(code) = message.get(&["referrer_code", "referrerCode"]) {
+        // §9.6 — still the GMC system, for the referrer only.
+        identifiers.push(json!({ "system": fhir::GMC_NUMBER_SYSTEM, "value": code }));
+    }
+
+    if identifiers.is_empty() && name_source.is_none() {
         return None;
     }
 
@@ -606,45 +878,25 @@ pub fn practitioner(
     );
     practitioner.insert("meta".to_string(), profile_meta(fhir::PRACTITIONER_PROFILE));
 
-    // §9.6 — the GMC system, for values that are plainly not GMC numbers.
-    if let Some(value) = identifier {
-        practitioner.insert(
-            "identifier".to_string(),
-            json!([{ "system": fhir::GMC_NUMBER_SYSTEM, "value": value }]),
-        );
+    if !identifiers.is_empty() {
+        practitioner.insert("identifier".to_string(), json!(identifiers));
     }
-
-    if let Some(raw) = name_source {
-        let split = split_person_name(raw);
-        if !split.is_empty() {
-            let mut name = Map::new();
-            if !split.family.is_empty() {
-                name.insert("family".to_string(), json!(split.family));
-            }
-            if !split.given.is_empty() {
-                name.insert("given".to_string(), json!(split.given));
-            }
-            if !split.prefixes.is_empty() {
-                name.insert("prefix".to_string(), json!(split.prefixes));
-            }
-            practitioner.insert("name".to_string(), json!([Value::Object(name)]));
-        }
-    }
+    put(
+        &mut practitioner,
+        "name",
+        name_source.map(|text| json!([{ "text": text }])),
+    );
 
     Some(Value::Object(practitioner))
 }
 
-/// §6.10's `Organization`.
+/// §6.10's `Organization`: the sending health board.
 ///
-/// `None` when neither `referrer_org` nor a DHA code is present (§6.10.1).
+/// `None` when there is no `hb_code` (§6.10.1). `referrer_org` and
+/// `dhaCode` are no longer read; the name is [`health_board_name`].
 #[must_use]
 pub fn organization(message: &PromsMessage, identities: &Identities) -> Option<Value> {
-    let referrer_org = message.get(&["referrer_org", "referrerOrg"]);
-    let dha_code = message.get(&["dhaCode", "DHA_CODE", "dha_code"]);
-
-    if referrer_org.is_none() && dha_code.is_none() {
-        return None;
-    }
+    let hb_code = message.get(&["hb_code", "hbCode", "HB_CODE"])?;
 
     let mut organization = Map::new();
     organization.insert("resourceType".to_string(), json!("Organization"));
@@ -653,42 +905,33 @@ pub fn organization(message: &PromsMessage, identities: &Identities) -> Option<V
         json!(identities.get(Slot::Organization).unwrap_or_default()),
     );
     organization.insert("meta".to_string(), profile_meta(fhir::ORGANIZATION_PROFILE));
-
-    if let Some(code) = dha_code {
-        organization.insert(
-            "identifier".to_string(),
-            json!([{ "system": fhir::ODS_ORGANISATION_CODE_SYSTEM, "value": code }]),
-        );
-    }
-
-    // §6.10.1 — the payload's value first, then the lookup. `referrer_org`
-    // is present-but-empty in real SIT payloads, which §2.5.2 makes
-    // indistinguishable from absent, so the fallback is what runs.
-    let name = referrer_org
-        .map(ToString::to_string)
-        .or_else(|| dha_code.and_then(dha_code_name));
-    put(&mut organization, "name", name.map(|n| json!(n)));
+    organization.insert("active".to_string(), json!(true));
+    organization.insert(
+        "identifier".to_string(),
+        json!([{ "system": fhir::ODS_ORGANISATION_CODE_SYSTEM, "value": hb_code }]),
+    );
+    put(
+        &mut organization,
+        "name",
+        health_board_name(message).map(|n| json!(n)),
+    );
 
     Some(Value::Object(organization))
 }
 
 /// §6.11's `Location`.
 ///
-/// **Always present**, unlike [`practitioner`] and [`organization`]. The
+/// **Always present**, unlike [`practitioner`] and [`organization`]: the
 /// Python's `map_location` returns a `Location` unconditionally, so a
-/// bundle with no location data at all still carries an entry holding
-/// nothing but an id and a profile.
+/// bundle with no location data still carries an entry (now holding an id,
+/// a profile and `status`). See §9.13.
 ///
-/// That is measurable: `EXPLICIT_EVENT_CODE_MESSAGE` has no
-/// `referrer_location` and no `referrer_postcode`, and its bundle still
-/// ends with a `Location`. Returning `None` here — which reads as the
-/// obvious symmetry with the two mappers above — drops an entry the
-/// Python emits. See §9.13.
+/// Upstream #423: `identifier` is `referrer_prac`; there is no `name`;
+/// `address.text` is `referrer_location` and `referrer_postcode` joined by
+/// a space, so a location string that already ends in the postcode repeats
+/// it (§6.11). The mapping says so; it is reproduced, not tidied.
 #[must_use]
 pub fn location(message: &PromsMessage, identities: &Identities) -> Value {
-    let referrer_location = message.get(&["referrer_location", "referrerLocation"]);
-    let postcode = message.get(&["referrer_postcode", "referrerPostcode"]);
-
     let mut location = Map::new();
     location.insert("resourceType".to_string(), json!("Location"));
     location.insert(
@@ -696,29 +939,30 @@ pub fn location(message: &PromsMessage, identities: &Identities) -> Value {
         json!(identities.get(Slot::Location).unwrap_or_default()),
     );
     location.insert("meta".to_string(), profile_meta(fhir::LOCATION_PROFILE));
+    location.insert("status".to_string(), json!("active"));
 
-    if let Some(raw) = referrer_location {
+    if let Some(prac) = message.get(&["referrer_prac", "referrerPrac"]) {
         location.insert(
             "identifier".to_string(),
-            json!([{ "system": fhir::LOCATION_IDENTIFIER_SYSTEM, "value": raw }]),
+            json!([{ "system": fhir::LOCATION_IDENTIFIER_SYSTEM, "value": prac }]),
         );
-
-        // §6.11.1 and §9.5 — the first comma-delimited segment, because
-        // the spreadsheet marks the name's source as "??".
-        let first = raw.split(',').next().unwrap_or_default().trim();
-        if !first.is_empty() {
-            location.insert("name".to_string(), json!(first));
-        }
     }
 
-    if let Some(postcode) = postcode {
-        location.insert("address".to_string(), json!({ "postalCode": postcode }));
+    let place = message.get(&["referrer_location", "referrerLocation"]);
+    let postcode = message.get(&["referrer_postcode", "referrerPostcode"]);
+    let text: Vec<&str> = [place, postcode].into_iter().flatten().collect();
+    if !text.is_empty() {
+        let mut address = Map::new();
+        address.insert("text".to_string(), json!(text.join(" ")));
+        put(&mut address, "postalCode", postcode.map(|p| json!(p)));
+        location.insert("address".to_string(), Value::Object(address));
     }
 
     Value::Object(location)
 }
 
-/// The `SYSTEM_ID`, falling back to `hbCode` (§6.2).
+/// The `SYSTEM_ID`, falling back to `hbCode` (§6.2); empty when neither is
+/// present, which selects the `unknown` source of §5.2.2.
 fn system_id_of(message: &PromsMessage) -> String {
     message
         .get(&["system_id", "SYSTEM_ID", "systemId"])
@@ -742,7 +986,8 @@ fn appointment_datetime(message: &PromsMessage) -> Option<String> {
     to_fhir_datetime(combined)
 }
 
-/// The clinical resource for a bundle (§2.2).
+/// The clinical resource for a bundle (§2.2): dispatches on
+/// `message_type.clinical` to the one builder that bundle shape uses.
 #[must_use]
 pub fn clinical(
     message: &PromsMessage,
@@ -754,6 +999,6 @@ pub fn clinical(
         Clinical::ServiceRequest => service_request(message, identities, present),
         Clinical::Procedure => procedure(message, identities),
         Clinical::Appointment => appointment(message, message_type, identities, present),
-        Clinical::Encounter => encounter(message_type, identities),
+        Clinical::Encounter => encounter(message, message_type, identities),
     }
 }

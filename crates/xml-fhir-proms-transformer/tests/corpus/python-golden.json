@@ -7,7 +7,7 @@
           "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/appointment-cancellation",
           "destination": [
             {
-              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
               "name": "FHIR Promptly Collect"
             }
           ],
@@ -35,17 +35,20 @@
           },
           "resourceType": "MessageHeader",
           "sender": {
+            "display": "Hywel Dda University Health Board",
             "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
             "type": "Organization"
           },
           "source": {
-            "endpoint": "https://wpas-source.invalid/system-id/149"
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
           }
         }
       },
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
         "resource": {
+          "active": true,
           "address": [
             {
               "postalCode": "LL57 2AA"
@@ -66,7 +69,7 @@
           ],
           "meta": {
             "profile": [
-              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
             ]
           },
           "name": [
@@ -97,7 +100,7 @@
                 "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
                 "type": "Patient"
               },
-              "status": "accepted"
+              "status": "tentative"
             },
             {
               "actor": {
@@ -118,7 +121,7 @@
           "id": "00000000-0000-4000-8000-000000000004",
           "identifier": [
             {
-              "system": "https://fhir.hl7.org.uk/Id/gmc-number",
+              "system": "https://fhir.nhs.wales/Id/wpas-practitioner",
               "value": "HANJO"
             }
           ],
@@ -129,10 +132,7 @@
           },
           "name": [
             {
-              "family": "Jones",
-              "given": [
-                "Hannah"
-              ]
+              "text": "Jones, Hannah"
             }
           ],
           "resourceType": "Practitioner"
@@ -141,11 +141,12 @@
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
         "resource": {
+          "active": true,
           "id": "00000000-0000-4000-8000-000000000005",
           "identifier": [
             {
               "system": "https://fhir.nhs.uk/Id/ods-organization-code",
-              "value": "7A1"
+              "value": "X98"
             }
           ],
           "meta": {
@@ -153,7 +154,7 @@
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
             ]
           },
-          "name": "BETSI CADWALADR UNIVERSITY LHB",
+          "name": "Hywel Dda University Health Board",
           "resourceType": "Organization"
         }
       },
@@ -161,22 +162,194 @@
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
         "resource": {
           "address": {
-            "postalCode": "LL57 2PW"
+            "postalCode": "LL57 2PW",
+            "text": "YSBYTY GWYNEDD, PENRHOSGARNEDD, BANGOR, GWYNEDD, LL57 2PW LL57 2PW"
           },
           "id": "00000000-0000-4000-8000-000000000006",
-          "identifier": [
-            {
-              "system": "https://fhir.nhs.wales/Id/wrts-location-identifier",
-              "value": "YSBYTY GWYNEDD, PENRHOSGARNEDD, BANGOR, GWYNEDD, LL57 2PW"
-            }
-          ],
           "meta": {
             "profile": [
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
             ]
           },
-          "name": "YSBYTY GWYNEDD",
-          "resourceType": "Location"
+          "resourceType": "Location",
+          "status": "active"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "DISCHARGE_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/discharge",
+          "destination": [
+            {
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "SURGERY-DN",
+            "display": "Discharge Notification",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Ifor Rees",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Encounter"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "display": "Hywel Dda University Health Board",
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "active": true,
+          "address": [
+            {
+              "postalCode": "CF10 1EP"
+            }
+          ],
+          "birthDate": "1968-02-11",
+          "gender": "male",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434766126"
+            },
+            {
+              "system": "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
+              "value": "CV0044326"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Rees",
+              "given": [
+                "Ifor"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "class": {
+            "code": "IMP",
+            "display": "Inpatient encounter",
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+          },
+          "id": "00000000-0000-4000-8000-000000000003",
+          "identifier": [
+            {
+              "system": "https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-encounter",
+              "value": "ANK-7A22867982"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Encounter"
+            ]
+          },
+          "resourceType": "Encounter",
+          "status": "finished",
+          "subject": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+            "type": "Patient"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.wales/Id/wpas-practitioner",
+              "value": "JONMG"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Practitioner"
+            ]
+          },
+          "name": [
+            {
+              "text": "Morgan, James"
+            }
+          ],
+          "resourceType": "Practitioner"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "active": true,
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "X98"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "Hywel Dda University Health Board",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "address": {
+            "postalCode": "CF14 4XW",
+            "text": "UNIVERSITY HOSPITAL OF WALES, HEATH PARK, CARDIFF, CF14 4XW CF14 4XW"
+          },
+          "id": "00000000-0000-4000-8000-000000000006",
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "resourceType": "Location",
+          "status": "active"
         }
       }
     ],
@@ -191,7 +364,7 @@
           "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/procedure",
           "destination": [
             {
-              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
               "name": "FHIR Promptly Collect"
             }
           ],
@@ -219,13 +392,15 @@
           },
           "resourceType": "MessageHeader",
           "source": {
-            "endpoint": "https://wpas-source.invalid/system-id/149"
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
           }
         }
       },
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
         "resource": {
+          "active": true,
           "id": "00000000-0000-4000-8000-000000000002",
           "identifier": [
             {
@@ -235,7 +410,7 @@
           ],
           "meta": {
             "profile": [
-              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
             ]
           },
           "name": [
@@ -276,7 +451,8 @@
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
             ]
           },
-          "resourceType": "Location"
+          "resourceType": "Location",
+          "status": "active"
         }
       }
     ],
@@ -291,7 +467,7 @@
           "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/encounter",
           "destination": [
             {
-              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
               "name": "FHIR Promptly Collect"
             }
           ],
@@ -319,17 +495,20 @@
           },
           "resourceType": "MessageHeader",
           "sender": {
+            "display": "Hywel Dda University Health Board",
             "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
             "type": "Organization"
           },
           "source": {
-            "endpoint": "https://wpas-source.invalid/system-id/149"
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
           }
         }
       },
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
         "resource": {
+          "active": true,
           "address": [
             {
               "postalCode": "SA2 8QA"
@@ -350,7 +529,7 @@
           ],
           "meta": {
             "profile": [
-              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
             ]
           },
           "name": [
@@ -374,6 +553,12 @@
             "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode"
           },
           "id": "00000000-0000-4000-8000-000000000003",
+          "identifier": [
+            {
+              "system": "https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-encounter",
+              "value": "ANK-7A22867973"
+            }
+          ],
           "meta": {
             "profile": [
               "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Encounter"
@@ -393,7 +578,7 @@
           "id": "00000000-0000-4000-8000-000000000004",
           "identifier": [
             {
-              "system": "https://fhir.hl7.org.uk/Id/gmc-number",
+              "system": "https://fhir.nhs.wales/Id/wpas-practitioner",
               "value": "WILLR"
             }
           ],
@@ -404,10 +589,7 @@
           },
           "name": [
             {
-              "family": "Williams",
-              "given": [
-                "Rhys"
-              ]
+              "text": "Williams, Rhys"
             }
           ],
           "resourceType": "Practitioner"
@@ -416,11 +598,12 @@
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
         "resource": {
+          "active": true,
           "id": "00000000-0000-4000-8000-000000000005",
           "identifier": [
             {
               "system": "https://fhir.nhs.uk/Id/ods-organization-code",
-              "value": "7A2"
+              "value": "X98"
             }
           ],
           "meta": {
@@ -428,7 +611,7 @@
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
             ]
           },
-          "name": "HYWEL DDA UNIVERSITY LHB",
+          "name": "Hywel Dda University Health Board",
           "resourceType": "Organization"
         }
       },
@@ -436,22 +619,17 @@
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
         "resource": {
           "address": {
-            "postalCode": "SA6 6NL"
+            "postalCode": "SA6 6NL",
+            "text": "MORRISTON HOSPITAL, SWANSEA, SA6 6NL SA6 6NL"
           },
           "id": "00000000-0000-4000-8000-000000000006",
-          "identifier": [
-            {
-              "system": "https://fhir.nhs.wales/Id/wrts-location-identifier",
-              "value": "MORRISTON HOSPITAL, SWANSEA, SA6 6NL"
-            }
-          ],
           "meta": {
             "profile": [
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
             ]
           },
-          "name": "MORRISTON HOSPITAL",
-          "resourceType": "Location"
+          "resourceType": "Location",
+          "status": "active"
         }
       }
     ],
@@ -466,7 +644,7 @@
           "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/referral",
           "destination": [
             {
-              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
               "name": "FHIR Promptly Collect"
             }
           ],
@@ -498,13 +676,15 @@
           },
           "resourceType": "MessageHeader",
           "source": {
-            "endpoint": "https://wpas-source.invalid/system-id/149"
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
           }
         }
       },
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
         "resource": {
+          "active": true,
           "id": "00000000-0000-4000-8000-000000000002",
           "identifier": [
             {
@@ -514,7 +694,7 @@
           ],
           "meta": {
             "profile": [
-              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
             ]
           },
           "name": [
@@ -532,8 +712,18 @@
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
         "resource": {
+          "code": {
+            "coding": [
+              {
+                "code": "REFERRAL",
+                "display": "Referral",
+                "system": "https://fhir.nhs.wales/CodeSystem/proms-event"
+              }
+            ]
+          },
+          "doNotPerform": false,
           "id": "00000000-0000-4000-8000-000000000003",
-          "intent": "plan",
+          "intent": "order",
           "meta": {
             "profile": [
               "https://fhir.hl7.org.uk/StructureDefinition/UKCore-ServiceRequest"
@@ -578,7 +768,273 @@
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
             ]
           },
-          "resourceType": "Location"
+          "resourceType": "Location",
+          "status": "active"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "LEGACY_MESSAGE_TYPE_PREOP_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/appointment",
+          "destination": [
+            {
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "PREOP",
+            "display": "Appointment Scheduled",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Gareth Jones",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Appointment"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "display": "Hywel Dda University Health Board",
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "active": true,
+          "birthDate": "1960-01-20",
+          "gender": "male",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434765935"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Jones",
+              "given": [
+                "Gareth"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Appointment"
+            ]
+          },
+          "participant": [
+            {
+              "actor": {
+                "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+                "type": "Patient"
+              },
+              "status": "tentative"
+            }
+          ],
+          "resourceType": "Appointment",
+          "status": "booked"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "active": true,
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "X98"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "Hywel Dda University Health Board",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000006",
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "resourceType": "Location",
+          "status": "active"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "LEGACY_MESSAGE_TYPE_SURGERY_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/procedure",
+          "destination": [
+            {
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "SURGERY",
+            "display": "Procedure Performed",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Megan Williams",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Procedure"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "display": "Hywel Dda University Health Board",
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "active": true,
+          "birthDate": "1975-06-30",
+          "gender": "female",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434765927"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Williams",
+              "given": [
+                "Megan"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Procedure"
+            ]
+          },
+          "resourceType": "Procedure",
+          "status": "completed",
+          "subject": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+            "type": "Patient"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "active": true,
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "X98"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "Hywel Dda University Health Board",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000006",
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "resourceType": "Location",
+          "status": "active"
         }
       }
     ],
@@ -593,7 +1049,7 @@
           "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/referral",
           "destination": [
             {
-              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
               "name": "FHIR Promptly Collect"
             }
           ],
@@ -625,13 +1081,14 @@
           },
           "resourceType": "MessageHeader",
           "source": {
-            "endpoint": "https://wpas-source.invalid/system-id/unknown"
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/unknown"
           }
         }
       },
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
         "resource": {
+          "active": true,
           "id": "00000000-0000-4000-8000-000000000002",
           "identifier": [
             {
@@ -641,7 +1098,7 @@
           ],
           "meta": {
             "profile": [
-              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
             ]
           },
           "name": [
@@ -659,8 +1116,18 @@
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
         "resource": {
+          "code": {
+            "coding": [
+              {
+                "code": "REFERRAL",
+                "display": "Referral",
+                "system": "https://fhir.nhs.wales/CodeSystem/proms-event"
+              }
+            ]
+          },
+          "doNotPerform": false,
           "id": "00000000-0000-4000-8000-000000000003",
-          "intent": "plan",
+          "intent": "order",
           "meta": {
             "profile": [
               "https://fhir.hl7.org.uk/StructureDefinition/UKCore-ServiceRequest"
@@ -705,7 +1172,8 @@
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
             ]
           },
-          "resourceType": "Location"
+          "resourceType": "Location",
+          "status": "active"
         }
       }
     ],
@@ -720,7 +1188,7 @@
           "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/referral",
           "destination": [
             {
-              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
               "name": "FHIR Promptly Collect"
             }
           ],
@@ -752,13 +1220,15 @@
           },
           "resourceType": "MessageHeader",
           "source": {
-            "endpoint": "https://wpas-source.invalid/system-id/149"
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
           }
         }
       },
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
         "resource": {
+          "active": true,
           "id": "00000000-0000-4000-8000-000000000002",
           "identifier": [
             {
@@ -768,7 +1238,7 @@
           ],
           "meta": {
             "profile": [
-              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
             ]
           },
           "name": [
@@ -786,8 +1256,18 @@
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
         "resource": {
+          "code": {
+            "coding": [
+              {
+                "code": "REFERRAL",
+                "display": "Referral",
+                "system": "https://fhir.nhs.wales/CodeSystem/proms-event"
+              }
+            ]
+          },
+          "doNotPerform": false,
           "id": "00000000-0000-4000-8000-000000000003",
-          "intent": "plan",
+          "intent": "order",
           "meta": {
             "profile": [
               "https://fhir.hl7.org.uk/StructureDefinition/UKCore-ServiceRequest"
@@ -832,14 +1312,192 @@
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
             ]
           },
-          "resourceType": "Location"
+          "resourceType": "Location",
+          "status": "active"
         }
       }
     ],
     "resourceType": "Bundle",
     "type": "message"
   },
-  "PREOP_MESSAGE": {
+  "OUTPATIENT_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/outpatient",
+          "destination": [
+            {
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "PREOP-VIS",
+            "display": "Outpatient Visit",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Bethan Lewis",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Encounter"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "display": "Hywel Dda University Health Board",
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "active": true,
+          "address": [
+            {
+              "postalCode": "SA2 8QA"
+            }
+          ],
+          "birthDate": "1972-05-09",
+          "gender": "female",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434766142"
+            },
+            {
+              "system": "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
+              "value": "SB0011318"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Lewis",
+              "given": [
+                "Bethan"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "class": {
+            "code": "AMB",
+            "display": "Ambulatory",
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+          },
+          "id": "00000000-0000-4000-8000-000000000003",
+          "identifier": [
+            {
+              "system": "https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-encounter",
+              "value": "ANK-7A22867984"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Encounter"
+            ]
+          },
+          "resourceType": "Encounter",
+          "status": "finished",
+          "subject": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+            "type": "Patient"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.wales/Id/wpas-practitioner",
+              "value": "DAVIP"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Practitioner"
+            ]
+          },
+          "name": [
+            {
+              "text": "Price, David"
+            }
+          ],
+          "resourceType": "Practitioner"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "active": true,
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "X98"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "Hywel Dda University Health Board",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "address": {
+            "postalCode": "SA6 6NL",
+            "text": "MORRISTON HOSPITAL, SWANSEA, SA6 6NL SA6 6NL"
+          },
+          "id": "00000000-0000-4000-8000-000000000006",
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "resourceType": "Location",
+          "status": "active"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "PREOP_AS_MESSAGE": {
     "entry": [
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
@@ -847,12 +1505,12 @@
           "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/appointment",
           "destination": [
             {
-              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
               "name": "FHIR Promptly Collect"
             }
           ],
           "eventCoding": {
-            "code": "PREOP",
+            "code": "PREOP-AS",
             "display": "Appointment Scheduled",
             "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
           },
@@ -875,17 +1533,20 @@
           },
           "resourceType": "MessageHeader",
           "sender": {
+            "display": "Hywel Dda University Health Board",
             "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
             "type": "Organization"
           },
           "source": {
-            "endpoint": "https://wpas-source.invalid/system-id/149"
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
           }
         }
       },
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
         "resource": {
+          "active": true,
           "address": [
             {
               "postalCode": "SA2 8QA"
@@ -897,16 +1558,16 @@
           "identifier": [
             {
               "system": "https://fhir.nhs.uk/Id/nhs-number",
-              "value": "9434765935"
+              "value": "9434766134"
             },
             {
               "system": "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
-              "value": "SB0011223"
+              "value": "SB0011300"
             }
           ],
           "meta": {
             "profile": [
-              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
             ]
           },
           "name": [
@@ -926,6 +1587,12 @@
         "resource": {
           "end": "2024-08-15T14:00:00Z",
           "id": "00000000-0000-4000-8000-000000000003",
+          "identifier": [
+            {
+              "system": "https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-appointment",
+              "value": "ANK-7A22867983"
+            }
+          ],
           "meta": {
             "profile": [
               "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Appointment"
@@ -937,7 +1604,7 @@
                 "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
                 "type": "Patient"
               },
-              "status": "accepted"
+              "status": "tentative"
             },
             {
               "actor": {
@@ -967,7 +1634,7 @@
           "id": "00000000-0000-4000-8000-000000000004",
           "identifier": [
             {
-              "system": "https://fhir.hl7.org.uk/Id/gmc-number",
+              "system": "https://fhir.nhs.wales/Id/wpas-practitioner",
               "value": "DAVIP"
             }
           ],
@@ -978,10 +1645,7 @@
           },
           "name": [
             {
-              "family": "Price",
-              "given": [
-                "David"
-              ]
+              "text": "Price, David"
             }
           ],
           "resourceType": "Practitioner"
@@ -990,11 +1654,12 @@
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
         "resource": {
+          "active": true,
           "id": "00000000-0000-4000-8000-000000000005",
           "identifier": [
             {
               "system": "https://fhir.nhs.uk/Id/ods-organization-code",
-              "value": "7A2"
+              "value": "X98"
             }
           ],
           "meta": {
@@ -1002,7 +1667,7 @@
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
             ]
           },
-          "name": "HYWEL DDA UNIVERSITY LHB",
+          "name": "Hywel Dda University Health Board",
           "resourceType": "Organization"
         }
       },
@@ -1010,22 +1675,212 @@
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
         "resource": {
           "address": {
-            "postalCode": "SA6 6NL"
+            "postalCode": "SA6 6NL",
+            "text": "MORRISTON HOSPITAL, SWANSEA, SA6 6NL SA6 6NL"
           },
           "id": "00000000-0000-4000-8000-000000000006",
-          "identifier": [
-            {
-              "system": "https://fhir.nhs.wales/Id/wrts-location-identifier",
-              "value": "MORRISTON HOSPITAL, SWANSEA, SA6 6NL"
-            }
-          ],
           "meta": {
             "profile": [
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
             ]
           },
-          "name": "MORRISTON HOSPITAL",
-          "resourceType": "Location"
+          "resourceType": "Location",
+          "status": "active"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "PREOP_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/appointment",
+          "destination": [
+            {
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "PREOP",
+            "display": "Appointment Scheduled",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Gareth Jones",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Appointment"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "display": "Hywel Dda University Health Board",
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "active": true,
+          "address": [
+            {
+              "postalCode": "SA2 8QA"
+            }
+          ],
+          "birthDate": "1960-01-20",
+          "gender": "male",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434765935"
+            },
+            {
+              "system": "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
+              "value": "SB0011223"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Jones",
+              "given": [
+                "Gareth"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "end": "2024-08-15T14:00:00Z",
+          "id": "00000000-0000-4000-8000-000000000003",
+          "identifier": [
+            {
+              "system": "https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-appointment",
+              "value": "ANK-7A22867972"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Appointment"
+            ]
+          },
+          "participant": [
+            {
+              "actor": {
+                "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+                "type": "Patient"
+              },
+              "status": "tentative"
+            },
+            {
+              "actor": {
+                "reference": "urn:uuid:00000000-0000-4000-8000-000000000004",
+                "type": "Practitioner"
+              },
+              "status": "accepted"
+            }
+          ],
+          "resourceType": "Appointment",
+          "serviceType": [
+            {
+              "coding": [
+                {
+                  "display": "Trauma and Orthopaedics"
+                }
+              ]
+            }
+          ],
+          "start": "2024-08-15T14:00:00Z",
+          "status": "booked"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.wales/Id/wpas-practitioner",
+              "value": "DAVIP"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Practitioner"
+            ]
+          },
+          "name": [
+            {
+              "text": "Price, David"
+            }
+          ],
+          "resourceType": "Practitioner"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "active": true,
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "X98"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "Hywel Dda University Health Board",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "address": {
+            "postalCode": "SA6 6NL",
+            "text": "MORRISTON HOSPITAL, SWANSEA, SA6 6NL SA6 6NL"
+          },
+          "id": "00000000-0000-4000-8000-000000000006",
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "resourceType": "Location",
+          "status": "active"
         }
       }
     ],
@@ -1040,7 +1895,7 @@
           "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/preadmission",
           "destination": [
             {
-              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
               "name": "FHIR Promptly Collect"
             }
           ],
@@ -1068,17 +1923,20 @@
           },
           "resourceType": "MessageHeader",
           "sender": {
+            "display": "Hywel Dda University Health Board",
             "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
             "type": "Organization"
           },
           "source": {
-            "endpoint": "https://wpas-source.invalid/system-id/149"
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
           }
         }
       },
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
         "resource": {
+          "active": true,
           "address": [
             {
               "postalCode": "CF10 1EP"
@@ -1099,7 +1957,7 @@
           ],
           "meta": {
             "profile": [
-              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
             ]
           },
           "name": [
@@ -1142,7 +2000,7 @@
           "id": "00000000-0000-4000-8000-000000000004",
           "identifier": [
             {
-              "system": "https://fhir.hl7.org.uk/Id/gmc-number",
+              "system": "https://fhir.nhs.wales/Id/wpas-practitioner",
               "value": "DAVIP"
             }
           ],
@@ -1153,10 +2011,7 @@
           },
           "name": [
             {
-              "family": "Price",
-              "given": [
-                "David"
-              ]
+              "text": "Price, David"
             }
           ],
           "resourceType": "Practitioner"
@@ -1165,11 +2020,12 @@
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
         "resource": {
+          "active": true,
           "id": "00000000-0000-4000-8000-000000000005",
           "identifier": [
             {
               "system": "https://fhir.nhs.uk/Id/ods-organization-code",
-              "value": "7A4"
+              "value": "X98"
             }
           ],
           "meta": {
@@ -1177,7 +2033,7 @@
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
             ]
           },
-          "name": "7A4",
+          "name": "Hywel Dda University Health Board",
           "resourceType": "Organization"
         }
       },
@@ -1185,22 +2041,17 @@
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
         "resource": {
           "address": {
-            "postalCode": "CF14 4XW"
+            "postalCode": "CF14 4XW",
+            "text": "UNIVERSITY HOSPITAL OF WALES, HEATH PARK, CARDIFF, CF14 4XW CF14 4XW"
           },
           "id": "00000000-0000-4000-8000-000000000006",
-          "identifier": [
-            {
-              "system": "https://fhir.nhs.wales/Id/wrts-location-identifier",
-              "value": "UNIVERSITY HOSPITAL OF WALES, HEATH PARK, CARDIFF, CF14 4XW"
-            }
-          ],
           "meta": {
             "profile": [
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
             ]
           },
-          "name": "UNIVERSITY HOSPITAL OF WALES",
-          "resourceType": "Location"
+          "resourceType": "Location",
+          "status": "active"
         }
       }
     ],
@@ -1215,7 +2066,7 @@
           "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/referral",
           "destination": [
             {
-              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
               "name": "FHIR Promptly Collect"
             }
           ],
@@ -1247,20 +2098,24 @@
           },
           "resourceType": "MessageHeader",
           "sender": {
+            "display": "Hywel Dda University Health Board",
             "reference": "urn:uuid:00000000-0000-4000-8000-000000000006",
             "type": "Organization"
           },
           "source": {
-            "endpoint": "https://wpas-source.invalid/system-id/149"
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
           }
         }
       },
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
         "resource": {
+          "active": true,
           "address": [
             {
               "city": "Tredegar",
+              "district": "Gwent",
               "line": [
                 "Tredegar House, Park Street"
               ],
@@ -1273,12 +2128,27 @@
               "language": {
                 "coding": [
                   {
+                    "code": "CY",
                     "display": "Welsh",
-                    "system": "https://fhir.hl7.org.uk/CodeSystem/UKCore-HumanLanguage"
+                    "system": "https://fhir.nhs.wales/CodeSystem/wpas-spoken-language"
                   }
                 ]
-              },
-              "preferred": true
+              }
+            }
+          ],
+          "extension": [
+            {
+              "url": "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-EthnicCategory",
+              "valueCodeableConcept": {
+                "coding": [
+                  {
+                    "code": "A",
+                    "display": "White - British",
+                    "system": "https://fhir.nhs.wales/CodeSystem/wpas-ethnicity"
+                  }
+                ],
+                "text": "White - British"
+              }
             }
           ],
           "gender": "male",
@@ -1295,23 +2165,40 @@
           ],
           "meta": {
             "profile": [
-              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
             ]
           },
           "name": [
             {
               "family": "Bevan",
               "given": [
-                "Aneurin",
-                "Nye"
-              ],
-              "prefix": [
-                "Mr"
+                "Aneurin Nye"
               ],
               "use": "official"
             }
           ],
-          "resourceType": "Patient"
+          "resourceType": "Patient",
+          "telecom": [
+            {
+              "system": "phone",
+              "use": "home",
+              "value": "07555566771-2"
+            },
+            {
+              "system": "phone",
+              "use": "work",
+              "value": "07555566771-1"
+            },
+            {
+              "system": "phone",
+              "use": "mobile",
+              "value": "07555566771-3"
+            },
+            {
+              "system": "email",
+              "value": "simphel@aol.com"
+            }
+          ]
         }
       },
       {
@@ -1320,25 +2207,37 @@
           "code": {
             "coding": [
               {
-                "code": "ORTHO",
-                "display": "Referral"
+                "code": "REFERRAL",
+                "display": "Referral",
+                "system": "https://fhir.nhs.wales/CodeSystem/proms-event"
               }
             ]
           },
+          "doNotPerform": false,
           "id": "00000000-0000-4000-8000-000000000003",
           "identifier": [
             {
-              "system": "https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-servicerequest",
+              "system": "https://fhir.nhs.wales/Id/wpas-servicerequest",
               "value": "7A22867970"
             }
           ],
-          "intent": "plan",
+          "intent": "order",
           "meta": {
             "profile": [
               "https://fhir.hl7.org.uk/StructureDefinition/UKCore-ServiceRequest"
             ]
           },
           "occurrenceDateTime": "2024-06-12T00:00:00Z",
+          "reasonCode": [
+            {
+              "coding": [
+                {
+                  "code": "ORTHO",
+                  "system": "https://fhir.nhs.wales/CodeSystem/wpas-event-pathway"
+                }
+              ]
+            }
+          ],
           "requester": {
             "reference": "urn:uuid:00000000-0000-4000-8000-000000000004",
             "type": "PractitionerRole"
@@ -1357,8 +2256,8 @@
           "id": "00000000-0000-4000-8000-000000000004",
           "identifier": [
             {
-              "system": "https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-practitionerrole",
-              "value": "31688553"
+              "system": "https://fhir.hl7.org.uk/Id/gmc-number",
+              "value": "G7654321"
             }
           ],
           "location": [
@@ -1399,6 +2298,10 @@
           "id": "00000000-0000-4000-8000-000000000005",
           "identifier": [
             {
+              "system": "https://fhir.nhs.wales/Id/wpas-practitioner",
+              "value": "HANJO"
+            },
+            {
               "system": "https://fhir.hl7.org.uk/Id/gmc-number",
               "value": "G7654321"
             }
@@ -1410,10 +2313,7 @@
           },
           "name": [
             {
-              "family": "L",
-              "given": [
-                "ARDERN-JONES"
-              ]
+              "text": "ARDERN-JONES L"
             }
           ],
           "resourceType": "Practitioner"
@@ -1422,11 +2322,12 @@
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
         "resource": {
+          "active": true,
           "id": "00000000-0000-4000-8000-000000000006",
           "identifier": [
             {
               "system": "https://fhir.nhs.uk/Id/ods-organization-code",
-              "value": "7A1"
+              "value": "X98"
             }
           ],
           "meta": {
@@ -1434,7 +2335,7 @@
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
             ]
           },
-          "name": "BETSI CADWALADR UNIVERSITY LHB",
+          "name": "Hywel Dda University Health Board",
           "resourceType": "Organization"
         }
       },
@@ -1442,13 +2343,14 @@
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000007",
         "resource": {
           "address": {
-            "postalCode": "LL57 2PW"
+            "postalCode": "LL57 2PW",
+            "text": "YSBYTY GWYNEDD, PENRHOSGARNEDD, BANGOR, GWYNEDD, LL57 2PW LL57 2PW"
           },
           "id": "00000000-0000-4000-8000-000000000007",
           "identifier": [
             {
               "system": "https://fhir.nhs.wales/Id/wrts-location-identifier",
-              "value": "YSBYTY GWYNEDD, PENRHOSGARNEDD, BANGOR, GWYNEDD, LL57 2PW"
+              "value": "W95001"
             }
           ],
           "meta": {
@@ -1456,8 +2358,203 @@
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
             ]
           },
-          "name": "YSBYTY GWYNEDD",
-          "resourceType": "Location"
+          "resourceType": "Location",
+          "status": "active"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "RESCHEDULE_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/appointment-reschedule",
+          "destination": [
+            {
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "PREOP-AR",
+            "display": "Appointment Reschedule",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Gareth Jones",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Appointment"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "display": "Hywel Dda University Health Board",
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "active": true,
+          "address": [
+            {
+              "postalCode": "SA2 8QA"
+            }
+          ],
+          "birthDate": "1960-01-20",
+          "gender": "male",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434766134"
+            },
+            {
+              "system": "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
+              "value": "SB0011300"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Jones",
+              "given": [
+                "Gareth"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "end": "2024-08-22T16:30:00Z",
+          "id": "00000000-0000-4000-8000-000000000003",
+          "identifier": [
+            {
+              "system": "https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-appointment",
+              "value": "ANK-7A22867983"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Appointment"
+            ]
+          },
+          "participant": [
+            {
+              "actor": {
+                "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+                "type": "Patient"
+              },
+              "status": "tentative"
+            },
+            {
+              "actor": {
+                "reference": "urn:uuid:00000000-0000-4000-8000-000000000004",
+                "type": "Practitioner"
+              },
+              "status": "accepted"
+            }
+          ],
+          "resourceType": "Appointment",
+          "serviceType": [
+            {
+              "coding": [
+                {
+                  "display": "Trauma and Orthopaedics"
+                }
+              ]
+            }
+          ],
+          "start": "2024-08-22T16:30:00Z",
+          "status": "booked"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.wales/Id/wpas-practitioner",
+              "value": "DAVIP"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Practitioner"
+            ]
+          },
+          "name": [
+            {
+              "text": "Price, David"
+            }
+          ],
+          "resourceType": "Practitioner"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "active": true,
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "X98"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "Hywel Dda University Health Board",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "address": {
+            "postalCode": "SA6 6NL",
+            "text": "MORRISTON HOSPITAL, SWANSEA, SA6 6NL SA6 6NL"
+          },
+          "id": "00000000-0000-4000-8000-000000000006",
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "resourceType": "Location",
+          "status": "active"
         }
       }
     ],
@@ -1472,7 +2569,7 @@
           "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/procedure",
           "destination": [
             {
-              "endpoint": "https://collect.promptlyhealth.com/fhir",
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
               "name": "FHIR Promptly Collect"
             }
           ],
@@ -1500,17 +2597,20 @@
           },
           "resourceType": "MessageHeader",
           "sender": {
+            "display": "Hywel Dda University Health Board",
             "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
             "type": "Organization"
           },
           "source": {
-            "endpoint": "https://wpas-source.invalid/system-id/149"
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
           }
         }
       },
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
         "resource": {
+          "active": true,
           "address": [
             {
               "postalCode": "CF10 1EP"
@@ -1531,7 +2631,7 @@
           ],
           "meta": {
             "profile": [
-              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Patient"
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
             ]
           },
           "name": [
@@ -1578,7 +2678,7 @@
           "id": "00000000-0000-4000-8000-000000000004",
           "identifier": [
             {
-              "system": "https://fhir.hl7.org.uk/Id/gmc-number",
+              "system": "https://fhir.nhs.wales/Id/wpas-practitioner",
               "value": "JONMG"
             }
           ],
@@ -1589,10 +2689,7 @@
           },
           "name": [
             {
-              "family": "Morgan",
-              "given": [
-                "James"
-              ]
+              "text": "Morgan, James"
             }
           ],
           "resourceType": "Practitioner"
@@ -1601,11 +2698,12 @@
       {
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
         "resource": {
+          "active": true,
           "id": "00000000-0000-4000-8000-000000000005",
           "identifier": [
             {
               "system": "https://fhir.nhs.uk/Id/ods-organization-code",
-              "value": "7A4"
+              "value": "X98"
             }
           ],
           "meta": {
@@ -1613,7 +2711,7 @@
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
             ]
           },
-          "name": "7A4",
+          "name": "Hywel Dda University Health Board",
           "resourceType": "Organization"
         }
       },
@@ -1621,22 +2719,367 @@
         "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
         "resource": {
           "address": {
-            "postalCode": "CF14 4XW"
+            "postalCode": "CF14 4XW",
+            "text": "UNIVERSITY HOSPITAL OF WALES, HEATH PARK, CARDIFF, CF14 4XW CF14 4XW"
           },
           "id": "00000000-0000-4000-8000-000000000006",
-          "identifier": [
-            {
-              "system": "https://fhir.nhs.wales/Id/wrts-location-identifier",
-              "value": "UNIVERSITY HOSPITAL OF WALES, HEATH PARK, CARDIFF, CF14 4XW"
-            }
-          ],
           "meta": {
             "profile": [
               "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
             ]
           },
-          "name": "UNIVERSITY HOSPITAL OF WALES",
-          "resourceType": "Location"
+          "resourceType": "Location",
+          "status": "active"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "SURGERY_PERF_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/surgery",
+          "destination": [
+            {
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "SURGERY-PERF",
+            "display": "Surgery Performed",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Ifor Rees",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Procedure"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "display": "Hywel Dda University Health Board",
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "active": true,
+          "address": [
+            {
+              "postalCode": "CF10 1EP"
+            }
+          ],
+          "birthDate": "1968-02-11",
+          "gender": "male",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434766118"
+            },
+            {
+              "system": "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
+              "value": "CV0044318"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Rees",
+              "given": [
+                "Ifor"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "code": {
+            "coding": [
+              {
+                "code": "ORTHO",
+                "display": "Procedure performed"
+              }
+            ]
+          },
+          "id": "00000000-0000-4000-8000-000000000003",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Procedure"
+            ]
+          },
+          "performedDateTime": "2024-07-21T10:00:00Z",
+          "resourceType": "Procedure",
+          "status": "completed",
+          "subject": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+            "type": "Patient"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.wales/Id/wpas-practitioner",
+              "value": "JONMG"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Practitioner"
+            ]
+          },
+          "name": [
+            {
+              "text": "Morgan, James"
+            }
+          ],
+          "resourceType": "Practitioner"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "active": true,
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "X98"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "Hywel Dda University Health Board",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "address": {
+            "postalCode": "CF14 4XW",
+            "text": "UNIVERSITY HOSPITAL OF WALES, HEATH PARK, CARDIFF, CF14 4XW CF14 4XW"
+          },
+          "id": "00000000-0000-4000-8000-000000000006",
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "resourceType": "Location",
+          "status": "active"
+        }
+      }
+    ],
+    "resourceType": "Bundle",
+    "type": "message"
+  },
+  "SURGERY_PROC_MESSAGE": {
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "resource": {
+          "definition": "https://fhir.promptly.health/wpas/MessageDefinition/wpas/procedure",
+          "destination": [
+            {
+              "endpoint": "https://wpas-fhir.stg.labs.promptly.health/fhir/r4/$process-message",
+              "name": "FHIR Promptly Collect"
+            }
+          ],
+          "eventCoding": {
+            "code": "SURGERY-PROC",
+            "display": "Procedure Performed",
+            "system": "https://fhir.promptly.health/wpas/CodeSystem/wpas-event-codes"
+          },
+          "focus": [
+            {
+              "display": "Megan Williams",
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+              "type": "Patient"
+            },
+            {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003",
+              "type": "Procedure"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "meta": {
+            "profile": [
+              "https://fhir.promptly.health/wpas/StructureDefinition/wpas-messageheader"
+            ]
+          },
+          "resourceType": "MessageHeader",
+          "sender": {
+            "display": "Hywel Dda University Health Board",
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005",
+            "type": "Organization"
+          },
+          "source": {
+            "endpoint": "https://fhir.nhs.uk/source-system/wpas/149",
+            "name": "Hywel Dda University Health Board"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "resource": {
+          "active": true,
+          "address": [
+            {
+              "postalCode": "CF10 1EP"
+            }
+          ],
+          "birthDate": "1975-06-30",
+          "gender": "female",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/nhs-number",
+              "value": "9434766100"
+            },
+            {
+              "system": "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
+              "value": "CV0044300"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/wpas-patient"
+            ]
+          },
+          "name": [
+            {
+              "family": "Williams",
+              "given": [
+                "Megan"
+              ],
+              "use": "official"
+            }
+          ],
+          "resourceType": "Patient"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+        "resource": {
+          "code": {
+            "coding": [
+              {
+                "code": "ORTHO",
+                "display": "Procedure performed"
+              }
+            ]
+          },
+          "id": "00000000-0000-4000-8000-000000000003",
+          "meta": {
+            "profile": [
+              "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Procedure"
+            ]
+          },
+          "performedDateTime": "2024-07-20T09:30:00Z",
+          "resourceType": "Procedure",
+          "status": "completed",
+          "subject": {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002",
+            "type": "Patient"
+          }
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+        "resource": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.wales/Id/wpas-practitioner",
+              "value": "JONMG"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Practitioner"
+            ]
+          },
+          "name": [
+            {
+              "text": "Morgan, James"
+            }
+          ],
+          "resourceType": "Practitioner"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+        "resource": {
+          "active": true,
+          "id": "00000000-0000-4000-8000-000000000005",
+          "identifier": [
+            {
+              "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+              "value": "X98"
+            }
+          ],
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization"
+            ]
+          },
+          "name": "Hywel Dda University Health Board",
+          "resourceType": "Organization"
+        }
+      },
+      {
+        "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+        "resource": {
+          "address": {
+            "postalCode": "CF14 4XW",
+            "text": "UNIVERSITY HOSPITAL OF WALES, HEATH PARK, CARDIFF, CF14 4XW CF14 4XW"
+          },
+          "id": "00000000-0000-4000-8000-000000000006",
+          "meta": {
+            "profile": [
+              "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location"
+            ]
+          },
+          "resourceType": "Location",
+          "status": "active"
         }
       }
     ],
@@ -1644,6 +3087,6 @@
     "type": "message"
   },
   "UNROUTABLE_MESSAGE": {
-    "__error__": "ValueError: Cannot route WPAS message: eventCode='UNKNOWN_TYPE', root='PromsEventRequest'. Expected one of: ['CANCELLED', 'INPATIENT', 'PREOP', 'PREREAD', 'REFERRAL', 'SURGERY']"
+    "__error__": "Cannot route WPAS message: eventCode='UNKNOWN_TYPE', root='PromsEventRequest'. Expected one of: ['CANCELLED', 'INPATIENT', 'PREOP', 'PREOP-AR', 'PREOP-AS', 'PREOP-VIS', 'PREREAD', 'REFERRAL', 'SURGERY', 'SURGERY-DN', 'SURGERY-PERF', 'SURGERY-PROC']"
   }
 }

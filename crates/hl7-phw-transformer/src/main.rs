@@ -15,6 +15,9 @@ use std::process::ExitCode;
 
 use hl7_phw_transformer::Phw;
 
+/// Start the shared receive loop around [`Phw`]. Exits non-zero only if the
+/// async runtime cannot start; configuration problems are reported by the
+/// loop itself (`spec/09-transformers.md` §1.1).
 fn main() -> ExitCode {
     // Before Tokio spawns any thread; see `ihb_fields::timestamp`.
     ihb_fields::timestamp::capture_local_offset();

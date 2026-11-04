@@ -1,0 +1,90 @@
+# Upstream sync — Python `0ae06f4` (23 Oct 2026)
+
+The Rust workspace was written against the Python as it stood around
+**21–24 Aug 2026** (it has `hl7-soap-server` and the PROMs transformer; it
+has no `rest_server`, which landed 26 Aug). The Python has since taken about
+100 commits. This file lists what changed, what it means here, and what has
+been ported. `spec/` stays the source of truth: each item below becomes a
+spec clause **before** it becomes code.
+
+Baseline used for the diff: `10fe237` (19 Aug), deliberately early so that
+nothing in the gap is missed.
+
+## Ported
+
+| Upstream | Rust | Spec |
+| --- | --- | --- |
+| `62b8c34` sender side: AE/AR/INVALID classification, `DeadLetterMessage`, `messages_nack_ae`/`_ar`, `messages_retry_attempt` | `ihb-sender` `Verdict::Nack`, `Settlement`; `ihb-bus` `LiveReceiver::dead_letter`; `hl7-sender` `ack::evaluate`; `ihb-telemetry` constants | `10-senders.md` §3.7.1, `04-observability.md` §3.1 |
+| `hl7_sender` config; `387b20a` | `hl7-sender`: queue or topic ingress, `INGRESS_ACCEPT_ANY_SESSION`, `REPLAY_SESSION_ID`, per-message store session; store queue optional for both queue senders. `hl7-subscription-sender`'s old `queue_receiver("topic/sub")` is replaced by a real subscription receiver. Health-check-first **not** ported (`02` §6.1.3) | `ihb-sender` `Variant::Hl7`, `ihb-bus` `next_subscription_session_receiver` | `02-configuration.md` §6.1.1–§6.4 |
+| `bfe8878` transformer topic ingress, `EGRESS_TOPIC_NAME` | `ihb-transformer` `Config::{ingress,egress}`, `ihb-bus` `LiveBus::plain_subscription_receiver` | `02-configuration.md` §5.2 |
+| `mock_receivers/hl7_topic_mock_receiver` | `hl7-mock-receiver`: second binary `hl7-topic-mock-receiver`, `topic::TopicConfig`; topic optional, log-only without a connection. Deviation: NACKs are answered without forwarding, as the queue mock does (Python forwards first). Pipeline `hl7topicmockreceiverrust-build.yml` | `11-mock-receivers.md` §5, `02-configuration.md` §8.1a |
+| `transformers/hl7_wds_transformer` | new `hl7-wds-transformer`: A28/A31 pass through, else `TransformError::Rejected` (new, verbatim text); pipeline added | `09-transformers.md` §7 |
+| `transformers/hl7_lims_wrrs_transformer` (`#418`, `#429`, `#431`) | new `hl7-lims-wrrs-transformer`: classifies `A31`/`A40` into `LIMS_NHS_ID_UPDATE` / `ADT_A40` and fans out one unchanged copy per rule, with deterministic per-path message ids; own receive loop (the shared runtime is one in, one out); `MAX_BATCH_SIZE` defaults to 1. Local: env file, classified topic with `PT5M` duplicate detection, Compose service (own profile `lims-to-wrrs`), `lims-trrr-hl7-sender.env` and service. **Not ported:** the LIMS queue-to-topic migration, so the LIMS topic the transformer and TRRR sender subscribe to is not fed locally and its two subscriptions are not in the emulator config. Deviation: this workspace's `xml_to_er7` keeps empty components, so the compacted layout is built by hand in the tests | `09-transformers.md` §10 |
+| `senders/db_sender` (`#422`, `#433`) | new `db-sender`: topic subscription to stored procedure (`EXEC proc @P1, @P2` in a transaction); transient abandons, fatal dead-letters `StoredProcedureExecutionFailed`; server messages sanitised; MSH-only logging (log lines carry the control id, not the MSH text). Deviations: `DB_ENCRYPT=Yes` and managed identity are startup failures (no TLS backend, `12` §5.8); procedure name validated; SQLSTATE is `UNKNOWN` (TDS has none). Local: `wrrs-stmsg-dbsender.env`, `sql/init-drs-db.sql` (applied by hand), Compose service, profile `risp-to-wrrs`. **Not run:** against a real SQL Server | `10-senders.md` §7 |
+| `shared_libs/wrds_service` | new `wrds-service` library: `GetResultSet` SOAP client over hyper + rustls (mTLS, DTD refused, fixture mode), `to_code` | `09-transformers.md` §9 |
+| `transformers/hl7_core_reference_transformer` | new `hl7-core-reference-transformer`: six PID fields via one WRDS lookup; fails closed on a WRDS error; merge-trigger `PID` found on the flat parse; pipeline added | `09-transformers.md` §8 |
+| `senders/soap_sender` `SOAP_ENVELOPE_FORMAT=wis` (`0f0164b`; needed by the WDS flow) | `soap-sender` `envelope::{Format, wrap_wis}`, queue variant only, as upstream | `10-senders.md` §4.6 |
+| `lookup_service` (`b835acb`, `0ae06f4`) | new `lookup-service` (lib + bin), **Phase 1, not production ready** as upstream: keys and canonical-key normalisation, `Cosmos` id encoding (hashed form byte-compatible), CSV parser and mapping engine, TTL/preload resolver, file store over seed data (compiled into the binary), seed import, JSON API, askama pages, Compose service and `local/lookup-service.env`. **Not ported:** the Cosmos store and its tests (`COSMOS_ENDPOINT` set refuses to start, so no deployed instance is writable); `/docs` and `/openapi.json`; the vendored Inter font and Bootstrap Icons; `scripts/latency_check.py`. Deviations: `invalid_request` replaces FastAPI's own 422 body; `LOOKUP_SEED_DIR` unset means embedded seed; no ADO pipeline (upstream has none; the binary is in `verify-pipelines`' `NOT_SERVICES`). An in-memory writable store exists for tests only | `20-lookup-service.md` |
+| `senders/hl7_subscription_sender`, `soap_subscription_sender` (verified, no change) | Compared config, ack classification (AA/CA/AE/AR/INVALID), dead-letter reason and description, NACK metrics, batch window, lazy MLLP connect, SOAP ack rules: all match. Known gaps unchanged: health-check-first (`02` §6.1.3), `SOAP_CLIENT_CERT_PATH`/`https` in `soap-sender` | `10-senders.md` §3.7, §4 |
+| `c17b134`, `15a751f` `hl7_message_processor` | `ihb-validation`: `trigger_map` (193-structure trigger table), `grammar` (XSD to recursive grammar, modular + self-contained; greedy matcher), `resolver` (version/structure to XSD), `schemas/2_5_1/{OMG_O19,ORU_R01}` vendored. hl7apy-native `validate_hl7_message` and the hl7apy converter **not** ported (no Rust hl7apy; `hl7-2` conversion/§6 cover it); contract recorded | `06-validation.md` §10 |
+| `78f2d23` Cosmos container `dashboard` + `type` discriminator | `dashboard`: default `COSMOS_CONTAINER=dashboard`; `alarm::documents` (`stamp`/`strip`, six `type`s); `AlarmStore` gains `documents`/`upsert_document`/`create_document`/`delete_document` (Cosmos query/upsert/create/delete, `InMemory`); `state_document` typed. `main` now actually builds the Cosmos store (it always passed `Disabled`). `spec/02` still says `alarms` (not mine to edit) | `15-dashboard.md` §10.1 |
+| `5eae123` scheduled alarm pauses | `dashboard::alarm::pause` (scopes rule/flows/all, UK-time validation, status, retention), `rules::evaluate_all_with_pauses`, `/alarms/pauses`, `/api/alarm-pauses[/options|/{id}/cancel]`, `pause_summary`, row pause fields. **Not ported:** `/alarmN/pause\|unpause` shims, per-flow alarm config / by-flow screens (no alarm config UI exists here), flow-page badges, seed script | `15-dashboard.md` §10.2 |
+| `e0c9d88` Contacts page | `dashboard::contacts`, `csv`, `/contacts`, `/api/contacts*`, `CONTACT_RETENTION_DAYS`, daily purge. Deviations: CSV import body is `text/csv` not multipart; flow ids validated against the closed `FLOWS`. **Not ported:** contacts on the Flows page | `15-dashboard.md` §10.3 |
+| `4b4f589`, `326b3ec`, `cdde18d` Network Test + endpoint upload | `dashboard::network_test`, `flow_sources`, `/network-test[/config]`, `/api/network-test/*` (run, history + delete, list with description, sources CRUD, CSV import). Runs inside the dashboard; the separate `network_test_app` is an exec-into container with no dashboard behaviour and is **not** ported. Destination picker not ported (needs discovery, `§3.1`). Finding recorded: unauthenticated probe | `15-dashboard.md` §10.4 |
+| `f7da495` topics on the dashboard | `dashboard::topics`, `Observatory::topics`, ARM topics/subscriptions, `/service-bus` section, `topics` + `namespace_kpis` on `/api/servicebus-metrics`. **Not ported:** per-flow topic health/ownership, consumer-app discovery, entity filters on Messages/throughput (all need Container App discovery + topic names in `FLOWS`) | `15-dashboard.md` §10.5 |
+| `daf7fdb` alarms operator guide | `crates/dashboard/docs/working_with_alarms.md`, written for this port's pages, no screenshots; the two seed-rule/modal fixes are Python-UI defects with no counterpart | `15-dashboard.md` §10.6 |
+| `45751ba` BusWatch aligned with dashboard | `buswatch`: dark/light theme with override, refresh bar (last updated, Refresh now, optional auto refresh, in-place swap), `topic:subscription` discovery and live reading (`discover_subscriptions`, `split_subscription_entity`). Bootstrap/icons/Inter **not** vendored. Emulator-backed subscription read not run | `14-buswatch.md` §2.2.1, §7.5 |
+| `rest_server` (`26 Aug`+) incl. `e090e23`; `hl7_rest_server` (retired upstream, same pipeline) | `rest-server` (`generic` + `hl7` pipelines, one image); `hl7-rest-server` (the HL7 pipeline as library and standalone binary). `ihb-validation`: `xsd::validate_file`, `resolver::custom_schema`. `pipeline-ado/{rest,hl7rest}serverrust-build.yml`, `local/{rest-server-lims,rest-server-risp,hl7-rest-server}.env`, Compose `rest-server`. Deviations: no Swagger/OpenAPI; `hl7apy` validator is `hl7-2` standard validation and is more lenient; RISP ORU/OMG checked by grammar, not XSD; `hl7-xsd` via the flow dictionary | `19-rest-servers.md`, `02-configuration.md` §11-§12, `06-validation.md` §11 |
+| `d9cc216`, `b2d0978`, `2b26c7f`, `9e797ac`, `7157ee3`, `03a11bf`, `8c1d012` (parts), `4c7f006`, `8e0d25a`: the queue to topic migrations for RISP, CAV Paris and Mosaiq. **Not "env files and Compose, no new code"** as first recorded: they changed behaviour | **Code:** `hl7-server` `validate::check_paris` (`MSH-9.2` in A28/A31/A40, two new messages), `routing::{standard_properties, mosaiq_properties, flow_properties}` (standard set on every flow, `mpi`/`wds` add the death fields, `mosaiq` only `SendingApplication`+`TriggerEvent`), `Pipeline` now calls `flow_properties`; `hl7-rest-server` RISP `MessageType` + `MessageStructure` was already ported, now tested for the `MSH-9.3` fallback. **Config:** emulator topics for Paris, Mosaiq, RISP, core-reference, WRRS and the topic mock receiver; `cav-paris-hl7-server.env` (renamed, `cav_paris_hl7_server`), `mosaiq-hl7-server.env`, `rest-server-risp.env`, `hl7-rest-server.env` to `EGRESS_TOPIC_NAME`/`WRRS_TOPIC_NAME`; new `{paris,mosaiq,risp}-mpi-hl7-sender.env`, `mpi-hl7-topic-mock-receiver.env`; Compose: three dedicated `hl7-sender` services, `mpi-hl7-topic-mock-receiver`, `cav-paris-hl7-server`, new `risp-to-mpi` profile. `ihb-e2e` `in_compose` reads Paris and Mosaiq from the topic mock's verifier subscription (compiles under `--features compose`; **not run**, no broker). `hl7_sender` (`8e0d25a`, `387b20a` parts of `8c1d012`) was already ported and is verified. **Deviations:** WDS server and PHW/Chemo/PIMS keep the shared queue (see below); the dashboard needs no change (`4c7f006` edits a Python docstring; `FLOWS` has no sender field); `release-apps.yml` and `docs/MESSAGE_REPLAY.md` / `local/README.md` have no counterpart here, so the replay redirect rule is recorded in the spec and `build-apps.yml` already builds `hl7-sender` once for every instance | `07-hl7-server.md` §3.3.3, §6.2; `03-message-bus.md` §4; `01-architecture.md` §2.1.3-§2.1.4, §4.1; `13-message-replay.md` §4.3; `18-deployment.md` §5.1.1; `19-rest-servers.md` §7.2.1-§7.2.2 |
+| `dev_tools/ultra7` (to `2f86e4b`) | new `ultra7` (lib + bin, developer tool, no image or pipeline): Python-compatible project JSON model, iteration field, format detect/pretty-print, export naming, project store, MLLP/REST/SOAP senders, repeat loop, terminal CLI. **Not ported:** the Tk GUI, themes, `settings.json`, widget tests. Deviations: no `https` (plain `std` HTTP/1.1), JSON keys sorted on format, CLI instead of GUI | `ultra7-test-message-sender.md` |
+| `dev_tools/integration_hub_tester` (to `0ae06f4`) | new `integration-hub-tester` (lib + bin, developer tool, no image or pipeline): twelve plugins (PHW, Chemo, PIMS, core reference, PROMs, HL7 server, REST server, HL7 SOAP server, MLLP frame, ACK classification, SOAP sender and subscription sender) each calling the component's own library, terminal CLI `list`/`samples`/`run`/`mock`. Upstream has **no tests**; the Rust ones are written from the spec. **Not ported:** the Tk GUI and themes; the four `TEMP` PROMs samples (`SURGERY-PERF`, `SURGERY-DN`, `PREOP-VIS`, `PREOP-AR`), because `xml-fhir-proms-transformer` does not route those codes yet (`8a7f6f3`, itself unported). Deviations: real `soap_sender::envelope::{wrap,evaluate}` instead of the plugin's private copy; the HL7 server tab also applies the `07` §7.1 allow-list; PIMS has no reference-data client to build; mock receiver is run in the foreground, not in a new console | `integration-hub-tester-component-preview.md` |
+
+## Not yet ported
+| `62b8c34`, `349351a` server side | `hl7-server`: `ack::build_nack`, `build_generic_nack`, `Rejection::ack_code` (`AR` validation / `AE` everything else), `Pipeline::nack`; oversized and non-UTF-8 frames get a generic `AE`. Deviation: `MSA-3` delimiters are escaped | `07-hl7-server.md` §4.3–§4.3.4 |
+| `330f1a7` | `hl7-mock-receiver`: `reject` trigger answers `AR`, beats `fail` | `11-mock-receivers.md` §1.1 |
+| `bd6c697` | Already true: `hl7-sender` `is_stale` treats a socket error as closed | none needed |
+
+### Left on the shared queue on purpose
+
+`8c1d012` also moved the shared `local-inthub-mpi-sender-ingress` (PHW,
+ChemoCare, PIMS and WDS to MPI) from a queue to a topic. Not done: a queue
+and a topic cannot share a name, and `ihb-e2e`'s `phw_to_mpi` and `in_compose`
+fixtures and `spec/18` §5.3 are written against the queue. Doing it means
+changing those emulator-backed tests, which need a broker (`01-architecture.md`
+§2.1.4). The `hl7-sender` side is already ready (`INGRESS_ACCEPT_ANY_SESSION`).
+
+### Cross-cutting behaviour changes to existing crates
+
+| Upstream | What changed | Rust crate |
+| --- | --- | --- |
+| `servicebus_client_factory.py` | **`MESSAGE_STORE_ENABLED` now defaults to `false`** (was `true`). `session_id` on a store event may be `None` and is sent as `""`. Rust does not read the variable at all today (`spec/02` §2.1.2 describes it; the code keys off `MESSAGE_STORE_QUEUE_NAME`). Needs a decision, because flipping the default changes what a deployment with the queue name set does | `hl7-server`, `hl7-soap-server`, `hl7-sender`, `soap-sender` |
+| `387b20a` | `hl7-soap-server` requires `MESSAGE_STORE_QUEUE_NAME` today; upstream status unchecked | `hl7-soap-server` |
+| `c17b134`, `15a751f` | New `hl7_message_processor` library: XSD-structure validation, trigger/structure map; `hl7_validation` gains `2_5_1`, `2_6` schemas and per-flow dictionaries | `ihb-validation` |
+
+### Services with no Rust equivalent
+
+| Python | Size (src / tests, lines) | Notes |
+| --- | --- | --- |
+| `senders/hl7_subscription_sender` | 562 / 946 | Rust `hl7-sender` already builds a binary of this name; **verify it matches the new behaviour** |
+| `senders/soap_subscription_sender` | 486 / 240 | As above, for `soap-sender` |
+| `mock_receivers/hl7_topic_mock_receiver` | 328 / 301 | |
+| `transformers/hl7_core_reference_transformer` | 235 / 361 | |
+| `transformers/hl7_wds_transformer` | 80 / 55 | |
+| `shared_libs/wrds_service` | 293 / 302 | |
+
+## Known pre-existing gate failures (not caused by this work)
+
+`cargo clippy --workspace --all-targets -- -D warnings` fails on the
+current toolchain (1.99) with `assert!(x.is_empty())` lints in
+`ihb-bus` (`fake.rs`) and `ihb-transformer` (`tests/runtime.rs`). Confirmed
+on a clean tree by stashing this change.
+
+## Port of `9e797ac..HEAD`: lookup service, PIMS and style leftovers
+
+| Upstream | Rust | Spec |
+| --- | --- | --- |
+| `2a220e3` (#426) lookup_service auth Phase 1.5, DEV/TST trial switch, seed layout | `lookup-service`: `security` (bearer RS256 verifier, Easy Auth principal, roles, CSRF), `jwks` (cached key set, blocking HTTPS), `Config` auth settings with the fail-closed rules, `SeedLocation::None` default, `writes_disabled` replaced by 401/403/`csrf_failed`, page banner and CSRF fields, seed fixtures moved to `tests/fixtures/seed`, `local/lookup-seed`. Deviation: unknown-`kid` refresh limited to one per 30 s. **Not ported:** `lookup-build.yml` ADO definition (the crate has none, `20` §10.4) | `20-lookup-service.md` §2.7-§2.9, §7.0, §7.5, §8, §12 |
+| `cd833d6` (#430) trust `X-Forwarded-Proto` | Nothing to change: pages link assets by path. Pinned by a test | `20` §10.6 |
+| `c1d2a74` (#394, never ported) and `04b30e7` (#427) PIMS reference-data enrichment, topics, `MessageType` | `hl7-pims-transformer`: `reference_data` (blocking `http`/`https` client with urllib3 retry rules), `PimsTransformer`, `enrich_pid`, `egress_properties`; `ihb-transformer` gains `Transformer::egress_properties` and `PayloadTransformer::transform_payload_with_properties` (additive). `Pims.map` stays the unenriched mapping for the golden corpus and the tester. Compose: PIMS on topics, `pims-mpi-hl7-sender`, `lookup-service` in the `pims-to-mpi` profile | `09-transformers.md` §1.3.3, §5.10-§5.12 |
+| `servers/hl7_server` `build_pims_properties` | Already true: the standard set carries `MessageType`; test added | `07-hl7-server.md` §6.2 item 5 |
+| `shared_libs/hl7_message_processor` `converter.py` (omit unsupplied components), `message_fields.py` (`get_sendingapp` etc.) | **Not applicable**: the hl7apy-to-XML converter is not ported (see above), and the accessors have no Rust caller | none |

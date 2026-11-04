@@ -13,20 +13,57 @@ use ihb_telemetry::metrics::Metrics;
 
 use crate::throttle::Throttle;
 
-/// The audit text on `MESSAGE_RECEIVED` (§2 step 4).
+/// The audit text on `MESSAGE_RECEIVED` (`spec/10-senders.md` §2 step 4).
+/// Kept verbatim from the Python audit text.
 pub const RECEIVED_AUDIT_TEXT: &str = "Message received for HL7 sending";
+
+/// Which kind of negative acknowledgement an HL7 receiver sent
+/// (`spec/10-senders.md` §3.7.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NackClass {
+    /// `MSA-1 = AE`, or any code that is not recognised: retry.
+    Recoverable,
+    /// Malformed, or no `MSA`: retry, but there is no code to report.
+    Invalid,
+    /// `MSA-1 = AR`: the receiver will never accept it. Dead-letter.
+    Reject,
+}
+
+impl NackClass {
+    /// The word the audit text uses: `AE`, `INVALID` or `AR`.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Recoverable => "AE",
+            Self::Invalid => "INVALID",
+            Self::Reject => "AR",
+        }
+    }
+}
 
 /// Whether the receiver accepted the message.
 ///
-/// Two states, deliberately. `spec/10-senders.md` §3.7.1: a negative
-/// acknowledgement is retried like any other failure, because nothing at
-/// this layer can tell a permanent rejection from a transient one. Service
-/// Bus's `MaxDeliveryCount` is what eventually gives up.
+/// `spec/10-senders.md` §3.7.1: an HL7 negative acknowledgement is a
+/// [`Verdict::Nack`], which distinguishes a permanent rejection (`AR`) from
+/// a retryable one. Every other refusal is [`Verdict::Rejected`], retried
+/// like any other failure, because nothing at that layer can tell the two
+/// apart; Service Bus's `MaxDeliveryCount` is what eventually gives up.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
     /// A positive acknowledgement. Complete the message.
     Accepted {
         /// The acknowledgement, for the audit text of §2 step 11.
+        acknowledgement: String,
+    },
+    /// An HL7 negative acknowledgement, classified (§3.7.1).
+    Nack {
+        /// How to treat it.
+        class: NackClass,
+        /// `MSA-1`, when there was one to read.
+        code: Option<String>,
+        /// Why, for the log line.
+        reason: String,
+        /// The acknowledgement, when there was one to read.
         acknowledgement: String,
     },
     /// Anything else. Abandon it.
@@ -50,6 +87,9 @@ impl Verdict {
     pub fn acknowledgement(&self) -> &str {
         match self {
             Self::Accepted { acknowledgement }
+            | Self::Nack {
+                acknowledgement, ..
+            }
             | Self::Rejected {
                 acknowledgement, ..
             } => acknowledgement,
@@ -102,6 +142,12 @@ impl DeliveryError {
 /// above it — the ordering, the throttle, the store write, the events — is
 /// shared.
 pub trait Delivery: Send {
+    /// `host:port` of the receiver, as a metric dimension on a negative
+    /// acknowledgement. Empty when the transport has no such notion.
+    fn endpoint(&self) -> String {
+        String::new()
+    }
+
     /// Deliver `message` and evaluate what came back.
     ///
     /// The implementation owns its own retry (§3.4, §4.3), because "retry
@@ -120,9 +166,39 @@ pub trait Delivery: Send {
     ) -> impl Future<Output = Result<Verdict, DeliveryError>> + Send;
 }
 
+/// What to do with a message once the pipeline is finished with it.
+///
+/// `Retry` and `DeadLetter` both mean the rest of the batch waits
+/// (`spec/10-senders.md` §3.7.1): the caller abandons it rather than
+/// delivering later messages past an earlier failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Settlement {
+    /// Positively acknowledged. Complete it.
+    Delivered,
+    /// Not delivered. Abandon it, and everything behind it.
+    Retry,
+    /// Rejected for good (`MSA-1 = AR`, `spec/10-senders.md` §3.7.1).
+    /// Dead-letter it, and abandon everything behind it.
+    DeadLetter {
+        /// The dead-letter reason: the acknowledgement code.
+        reason: String,
+        /// The dead-letter description. Names the control and correlation
+        /// ids, never the message.
+        description: String,
+    },
+}
+
+impl Settlement {
+    /// Whether the message was delivered.
+    #[must_use]
+    pub const fn is_delivered(&self) -> bool {
+        matches!(self, Self::Delivered)
+    }
+}
+
 /// Take one received message through §2, in order.
 ///
-/// Returns whether it may be completed.
+/// Returns what to do with it.
 ///
 /// # Steps that are easy to get wrong
 ///
@@ -134,12 +210,18 @@ pub trait Delivery: Send {
 /// oddly and is the Python's behaviour: a rejected message appears as a
 /// `MESSAGE_PROCESSED` whose audit text names the code, not as a
 /// `MESSAGE_FAILED`. The verdict travels in the return value.
+// The body is the numbered step sequence of §2.1 in order. The steps share
+// the delivery, the throttle and the audit context, and several are
+// conditional on earlier ones (step 6 on the attempt count, step 11 on the
+// verdict); splitting them into helpers would hide that order, which is the
+// thing a reader of this function needs to see.
+#[allow(clippy::too_many_lines)]
 pub async fn process_one<D, S>(
     delivery: &mut D,
     message: &Incoming,
     throttle: &mut Throttle,
     context: &Context<'_, S>,
-) -> bool
+) -> Settlement
 where
     D: Delivery,
     S: MessageSink,
@@ -164,7 +246,7 @@ where
             Some(error.validation_result()),
             None,
         );
-        return false;
+        return Settlement::Retry;
     };
 
     // ---- Steps 2 and 3: the received metadata. ---------------------
@@ -195,11 +277,19 @@ where
         // §5.3 already specifies and tests; naming it twice would be two
         // places for one rule to drift.
         if message.is_first_delivery() {
+            // §2.5 — the session the message actually arrived on wins over
+            // the deployment's fallback, so replay routing stays correct
+            // when one consumer takes messages from several sessions.
+            let session = message
+                .session_id
+                .as_deref()
+                .filter(|session| !session.trim().is_empty())
+                .unwrap_or(store_session_id);
             store_message(
                 store,
                 body,
                 &values,
-                store_session_id,
+                session,
                 microservice_id,
                 peer_service,
                 events,
@@ -232,33 +322,110 @@ where
                 Some(error.validation_result()),
                 correlation_id,
             );
-            return false;
+            return Settlement::Retry;
         }
     };
 
-    // ---- Step 10. --------------------------------------------------
-    if verdict.is_accepted() {
-        metrics.message_sent();
+    // ---- Steps 10 and 11. -------------------------------------------
+    match verdict {
+        Verdict::Nack {
+            class,
+            code,
+            reason,
+            ..
+        } => {
+            // §3.7.1 — a negative acknowledgement is a failed delivery, and
+            // says so. The pre-`368` behaviour of logging it as processed
+            // is gone with the single-state verdict.
+            let endpoint = delivery.endpoint();
+            let code_label = code.as_deref().unwrap_or("UNKNOWN");
+            let attributes = [
+                ("ack_code", code_label),
+                ("correlation_id", values.correlation_id.as_str()),
+                ("message_id", message_id.as_str()),
+                ("endpoint", endpoint.as_str()),
+            ];
+            let failure = format!(
+                "{} ACK ({}) received for message {message_id} from {endpoint}",
+                if class == NackClass::Reject {
+                    "Application Reject"
+                } else {
+                    "Negative"
+                },
+                class.label(),
+            );
+            tracing::error!(%reason, "{failure}");
+
+            if class == NackClass::Reject {
+                events.log_message_failed(
+                    body,
+                    &failure,
+                    Some(
+                        "Non-recoverable NACK (AR) - message routed to dead-letter/escalation path",
+                    ),
+                    correlation_id,
+                );
+                metrics.count(ihb_telemetry::metrics::MESSAGES_NACK_AR, 1, &attributes);
+                return Settlement::DeadLetter {
+                    reason: "AR".to_string(),
+                    description: format!(
+                        "Application Reject ACK (AR) for message_id={message_id}, correlation_id={}",
+                        values.correlation_id
+                    ),
+                };
+            }
+
+            events.log_message_failed(
+                body,
+                &failure,
+                Some(&format!(
+                    "Recoverable NACK ({}) - message will be retried",
+                    class.label()
+                )),
+                correlation_id,
+            );
+            if class == NackClass::Recoverable {
+                metrics.count(ihb_telemetry::metrics::MESSAGES_NACK_AE, 1, &attributes);
+                metrics.count(
+                    ihb_telemetry::metrics::MESSAGES_RETRY_ATTEMPT,
+                    1,
+                    &attributes,
+                );
+            }
+            Settlement::Retry
+        }
+        verdict => {
+            // ---- Step 10. -----------------------------------------
+            if verdict.is_accepted() {
+                metrics.message_sent();
+            }
+
+            // ---- Step 11: even when the acknowledgement was negative
+            // (§2.1), for the transports that do not classify it.
+            events.log_message_processed(
+                body,
+                Some(&format!(
+                    "Message sent successfully, received ACK: {}",
+                    verdict.acknowledgement()
+                )),
+                correlation_id,
+            );
+
+            if let Verdict::Rejected { reason, .. } = &verdict {
+                // Not a `MESSAGE_FAILED` — §2.1 is explicit that the event
+                // above is what the Python emits. The log line is where
+                // the reason lives.
+                tracing::warn!(message_id = %message_id, %reason, "the receiver did not accept the message");
+            }
+
+            // ---- Step 12. -----------------------------------------
+            if verdict.is_accepted() {
+                Settlement::Delivered
+            } else {
+                Settlement::Retry
+            }
+        }
     }
-
-    // ---- Step 11: even when the acknowledgement was negative (§2.1).
-    events.log_message_processed(
-        body,
-        Some(&format!(
-            "Message sent successfully, received ACK: {}",
-            verdict.acknowledgement()
-        )),
-        correlation_id,
-    );
-
-    if let Verdict::Rejected { reason, .. } = &verdict {
-        // Not a `MESSAGE_FAILED` — §2.1 is explicit that the event above is
-        // what the Python emits. The log line is where the reason lives.
-        tracing::warn!(message_id = %message_id, %reason, "the receiver did not accept the message");
-    }
-
-    // ---- Step 12. --------------------------------------------------
-    verdict.is_accepted()
 }
 
 /// Everything a sender holds for its lifetime, as against per message.
@@ -283,7 +450,10 @@ pub struct Context<'a, S> {
     pub metrics: &'a Metrics,
 }
 
-/// Step 6 — the audit copy (§2.5).
+/// Step 6 — the audit copy (`spec/10-senders.md` §2.5).
+///
+/// A refusal or failure here is logged and the delivery goes on
+/// (AGENTS.md: a failure to persist is swallowed, a failure to forward is not).
 #[expect(
     clippy::too_many_arguments,
     reason = "every one is a distinct field of the store event; grouping \
@@ -300,6 +470,15 @@ async fn store_message<S: MessageSink>(
     events: &EventLogger,
     correlation_id: Option<&str>,
 ) {
+    // §2.5 — a stored message with no session cannot be replayed onto a
+    // flow. Refused, and logged; the delivery goes on.
+    if session_id.trim().is_empty() {
+        tracing::error!(
+            "Failed to send to message store: a non-empty replay-routing session ID is required"
+        );
+        return;
+    }
+
     // §2.5 — the schema-unaware conversion, and a failure here is not
     // fatal. A message with no XML rendering is still worth storing; the
     // raw payload is what replay uses.
@@ -389,5 +568,90 @@ mod tests {
         };
         assert!(!rejected.is_accepted());
         assert_eq!(rejected.acknowledgement(), "MSA|AE|M1");
+    }
+
+    /// A delivery that always answers with the verdict it was given.
+    struct Canned(Verdict);
+
+    impl Delivery for Canned {
+        fn endpoint(&self) -> String {
+            "mpi.example:2575".to_string()
+        }
+
+        // `Delivery::deliver` is an async trait method; this stub has nothing
+        // to await.
+        #[allow(clippy::unused_async_trait_impl)]
+        async fn deliver(&mut self, _message: &str) -> Result<Verdict, DeliveryError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    async fn settle_with(verdict: Verdict) -> Settlement {
+        let events = EventLogger::new("wf", "ms");
+        let metrics = Metrics::new("wf", "ms", "PHW", "MPI");
+        let context: Context<'_, ihb_bus::fake::FakeSender> = Context {
+            store: None,
+            store_session_id: String::new(),
+            microservice_id: "ms".to_string(),
+            peer_service: "MPI".to_string(),
+            events: &events,
+            metrics: &metrics,
+        };
+        let message = Incoming {
+            body: b"MSH|^~\\&|A|B|C|D|20250505||ADT^A31|M1|P|2.5".to_vec(),
+            message_id: None,
+            session_id: None,
+            properties: ihb_bus::Properties::default(),
+            delivery_count: None,
+            token: ihb_bus::message::Token::fake(1),
+        };
+        let mut throttle = Throttle::per_minute(None).unwrap();
+        process_one(&mut Canned(verdict), &message, &mut throttle, &context).await
+    }
+
+    fn nack(class: NackClass, code: Option<&str>) -> Verdict {
+        Verdict::Nack {
+            class,
+            code: code.map(str::to_string),
+            reason: "Negative ACK".to_string(),
+            acknowledgement: "MSA|..".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_application_reject_is_dead_lettered_not_retried() {
+        // spec/10-senders.md §3.7.1 — the reason is the code, and the
+        // description names ids only; the payload never reaches a
+        // dead-letter queue's metadata.
+        let settlement = settle_with(nack(NackClass::Reject, Some("AR"))).await;
+
+        let Settlement::DeadLetter {
+            reason,
+            description,
+        } = settlement
+        else {
+            panic!("expected a dead-letter, got {settlement:?}")
+        };
+        assert_eq!(reason, "AR");
+        assert!(description.contains("message_id=M1"), "{description}");
+        assert!(!description.contains("ADT"), "{description}");
+    }
+
+    #[tokio::test]
+    async fn a_recoverable_or_invalid_nack_is_retried() {
+        for verdict in [
+            nack(NackClass::Recoverable, Some("AE")),
+            nack(NackClass::Invalid, None),
+        ] {
+            assert_eq!(settle_with(verdict).await, Settlement::Retry);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_positive_acknowledgement_is_delivered() {
+        let accepted = Verdict::Accepted {
+            acknowledgement: "MSA|AA|M1".to_string(),
+        };
+        assert_eq!(settle_with(accepted).await, Settlement::Delivered);
     }
 }

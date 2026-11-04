@@ -1,0 +1,53 @@
+{# `spec/15-dashboard.md` §10.4's Network Test page. #}
+{% extends "base.html" %}
+
+{% block title %}Integration Hub — network test{% endblock %}
+
+{% block content %}
+<p class="muted">Tests a TCP connection from this dashboard's own network. It checks
+  that a host and port can be reached and how quickly; it cannot trace the route.</p>
+
+{% if unavailable %}
+<p class="unavailable">The flow source servers could not be read.</p>
+{% endif %}
+
+<section class="panel">
+  <h2>Test a connection <a href="/network-test/config" style="float:right;font-weight:400">Manage flow source servers</a></h2>
+  <form class="stacked" id="test-form">
+    <label>Flow source server
+      <select name="source">
+        <option value="">— choose, or type below —</option>
+        {% for source in sources %}
+        <option value="{{ source.url }}|{{ source.port }}">{{ source.description }} ({{ source.url }}:{{ source.port }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Host <input type="text" name="host" maxlength="253" required></label>
+    <label>Port <input type="number" name="port" min="1" max="65535" required></label>
+    <div><button type="submit">Run test</button></div>
+    <p class="form-message" id="test-message" role="status"></p>
+  </form>
+  <div class="body" id="test-result" hidden></div>
+</section>
+
+<section class="panel">
+  <h2>Tested endpoints</h2>
+  <div class="body">
+    <table>
+      <thead><tr><th>Endpoint</th><th>Description</th><th>Last result</th><th>Avg ms</th><th>Loss %</th><th></th></tr></thead>
+      <tbody id="endpoints"></tbody>
+    </table>
+    <p class="empty" id="endpoints-empty" hidden>Nothing has been tested yet.</p>
+  </div>
+</section>
+
+<section class="panel" id="history-panel" hidden>
+  <h2 id="history-title">History</h2>
+  <div class="body">
+    <svg id="history-chart" viewBox="0 0 400 80" width="100%" height="80" role="img" aria-label="Average latency over recent tests"></svg>
+    <button class="secondary" id="history-export" type="button">Export CSV</button>
+  </div>
+</section>
+
+<script src="/static/network-test.js"></script>
+{% endblock %}

@@ -21,6 +21,9 @@ use std::collections::BTreeMap;
 
 use time::OffsetDateTime;
 
+use crate::alarm::pause::{
+    Pause, active_for, fields_for, next_scheduled_for, scheduled_fields_for,
+};
 use crate::alarm::store::{AlarmStore, Partition, StoreError};
 use crate::alarm::{Outcome, RuleConfig, RuleState, Status, Trip, evaluate};
 use crate::period::{Period, period_at};
@@ -175,6 +178,11 @@ pub struct Row {
     pub rule: RuleConfig,
     /// What it decided.
     pub outcome: Outcome,
+    /// The pause record holding the rule, when one does (§10.2.9). A rule
+    /// held by a legacy `paused_until` has `Paused` status and no record.
+    pub pause: Option<crate::alarm::pause::PauseFields>,
+    /// The soonest pause that has not started yet (§10.2.9).
+    pub scheduled: Option<crate::alarm::pause::ScheduledFields>,
 }
 
 /// Evaluate every rule in a partition (§5.1.2).
@@ -193,6 +201,31 @@ pub async fn evaluate_all<S, F>(
     store: &S,
     partition: Partition,
     now: OffsetDateTime,
+    measure: F,
+) -> Result<Vec<Row>, StoreError>
+where
+    S: AlarmStore,
+    F: FnMut(&RuleConfig) -> Trip,
+{
+    evaluate_all_with_pauses(store, partition, now, &[], measure).await
+}
+
+/// [`evaluate_all`] with the pause records of `spec/15-dashboard.md` §10.2.
+///
+/// A rule covered by an active pause is `Paused` and is neither measured
+/// nor escalated (§10.2.5). Its state entry is **carried forward
+/// unchanged**: the state document is rewritten whole, so dropping the
+/// entry would forget a cooldown that is still running and the alarm would
+/// re-escalate the moment the pause ended.
+///
+/// # Errors
+///
+/// As [`evaluate_all`].
+pub async fn evaluate_all_with_pauses<S, F>(
+    store: &S,
+    partition: Partition,
+    now: OffsetDateTime,
+    pauses: &[Pause],
     mut measure: F,
 ) -> Result<Vec<Row>, StoreError>
 where
@@ -209,6 +242,32 @@ where
     for rule in rules {
         // §5.1.2 step 1 — a disabled or deleted rule is not evaluated.
         if !rule.is_active() {
+            continue;
+        }
+
+        let alarm_type = partition.as_str();
+        let scheduled = next_scheduled_for(pauses, alarm_type, &rule.id, &rule.workflow_id, now)
+            .map(scheduled_fields_for);
+
+        // §10.2.5 — before the lifecycle, so a paused rule that is also in
+        // alarm shows `paused`: the operator asked for silence.
+        if let Some(pause) = active_for(pauses, alarm_type, &rule.id, &rule.workflow_id, now) {
+            if let Some(kept) = held.get(&rule.id) {
+                next.insert(rule.id.clone(), kept.clone());
+            }
+            let fields = fields_for(pause, now);
+            rows.push(Row {
+                outcome: Outcome {
+                    status: Status::Paused,
+                    state: held.get(&rule.id).cloned(),
+                    escalate: false,
+                    cooldown_remaining: None,
+                    pause_remaining: fields.pause_remaining,
+                },
+                rule,
+                pause: Some(fields),
+                scheduled,
+            });
             continue;
         }
 
@@ -231,7 +290,12 @@ where
             }
         }
 
-        rows.push(Row { rule, outcome });
+        rows.push(Row {
+            rule,
+            outcome,
+            pause: None,
+            scheduled,
+        });
     }
 
     // Written only when something moved. An unconditional write would be a
@@ -579,5 +643,149 @@ mod tests {
         assert_eq!(summary.unknown, 1);
         assert_eq!(summary.healthy, 1);
         assert_eq!(summary.total, 3);
+    }
+
+    // --- §10.2: pause records in the lifecycle ----------------------------
+
+    fn all_pause(start: OffsetDateTime, end: Option<OffsetDateTime>) -> Pause {
+        Pause {
+            pause_id: "p-1".to_string(),
+            scope: crate::alarm::pause::Scope::All,
+            flows: Vec::new(),
+            rules: Vec::new(),
+            start_at: Some(start),
+            end_at: end,
+            reason: "planned maintenance".to_string(),
+            requested_by: "ops".to_string(),
+            created_at: Some(start),
+            cancelled_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_paused_rule_that_would_trip_is_paused_and_does_not_escalate() {
+        // spec/15-dashboard.md §10.2.5.
+        let store = InMemory::new();
+        store.add(
+            Partition::Alarm1,
+            RuleConfig {
+                email_alerts_enabled: true,
+                ..RuleConfig::for_test("phw-to-mpi")
+            },
+        );
+        let pauses = [all_pause(
+            NOW - time::Duration::minutes(10),
+            Some(NOW + time::Duration::minutes(50)),
+        )];
+
+        let rows =
+            evaluate_all_with_pauses(&store, Partition::Alarm1, NOW, &pauses, |_| Trip::Tripped)
+                .await
+                .unwrap();
+
+        assert_eq!(rows[0].outcome.status, Status::Paused);
+        assert!(!rows[0].outcome.escalate);
+        assert_eq!(
+            rows[0].pause.as_ref().map(|p| p.pause_remaining),
+            Some(Some(50.0))
+        );
+        assert!(
+            store.state(Partition::Alarm1).await.unwrap().is_empty(),
+            "a paused rule starts no cooldown"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_paused_rule_is_not_measured() {
+        // §10.2.5 — "not evaluated further".
+        let store = InMemory::new();
+        store.add(Partition::Alarm1, RuleConfig::for_test("phw-to-mpi"));
+        let pauses = [all_pause(NOW - time::Duration::minutes(1), None)];
+        let mut asked = 0;
+
+        evaluate_all_with_pauses(&store, Partition::Alarm1, NOW, &pauses, |_| {
+            asked += 1;
+            Trip::Tripped
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(asked, 0);
+    }
+
+    #[tokio::test]
+    async fn a_running_cooldown_survives_a_pause() {
+        // §10.2.5 — the state document is rewritten whole, so an entry left
+        // out is a cooldown forgotten, and the alarm would re-escalate the
+        // moment the pause ended.
+        let store = InMemory::new();
+        store.add(Partition::Alarm1, RuleConfig::for_test("a"));
+        store.add(Partition::Alarm1, RuleConfig::for_test("b"));
+
+        let cooling = RuleState {
+            last_alarm_at: Some(NOW - time::Duration::minutes(5)),
+            ..RuleState::default()
+        };
+        let mut held = BTreeMap::new();
+        held.insert("a".to_string(), cooling.clone());
+        held.insert("b".to_string(), cooling.clone());
+        store.put_state(Partition::Alarm1, &held).await.unwrap();
+
+        let mut pause = all_pause(NOW - time::Duration::minutes(1), None);
+        pause.scope = crate::alarm::pause::Scope::Rule;
+        pause.rules = vec![crate::alarm::pause::RuleTarget {
+            alarm_type: "alarm1".to_string(),
+            rule_id: "a".to_string(),
+            workflow_id: "a".to_string(),
+        }];
+
+        // `b` returns to healthy, which rewrites the document.
+        evaluate_all_with_pauses(&store, Partition::Alarm1, NOW, &[pause], |_| Trip::Clear)
+            .await
+            .unwrap();
+
+        let after = store.state(Partition::Alarm1).await.unwrap();
+        assert_eq!(after.get("a"), Some(&cooling), "kept through the pause");
+        assert!(
+            !after.contains_key("b"),
+            "healthy still clears (§5.1.2 step 4)"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_ended_pause_no_longer_pauses() {
+        let store = InMemory::new();
+        store.add(Partition::Alarm1, RuleConfig::for_test("phw-to-mpi"));
+        let pauses = [all_pause(
+            NOW - time::Duration::hours(2),
+            Some(NOW - time::Duration::hours(1)),
+        )];
+
+        let rows =
+            evaluate_all_with_pauses(&store, Partition::Alarm1, NOW, &pauses, |_| Trip::Tripped)
+                .await
+                .unwrap();
+
+        assert_eq!(rows[0].outcome.status, Status::Critical);
+        assert!(rows[0].pause.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_rule_notes_the_pause_that_is_about_to_start() {
+        // §10.2.9.
+        let store = InMemory::new();
+        store.add(Partition::Alarm1, RuleConfig::for_test("phw-to-mpi"));
+        let pauses = [all_pause(NOW + time::Duration::hours(3), None)];
+
+        let rows =
+            evaluate_all_with_pauses(&store, Partition::Alarm1, NOW, &pauses, |_| Trip::Clear)
+                .await
+                .unwrap();
+
+        assert_eq!(rows[0].outcome.status, Status::Healthy);
+        assert_eq!(
+            rows[0].scheduled.as_ref().map(|s| s.pause_id.as_str()),
+            Some("p-1")
+        );
     }
 }

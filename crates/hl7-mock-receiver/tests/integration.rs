@@ -121,6 +121,30 @@ async fn read_frame(stream: &mut TcpStream) -> String {
     }
 }
 
+/// Read `count` frames through **one** framer.
+///
+/// [`read_frame`] builds a fresh framer per call, so when two replies arrive
+/// in a single TCP read the second is discarded with it and the next call
+/// waits forever. That made the pipelined test hang about one run in four.
+/// Anything expecting more than one reply on a connection must use this.
+async fn read_frames(stream: &mut TcpStream, count: usize) -> Vec<String> {
+    let mut framer = Framer::new();
+    let mut buffer = [0_u8; 4096];
+    let mut collected = Vec::new();
+    while collected.len() < count {
+        while let Some(frame) = framer.next_frame().unwrap() {
+            collected.push(String::from_utf8(frame).unwrap());
+        }
+        if collected.len() == count {
+            break;
+        }
+        let read = stream.read(&mut buffer).await.unwrap();
+        assert_ne!(read, 0, "the connection closed before a reply arrived");
+        framer.push(&buffer[..read]);
+    }
+    collected
+}
+
 #[tokio::test]
 async fn acknowledges_a_message_and_forwards_it() {
     // spec/11-mock-receivers.md §2.2 and §2.3, first row.
@@ -162,8 +186,8 @@ async fn several_messages_on_one_connection_each_get_a_reply() {
     let mut stream = TcpStream::connect(mock.address).await.unwrap();
     stream.write_all(&pipelined).await.unwrap();
 
-    let first = read_frame(&mut stream).await;
-    let next = read_frame(&mut stream).await;
+    let mut replies = read_frames(&mut stream, 2).await.into_iter();
+    let (first, next) = (replies.next().unwrap(), replies.next().unwrap());
 
     assert!(first.contains("MSA|AA|MSG00001"), "{first}");
     assert!(next.contains("MSA|AA|MSG00002"), "{next}");
@@ -221,7 +245,7 @@ async fn a_queue_that_refuses_the_message_produces_a_rejection() {
     stream.write_all(&encode(MESSAGE.as_bytes())).await.unwrap();
 
     assert!(read_frame(&mut stream).await.contains("MSA|AE|MSG00001"));
-    assert!(mock.bus.all_sent(QUEUE).is_empty());
+    assert_eq!(mock.bus.all_sent(QUEUE), Vec::new());
 
     drop(stream);
     mock.stop().await;

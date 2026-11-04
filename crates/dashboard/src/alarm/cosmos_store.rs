@@ -29,6 +29,7 @@ use ihb_config::Secret;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+use crate::alarm::documents::{ALARM_STATE, stamp, strip};
 use crate::alarm::store::{AlarmStore, Partition, StoreError};
 use crate::alarm::{RuleConfig, RuleState};
 use crate::azure::cosmos::{
@@ -111,7 +112,7 @@ impl CosmosStore {
         verb: &str,
         resource_type: ResourceType,
         resource_link: &str,
-        partition: Partition,
+        partition_key: &str,
     ) -> Result<Vec<(String, String)>, StoreError> {
         let date = cosmos_date(OffsetDateTime::now_utc());
 
@@ -135,7 +136,7 @@ impl CosmosStore {
             // The partition key is a JSON array of one value.
             (
                 "x-ms-documentdb-partitionkey".to_string(),
-                format!("[\"{}\"]", partition.as_str()),
+                format!("[\"{partition_key}\"]"),
             ),
         ])
     }
@@ -151,7 +152,7 @@ impl CosmosStore {
             documents_link(&self.database, &self.container)
         );
         let headers = self
-            .headers("GET", ResourceType::Docs, &link, partition)
+            .headers("GET", ResourceType::Docs, &link, partition.as_str())
             .await?;
         let borrowed: Vec<(&str, &str)> = headers
             .iter()
@@ -216,7 +217,7 @@ impl AlarmStore for CosmosStore {
 
         let link = documents_link(&self.database, &self.container);
         let mut headers = self
-            .headers("POST", ResourceType::Docs, &link, partition)
+            .headers("POST", ResourceType::Docs, &link, partition.as_str())
             .await?;
         headers.push(("x-ms-documentdb-is-upsert".to_string(), "true".to_string()));
 
@@ -237,6 +238,132 @@ impl AlarmStore for CosmosStore {
     fn is_enabled(&self) -> bool {
         true
     }
+
+    async fn documents(&self, partition_key: &str) -> Result<Vec<serde_json::Value>, StoreError> {
+        // A query is a POST to the collection signed with the collection's
+        // link, told apart from a create by its content type (§10.1).
+        let link = documents_link(&self.database, &self.container);
+        let mut headers = self
+            .headers("POST", ResourceType::Docs, &link, partition_key)
+            .await?;
+        headers.push(("x-ms-documentdb-isquery".to_string(), "true".to_string()));
+        // `-1` lets the server size the page; see §10.1.5 for what is not
+        // followed.
+        headers.push(("x-ms-max-item-count".to_string(), "-1".to_string()));
+
+        let borrowed: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        let url = documents_url(&self.endpoint, &self.database, &self.container);
+
+        match self
+            .client
+            .post_query_with(&url, &borrowed, query_body())
+            .await
+        {
+            Ok(response) => Ok(parse_query_response(&response)),
+            Err(error) => Err(StoreError::Unavailable(error.to_string())),
+        }
+    }
+
+    async fn upsert_document(
+        &self,
+        partition_key: &str,
+        id: &str,
+        doc_type: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), StoreError> {
+        let link = documents_link(&self.database, &self.container);
+        let mut headers = self
+            .headers("POST", ResourceType::Docs, &link, partition_key)
+            .await?;
+        headers.push(("x-ms-documentdb-is-upsert".to_string(), "true".to_string()));
+
+        let borrowed: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        let body = stamp(partition_key, id, doc_type, payload).to_string();
+        let url = documents_url(&self.endpoint, &self.database, &self.container);
+
+        match self.client.post_json_with(&url, &borrowed, body).await {
+            Ok(_) => Ok(()),
+            Err(error) => Err(StoreError::Unavailable(error.to_string())),
+        }
+    }
+
+    async fn create_document(
+        &self,
+        partition_key: &str,
+        id: &str,
+        doc_type: &str,
+        payload: &serde_json::Value,
+    ) -> Result<bool, StoreError> {
+        // No `is-upsert` header: Cosmos then answers `409 Conflict` for an
+        // id that exists, which is the whole point (§10.4.6).
+        let link = documents_link(&self.database, &self.container);
+        let headers = self
+            .headers("POST", ResourceType::Docs, &link, partition_key)
+            .await?;
+        let borrowed: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        let body = stamp(partition_key, id, doc_type, payload).to_string();
+        let url = documents_url(&self.endpoint, &self.database, &self.container);
+
+        match self.client.post_json_with(&url, &borrowed, body).await {
+            Ok(_) => Ok(true),
+            Err(HttpError::Status { code: 409, .. }) => Ok(false),
+            Err(error) => Err(StoreError::Unavailable(error.to_string())),
+        }
+    }
+
+    async fn delete_document(&self, partition_key: &str, id: &str) -> Result<(), StoreError> {
+        let link = format!(
+            "{}/docs/{id}",
+            documents_link(&self.database, &self.container)
+        );
+        let headers = self
+            .headers("DELETE", ResourceType::Docs, &link, partition_key)
+            .await?;
+        let borrowed: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        let url = document_url(&self.endpoint, &self.database, &self.container, id);
+
+        match self.client.delete_with(&url, &borrowed).await {
+            Ok(_) => Ok(()),
+            // Already gone is the outcome that was asked for.
+            Err(HttpError::Status { code: 404, .. }) => Ok(()),
+            Err(error) => Err(StoreError::Unavailable(error.to_string())),
+        }
+    }
+}
+
+/// The query for every document in the partition named by the request's
+/// partition-key header.
+///
+/// No `WHERE`: the partition header already scopes it, and a `type` filter
+/// would hide a document written before the discriminator existed.
+#[must_use]
+pub fn query_body() -> String {
+    serde_json::json!({"query": "SELECT * FROM c", "parameters": []}).to_string()
+}
+
+/// The documents in a Cosmos query response, routing metadata stripped.
+///
+/// `{"Documents": [...], "_count": n}`. A response without `Documents` is
+/// no documents rather than a panic.
+#[must_use]
+pub fn parse_query_response(response: &serde_json::Value) -> Vec<serde_json::Value> {
+    response
+        .get("Documents")
+        .and_then(serde_json::Value::as_array)
+        .map(|documents| documents.iter().map(strip).collect())
+        .unwrap_or_default()
 }
 
 impl CosmosStore {
@@ -277,6 +404,9 @@ pub fn state_document(
     serde_json::json!({
         "id": STATE_DOC_ID,
         "pk": partition.as_str(),
+        // §10.1.2 — storage-managed, so the mixed container can be browsed
+        // by kind.
+        "type": ALARM_STATE,
         "rules": rules,
     })
 }
@@ -486,6 +616,46 @@ mod tests {
         assert_eq!(document["id"], "state");
         assert_eq!(document["pk"], "alarm2");
         assert!(document["rules"].is_object());
+    }
+
+    #[test]
+    fn a_state_document_is_typed() {
+        // spec/15-dashboard.md §10.1.2.
+        let document = state_document(Partition::Alarm3, &BTreeMap::new());
+
+        assert_eq!(document["type"], "alarm_state");
+    }
+
+    #[test]
+    fn a_query_response_yields_its_documents_without_routing_metadata() {
+        // §10.1.3 — `id`, `pk`, `type` and the `_` properties are storage's.
+        let response = serde_json::json!({
+            "Documents": [
+                {"id": "a", "pk": "contacts", "type": "contact", "_rid": "x", "contact_id": "a"},
+                {"id": "b", "pk": "contacts", "type": "contact", "contact_id": "b"}
+            ],
+            "_count": 2
+        });
+
+        let documents = parse_query_response(&response);
+
+        assert_eq!(documents.len(), 2);
+        assert_eq!(documents[0], serde_json::json!({"contact_id": "a"}));
+    }
+
+    #[test]
+    fn a_query_response_without_documents_is_none_not_a_panic() {
+        assert!(parse_query_response(&serde_json::json!({})).is_empty());
+        assert!(parse_query_response(&serde_json::Value::Null).is_empty());
+    }
+
+    #[test]
+    fn the_query_has_no_type_filter() {
+        // §10.1 — a document written before the discriminator existed has
+        // no `type`, and filtering on it would hide the document.
+        let body: serde_json::Value = serde_json::from_str(&query_body()).unwrap();
+
+        assert_eq!(body["query"], "SELECT * FROM c");
     }
 
     #[test]

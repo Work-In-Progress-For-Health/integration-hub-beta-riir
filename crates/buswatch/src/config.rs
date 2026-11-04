@@ -41,17 +41,22 @@ pub const DEFAULT_PARALLELISM: usize = 2;
 /// ```
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Where the HTTP listener binds.
+    /// Where the HTTP listener binds, from `HOST` and `PORT` (default
+    /// `127.0.0.1:8000`). An unparseable `HOST` falls back to loopback, the
+    /// safe direction for a tool that shows unredacted bodies (§1.2).
     pub listen: SocketAddr,
     /// `SERVICEBUS_CONNECTION_STRING` — note the spelling (§2).
     pub connection_string: String,
     /// `BUSWATCH_QUEUE_NAMES`. Empty means discover (§2.2).
     pub queue_names: Vec<String>,
-    /// `BUSWATCH_PEEK_COUNT`.
+    /// `BUSWATCH_PEEK_COUNT` — messages summarised per queue; positive.
     pub peek_count: usize,
-    /// `BUSWATCH_DETAIL_SEARCH_LIMIT`.
+    /// `BUSWATCH_DETAIL_SEARCH_LIMIT` — how deep a detail lookup peeks
+    /// (§5.1); positive.
     pub detail_search_limit: usize,
-    /// How many queues refresh at once.
+    /// `BUSWATCH_MAX_PARALLEL_QUEUE_FETCHES` — an upper bound on queues
+    /// refreshed at once (§3.3); positive, default 2 to stay well inside
+    /// the emulator's connection quota (§6.1).
     pub parallelism: usize,
 }
 
@@ -223,6 +228,103 @@ pub fn discover_session_queues(emulator_config: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// Split a `topic:subscription` entity name (`spec/14-buswatch.md` §2.2.1).
+///
+/// `None` for a queue name, including one with a colon at either end — a
+/// name must have text on both sides to be a subscription.
+///
+/// # Examples
+///
+/// ```
+/// use buswatch::config::split_subscription_entity;
+///
+/// assert_eq!(split_subscription_entity("topic:sub"), Some(("topic", "sub")));
+/// assert_eq!(split_subscription_entity("a-queue"), None);
+/// assert_eq!(split_subscription_entity(":sub"), None);
+/// assert_eq!(split_subscription_entity("topic:"), None);
+/// ```
+#[must_use]
+pub fn split_subscription_entity(entity: &str) -> Option<(&str, &str)> {
+    let (topic, subscription) = entity.split_once(':')?;
+    (!topic.is_empty() && !subscription.is_empty()).then_some((topic, subscription))
+}
+
+/// The `topic:subscription` names in an emulator configuration, optionally
+/// only the session-enabled ones (§2.2.1).
+fn subscriptions(emulator_config: &str, sessions_only: bool) -> Vec<String> {
+    let Ok(document) = serde_json::from_str::<serde_json::Value>(emulator_config) else {
+        return Vec::new();
+    };
+
+    let Some(namespaces) = document
+        .get("UserConfig")
+        .and_then(|user| user.get("Namespaces"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Vec::new();
+    };
+
+    namespaces
+        .iter()
+        .filter_map(|namespace| namespace.get("Topics")?.as_array())
+        .flatten()
+        .flat_map(|topic| {
+            let topic_name = topic
+                .get("Name")
+                .and_then(serde_json::Value::as_str)
+                .filter(|name| !name.is_empty());
+            let list = topic
+                .get("Subscriptions")
+                .and_then(serde_json::Value::as_array);
+
+            topic_name
+                .zip(list)
+                .into_iter()
+                .flat_map(|(topic_name, list)| {
+                    list.iter().filter_map(move |subscription| {
+                        let name = subscription
+                            .get("Name")
+                            .and_then(serde_json::Value::as_str)
+                            .filter(|name| !name.is_empty())?;
+                        let requires_session = subscription
+                            .get("Properties")
+                            .and_then(|p| p.get("RequiresSession"))
+                            .and_then(serde_json::Value::as_bool)
+                            == Some(true);
+                        (requires_session || !sessions_only).then(|| format!("{topic_name}:{name}"))
+                    })
+                })
+        })
+        .collect()
+}
+
+/// Every `topic:subscription` in the emulator configuration (§2.2.1).
+///
+/// Never fails, for the reason [`discover_queues`] does not.
+///
+/// # Examples
+///
+/// ```
+/// use buswatch::config::discover_subscriptions;
+///
+/// let json = r#"{"UserConfig":{"Namespaces":[{"Topics":[
+///     {"Name":"t","Subscriptions":[{"Name":"a"},{"Name":"b"}]}
+/// ]}]}}"#;
+///
+/// assert_eq!(discover_subscriptions(json), ["t:a", "t:b"]);
+/// assert!(discover_subscriptions("not json").is_empty());
+/// ```
+#[must_use]
+pub fn discover_subscriptions(emulator_config: &str) -> Vec<String> {
+    subscriptions(emulator_config, false)
+}
+
+/// The session-enabled subscriptions, as `topic:subscription` (§2.2.1).
+#[must_use]
+pub fn discover_session_subscriptions(emulator_config: &str) -> BTreeSet<String> {
+    subscriptions(emulator_config, true).into_iter().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,7 +338,10 @@ mod tests {
         // queue added to the stack is a queue BusWatch shows.
         let queues = discover_queues(EMULATOR);
 
-        assert!(queues.len() >= 9, "found {}: {queues:?}", queues.len());
+        // Eight, not nine: upstream #427 moved the PIMS flow from a queue to
+        // topics, so `local-inthub-pims-transformer-ingress` is gone from the
+        // file. A drop below this means a queue was lost, not migrated.
+        assert!(queues.len() >= 8, "found {}: {queues:?}", queues.len());
         assert!(queues.contains(&"local-inthub-phw-transformer-ingress".to_string()));
         assert!(queues.contains(&"local-inthub-messagestore".to_string()));
         assert!(queues.contains(&"local-inthub-priority-messagequeue".to_string()));
@@ -260,6 +365,51 @@ mod tests {
                 &"local-inthub-messagestore".to_string(),
             ],
             "the non-session queues of spec/01 §4.1"
+        );
+    }
+
+    #[test]
+    fn the_real_configuration_has_a_session_subscription() {
+        // spec/14-buswatch.md §2.2.1, against the real file.
+        let subscriptions = discover_subscriptions(EMULATOR);
+
+        assert!(
+            subscriptions.contains(&"mpihl7input:mpihl7input-test-subscription".to_string()),
+            "{subscriptions:?}"
+        );
+        assert!(
+            discover_session_subscriptions(EMULATOR)
+                .contains("mpihl7input:mpihl7input-test-subscription")
+        );
+        for name in &subscriptions {
+            assert!(split_subscription_entity(name).is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_queue_is_never_taken_for_a_subscription() {
+        // §2.2.1 -- every discovered queue name must split to nothing, or
+        // BusWatch would open a subscription receiver for a queue.
+        for queue in discover_queues(EMULATOR) {
+            assert_eq!(split_subscription_entity(&queue), None, "{queue}");
+        }
+    }
+
+    #[test]
+    fn only_subscriptions_that_say_true_are_session_enabled() {
+        let json = r#"{"UserConfig":{"Namespaces":[{"Topics":[{"Name":"t","Subscriptions":[
+            {"Name":"yes","Properties":{"RequiresSession":true}},
+            {"Name":"no","Properties":{"RequiresSession":false}},
+            {"Name":"silent"},
+            {"Properties":{}}
+        ]}, {"Subscriptions":[{"Name":"orphan"}]}]}]}}"#;
+
+        assert_eq!(discover_subscriptions(json), ["t:yes", "t:no", "t:silent"]);
+        assert_eq!(
+            discover_session_subscriptions(json)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["t:yes"]
         );
     }
 
@@ -292,7 +442,7 @@ mod tests {
 
         assert_eq!(config.peek_count, DEFAULT_PEEK_COUNT);
         assert_eq!(config.detail_search_limit, DEFAULT_DETAIL_SEARCH_LIMIT);
-        assert!(config.queue_names.is_empty());
+        assert_eq!(config.queue_names, Vec::<String>::new());
         assert!(
             config
                 .connection_string

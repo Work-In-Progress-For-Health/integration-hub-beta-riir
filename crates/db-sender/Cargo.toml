@@ -1,0 +1,39 @@
+[package]
+name = "db-sender"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "Generic database sender: one topic subscription in, one SQL Server stored procedure call out. First deployment: RISP to WRRS."
+
+[lib]
+name = "db_sender"
+path = "src/lib.rs"
+
+[[bin]]
+name = "db-sender"
+path = "src/main.rs"
+
+[dependencies]
+ihb-bus.workspace = true
+ihb-config.workspace = true
+ihb-fields.workspace = true
+ihb-health.workspace = true
+ihb-runtime.workspace = true
+ihb-telemetry.workspace = true
+ihb-tls.workspace = true
+roxmltree.workspace = true
+thiserror.workspace = true
+tiberius.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "time", "signal"] }
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio-test.workspace = true
+
+[lints]
+workspace = true

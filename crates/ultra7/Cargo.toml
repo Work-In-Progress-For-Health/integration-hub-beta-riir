@@ -1,0 +1,28 @@
+[package]
+name = "ultra7"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "Developer tool: sends synthetic HL7, XML and JSON test messages to MLLP, REST and SOAP endpoints, repeating with one field changing. Not for any environment holding real patient data."
+
+[lib]
+name = "ultra7"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ultra7"
+path = "src/main.rs"
+
+[dependencies]
+roxmltree.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

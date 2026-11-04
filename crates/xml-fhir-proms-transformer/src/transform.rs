@@ -35,7 +35,8 @@ pub enum TransformError {
 /// Turn a WPAS payload into a FHIR R4B message Bundle (§1.2).
 ///
 /// `endpoint_override` supplies §5.2's per-board endpoint; pass
-/// `|_| None` to use the documented values and §5.2.2's placeholder.
+/// `|_| None` to use §5.2.2's derived values. `destination_endpoint` is
+/// §10.3's `PROMPTLY_DESTINATION_ENDPOINT`; `None` uses the staging default.
 ///
 /// # Errors
 ///
@@ -45,6 +46,7 @@ pub fn transform(
     uuids: &dyn UuidFactory,
     resolver: &dyn ReferenceDataResolver,
     endpoint_override: &dyn Fn(&str) -> Option<String>,
+    destination_endpoint: Option<&str>,
 ) -> Result<serde_json::Value, TransformError> {
     let message = parse(payload)?;
     let message_type = resolve(event_code(&message).as_deref(), &message.root_tag)?;
@@ -79,6 +81,7 @@ pub fn transform(
             &identities,
             &present,
             endpoint_override,
+            destination_endpoint,
         ),
     );
     builder.put(
@@ -93,7 +96,7 @@ pub fn transform(
     if present.contains(&Slot::PractitionerRole) {
         builder.put(
             Slot::PractitionerRole,
-            resources::practitioner_role(&message, &identities, &present),
+            resources::practitioner_role(&message, &identities, &present, true),
         );
     }
 
@@ -117,7 +120,13 @@ mod tests {
       </PromsEventRequest>";
 
     fn run(payload: &str) -> Result<serde_json::Value, TransformError> {
-        transform(payload, &SequentialUuids::new(), &StaticResolver, &|_| None)
+        transform(
+            payload,
+            &SequentialUuids::new(),
+            &StaticResolver,
+            &|_| None,
+            None,
+        )
     }
 
     #[test]
@@ -177,10 +186,11 @@ mod tests {
             ]
         );
 
-        // And it carries nothing but its identity.
+        // And it carries nothing but its identity and the fixed `status`
+        // (§6.11.0, upstream #423).
         let location = &bundle["entry"][4]["resource"];
         let keys: Vec<&String> = location.as_object().unwrap().keys().collect();
-        assert_eq!(keys, vec!["id", "meta", "resourceType"]);
+        assert_eq!(keys, vec!["id", "meta", "resourceType", "status"]);
     }
 
     #[test]

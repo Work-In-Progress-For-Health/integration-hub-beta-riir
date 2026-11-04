@@ -90,9 +90,26 @@ Python are replaced by environment variables — see §7.
 startup. `hl7-mock-receiver` is the exception: it MAY run with neither and
 log what it would have forwarded.
 
-§2.1.2 `MESSAGE_STORE_ENABLED` (bool, default `true`) disables message-store
-sends. When false, `send_to_store` is a no-op that logs at debug and the
-store sender is never created.
+§2.1.2 `MESSAGE_STORE_ENABLED` (bool, **default `false`**) gates every
+message-store send. The store sender is created only when it is true **and**
+`MESSAGE_STORE_QUEUE_NAME` is set; otherwise no store sender exists and a
+store send is skipped. Upstream flipped the default from `true` to `false`
+in `387b20a`, so a deployment that sets the queue name and not this variable
+**stores nothing**, as upstream does.
+
+§2.1.2a The services this applies to are those upstream builds through
+`create_message_store_client`: `hl7-server`, `hl7-soap-server`,
+`rest-server`, `hl7-rest-server`, `hl7-sender` and `soap-sender`. It is read
+with `ihb_config::message_store_queue`, so the rule is stated once.
+
+§2.1.2b **Deviation.** Booleans follow §1.5 (`false`, `0`, `no`, `off` are
+false). Upstream's factory is stricter in the other direction: only `false`
+is false, so `MESSAGE_STORE_ENABLED=0` enables the store there and disables
+it here. No upstream file sets such a value; use `true` or `false`.
+
+§2.1.2c A service that has a queue name but is disabled MUST say so at
+startup, at warn level naming both variables. A silent absence of the audit
+trail is the failure this default makes possible.
 
 ---
 
@@ -107,7 +124,8 @@ store sender is never created.
 | `EGRESS_QUEUE_NAME` | string | — | Destination queue. |
 | `EGRESS_TOPIC_NAME` | string | — | Destination topic. |
 | `EGRESS_SESSION_ID` | string | — | **Required.** Session for the outgoing message. |
-| `MESSAGE_STORE_QUEUE_NAME` | string | *(unset)* | Message-store queue. Absent means no store sender. |
+| `MESSAGE_STORE_QUEUE_NAME` | string | *(unset)* | Message-store queue. Absent means no store sender. Ignored unless `MESSAGE_STORE_ENABLED` is true (§2.1.2). |
+| `MESSAGE_STORE_ENABLED` | bool | `false` | Gates the store (§2.1.2). |
 | `HL7_VERSION` | string | *(unset)* | If set, `MSH-12` must equal it. |
 | `SENDING_APP` | csv | *(unset)* | If set, `MSH-3` must be in the list. |
 | `HL7_VALIDATION_FLOW` | string | *(unset)* | Flow schema group; see [`06-validation.md`](06-validation.md) §3. |
@@ -143,7 +161,8 @@ fails. This reproduces `_read_and_validate_message_size` and is deliberate.
 | `SOAP_ENDPOINT_PATH` | path | `/soap` | MUST start with `/`, else a startup failure. |
 | `EGRESS_QUEUE_NAME` / `EGRESS_TOPIC_NAME` | string | — | As §3.1. |
 | `EGRESS_SESSION_ID` | string | — | **Required.** |
-| `MESSAGE_STORE_QUEUE_NAME` | string | — | **Required** for this service. |
+| `MESSAGE_STORE_QUEUE_NAME` | string | — | **Required** for this service (upstream still requires it), but only used when `MESSAGE_STORE_ENABLED` is true (§2.1.2). |
+| `MESSAGE_STORE_ENABLED` | bool | `false` | Gates the store (§2.1.2). |
 | `HL7_SCHEMA_GROUP` | string | `phw` | Which flow's schemas validate the payload. |
 | `ALLOWED_HL7_STRUCTURES` | csv, non-empty | `ADT_A05,ADT_A39` | Accepted payload root elements. |
 | `ALLOWED_ASSIGNING_AUTHORITIES` | csv, non-empty | `328` | Accepted assigning authorities. |
@@ -163,9 +182,12 @@ security defect and is corrected here).
 
 | Variable | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `INGRESS_QUEUE_NAME` | string | — | **Required.** |
+| `INGRESS_QUEUE_NAME` | string | — | Source queue. Exactly one ingress transport; see §5.2. |
+| `INGRESS_TOPIC_NAME` | string | — | Source topic. Requires `INGRESS_SUBSCRIPTION_NAME`. |
+| `INGRESS_SUBSCRIPTION_NAME` | string | — | Subscription on `INGRESS_TOPIC_NAME`. |
 | `INGRESS_SESSION_ID` | string | *(unset)* | |
-| `EGRESS_QUEUE_NAME` | string | — | **Required.** |
+| `EGRESS_QUEUE_NAME` | string | — | Destination queue. Exactly one egress transport; see §5.2. |
+| `EGRESS_TOPIC_NAME` | string | — | Destination topic. |
 | `EGRESS_SESSION_ID` | string | *(unset)* | |
 | `MAX_BATCH_SIZE` | usize | `100` | Messages requested per receive. |
 | `LOG_LEVEL` | level | `ERROR` | The Python's transformer default. |
@@ -177,6 +199,25 @@ rather than silently falling back to `1` as the Python did — a batch size of
 1 in production is a 100× throughput regression that would be attributed to
 Rust.
 
+§5.2 Topic transports were added upstream in `transformer_base_lib`
+(`bfe8878`, 10 Sep 2026). Ingress is **either** `INGRESS_QUEUE_NAME`, **or**
+`INGRESS_TOPIC_NAME` together with `INGRESS_SUBSCRIPTION_NAME`; egress is
+**either** `EGRESS_QUEUE_NAME` **or** `EGRESS_TOPIC_NAME`. Each of the
+following is a startup failure, and every problem found is reported
+together (§1.4):
+
+| Condition | Message |
+| --- | --- |
+| No ingress | `Missing required configuration: set either INGRESS_QUEUE_NAME, or both INGRESS_TOPIC_NAME and INGRESS_SUBSCRIPTION_NAME.` |
+| Queue and topic ingress | `Invalid ingress configuration: INGRESS_QUEUE_NAME cannot be set together with INGRESS_TOPIC_NAME/INGRESS_SUBSCRIPTION_NAME. Configure only one ingress transport.` |
+| Topic without subscription, or the reverse | `Missing required configuration: INGRESS_TOPIC_NAME and INGRESS_SUBSCRIPTION_NAME must both be set when using topic-based ingress.` |
+| No egress | `Missing required configuration: set either EGRESS_QUEUE_NAME or EGRESS_TOPIC_NAME.` |
+| Queue and topic egress | `Invalid egress configuration: EGRESS_QUEUE_NAME cannot be set together with EGRESS_TOPIC_NAME. Configure only one egress transport.` |
+
+A topic subscription is reported as `topic/subscription`
+(`03-message-bus.md` §2.2). With `INGRESS_SESSION_ID` unset the receiver is
+a plain one; with it set, a session receiver.
+
 ---
 
 ## §6 Senders
@@ -187,15 +228,41 @@ Rust.
 
 | Variable | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `INGRESS_QUEUE_NAME` | string | — | **Required.** |
-| `INGRESS_SESSION_ID` | string | — | **Required.** |
+| `INGRESS_QUEUE_NAME` | string | — | Source queue. Exactly one ingress transport; see §6.1.1. |
+| `INGRESS_TOPIC_NAME` | string | — | Source topic. Requires `INGRESS_SUBSCRIPTION_NAME`. |
+| `INGRESS_SUBSCRIPTION_NAME` | string | — | Subscription on `INGRESS_TOPIC_NAME`. |
+| `INGRESS_SESSION_ID` | string | *(unset)* | A fixed session. Exclusive with `INGRESS_ACCEPT_ANY_SESSION`. |
+| `INGRESS_ACCEPT_ANY_SESSION` | bool | `false` | Take whichever session is next available, so replicas compete for distinct sessions. |
+| `REPLAY_SESSION_ID` | string | *(unset)* | Fallback session recorded on a stored message; see §6.1.2. |
 | `RECEIVER_MLLP_HOST` | string | — | **Required.** |
 | `RECEIVER_MLLP_PORT` | u16 | — | **Required.** |
-| `MESSAGE_STORE_QUEUE_NAME` | string | — | **Required.** |
+| `MESSAGE_STORE_QUEUE_NAME` | string | *(unset)* | Absent means no store sender (§6.1.4). |
+| `MESSAGE_STORE_ENABLED` | bool | `false` | Gates the store (§2.1.2). |
 | `ACK_TIMEOUT_SECONDS` | u64 | `30` | |
 | `MAX_MESSAGES_PER_MINUTE` | u32 | *(unset)* | Absent means unthrottled. A value ≤ 0 is a startup failure. |
 | `MAX_BATCH_SIZE` | usize | `100` | Reduced automatically per [`10-senders.md`](10-senders.md) §2.3. |
 | `LOG_LEVEL` | level | `ERROR` | |
+
+§6.1.1 Ingress is a queue **xor** a topic with its subscription, with the
+messages of §5.2. A fixed session together with
+`INGRESS_ACCEPT_ANY_SESSION=true` is a startup failure:
+`Invalid configuration: INGRESS_SESSION_ID cannot be set together with INGRESS_ACCEPT_ANY_SESSION=true. Configure only one session-selection mode.`
+With accept-any and no session yet available, the sender waits with backoff
+rather than failing; an idle queue is normal.
+
+§6.1.2 The session on a store event is, in order: the session the message
+arrived on; `INGRESS_SESSION_ID`; `REPLAY_SESSION_ID`. A store queue with
+none of `INGRESS_SESSION_ID`, `REPLAY_SESSION_ID` or accept-any is a startup
+failure: `Missing required configuration: set REPLAY_SESSION_ID when MESSAGE_STORE_QUEUE_NAME is configured without INGRESS_SESSION_ID (unless INGRESS_ACCEPT_ANY_SESSION=true).`
+A message that nonetheless has no session is not stored, and is logged, and
+delivered all the same.
+
+§6.1.3 **Deliberately not ported:** upstream binds the health check before
+the Service Bus and MLLP clients are built, so a container reports healthy
+while its dependencies are down. `AGENTS.md` records why that is the wrong
+trade here — a service that reports healthy and does nothing is the failure
+this workspace has already had — so the health check still starts only once
+the sender can receive.
 
 ### §6.2 `hl7-subscription-sender`
 
@@ -207,6 +274,10 @@ As §6.1 with these differences:
 | `INGRESS_SUBSCRIPTION_NAME` | string | — | **Required.** |
 | `INGRESS_SESSION_ID` | string | *(unset)* | Optional here, unlike §6.1. |
 | `MESSAGE_STORE_QUEUE_NAME` | — | — | Not read by this service. |
+
+§6.1.4 `MESSAGE_STORE_QUEUE_NAME` is optional for `hl7-sender` and
+`soap-sender` (upstream `387b20a`). Absent means the sender never writes to
+the store, and so does `MESSAGE_STORE_ENABLED` being false (§2.1.2).
 
 ### §6.3 `soap-sender` and `soap-subscription-sender`
 
@@ -265,6 +336,11 @@ managed-identity authentication.
 | `EGRESS_SESSION_ID` | string | *(unset)* | |
 | `MAX_MESSAGE_SIZE_BYTES` | usize | `16777216` | 16 MiB, the `hl7-2-mllp` default. |
 
+### §8.1a `hl7-topic-mock-receiver`
+
+As §8.1, except `EGRESS_TOPIC_NAME` (string, *optional*, absent means
+log-only) replaces `EGRESS_QUEUE_NAME`. `spec/11-mock-receivers.md` §5.
+
 ### §8.2 `http-mock-receiver`
 
 | Variable | Type | Default | Meaning |
@@ -312,7 +388,7 @@ is a developer wondering why.
 | `COSMOS_ENDPOINT` | url | *(unset)* | Blank disables alarm persistence; reads return empty. |
 | `COSMOS_KEY` | secret | *(unset)* | Present selects key auth and auto-creation; blank selects AAD RBAC. |
 | `COSMOS_DATABASE` | string | `integration-hub` | The Python's default. See §9.2.2. |
-| `COSMOS_CONTAINER` | string | `alarms` | Partition key `/pk`. |
+| `COSMOS_CONTAINER` | string | `dashboard` | Partition key `/pk`. Documents carry a `type` discriminator ([`15-dashboard.md`](15-dashboard.md) §10; upstream `78f2d23` renamed the container from `alarms`). |
 | `COSMOS_DISABLE_SSL_VERIFY` | bool | `false` | True only for the local emulator, and refused against any other host. |
 | `QUEUE_WARNING_THRESHOLD` | u64 | `10` | |
 | `QUEUE_CRITICAL_THRESHOLD` | u64 | `50` | |
@@ -356,6 +432,30 @@ mode is a Flask concept with no analogue here; demo mode is superseded by
 presentation settings deferred with the i18n work of
 [`15-dashboard.md`](15-dashboard.md) §6.
 
+### §9.3 `lookup-service`
+
+Phase 1, not production ready ([`20-lookup-service.md`](20-lookup-service.md)
+§1.1). Nothing is required.
+
+| Variable | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `ENVIRONMENT` | string | `DEV` | Upper-cased. Writes are allowed only in `LOCAL` ([`20`](20-lookup-service.md) §2.3). |
+| `HOST` | string | `0.0.0.0` | An IP address. Not loopback, unlike `buswatch` and `dashboard`: [`20`](20-lookup-service.md) §2.2. |
+| `PORT` | u16 | `8080` | |
+| `LOG_LEVEL` | string | `INFO` | Via the telemetry crate. Request access logging is never on ([`20`](20-lookup-service.md) §1.3). |
+| `AZURE_LOG_LEVEL` | string | `WARN` | Keep at `WARN` or above: SDK request logs carry URLs, and a Cosmos row URL carries the lookup key. |
+| `LOOKUP_SEED_DIR` | path | *(unset)* | Directory of `*.csv` and `tables.json`. Unset means the seed data compiled into the binary ([`20`](20-lookup-service.md) §10.1), where the Python defaulted to `./seed`. |
+| `LOOKUP_DEFAULT_TTL_SECONDS` | u32 ≥ 1 | `300` | Cache TTL for a table without `ttl_seconds`. |
+| `LOOKUP_CACHE_MAX_ENTRIES` | usize ≥ 1 | `10000` | Rows cached per TTL table. |
+| `LOOKUP_MAX_UPLOAD_MB` | usize ≥ 1 | `50` | Upload size limit. |
+| `LOOKUP_UPLOAD_CONCURRENCY` | usize ≥ 1 | `32` | Concurrent Cosmos batch requests during an upload. Read and validated for the Python's contract; unused until the Cosmos store exists. |
+| `COSMOS_ENDPOINT` | url | *(unset)* | **Set means refuse to start**: the Cosmos store is not ported ([`20`](20-lookup-service.md) §2.5). |
+| `COSMOS_KEY` | secret | *(unset)* | Read, unused. |
+| `COSMOS_DATABASE` | string | `integration-hub` | Read, unused (shared with the dashboard in the Python). |
+| `COSMOS_DISABLE_SSL_VERIFY` | bool | `false` | Refused with any endpoint that does not name `localhost`, `127.0.0.1` or `cosmos-emulator` ([`20`](20-lookup-service.md) §2.4). |
+| `LOOKUP_ROWS_CONTAINER` | string | `lookup-rows` | Read, unused. |
+| `LOOKUP_CONFIG_CONTAINER` | string | `lookup-config` | Read, unused. |
+
 ---
 
 ## §10 The `ihb-config` contract
@@ -380,3 +480,77 @@ value does not appear in the `Debug` output.
 §10.5 `ihb-config` MUST NOT read the process environment at any point other
 than an explicit call. Its parsing functions MUST take values, not names, so
 they are testable without mutating the global environment.
+
+---
+
+## §11 `hl7-rest-server`
+
+`Integration-Hub-Beta/servers/hl7_rest_server/hl7_rest_server/app_config.py`.
+Behaviour: [`19-rest-servers.md`](19-rest-servers.md) §1–§8.
+
+| Variable | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `WORKFLOW_ID`, `MICROSERVICE_ID`, `HEALTH_BOARD`, `PEER_SERVICE` | string | — | **Required.** |
+| `HOST` | string | `0.0.0.0` | HTTP bind address (the standalone service's default; `rest-server`'s is `127.0.0.1`). |
+| `PORT` | u16 | `8080` | HTTP port. |
+| `ENVIRONMENT` | string | `DEV` | Upper-cased; returned by `/ping`. Gated Swagger upstream; see `19` §1.1. |
+| `EGRESS_QUEUE_NAME` / `EGRESS_TOPIC_NAME` | string | — | Exactly one, as §3.1. |
+| `EGRESS_SESSION_ID` | string | — | **Required.** |
+| `MESSAGE_STORE_QUEUE_NAME` | string | *(unset)* | Optional; unset skips the store send. |
+| `MESSAGE_STORE_ENABLED` | bool | `false` | Gates the store (§2.1.2). |
+| `HL7_VERSION` | string | *(unset)* | Expected `MSH-12`. |
+| `SENDING_APP` | csv | *(unset)* | Allowed `MSH-3` values. Ignored for `risp`. |
+| `HL7_VALIDATION_FLOW` | string | *(unset)* | A schema group, `mpi` or `risp`. An unknown value is a startup failure (upstream failed on the first message). |
+| `HL7_VALIDATION_STANDARD` | string | *(unset)* | One of `2.4`, `2.5`, `2.5.1`, `2.6`. |
+| `MAX_MESSAGE_SIZE_BYTES` | i64 | `1048576` | As §3.2: non-positive or unparseable defaults; above 100 MiB is a startup failure. |
+| `WRRS_QUEUE_NAME` / `WRRS_TOPIC_NAME` | string | — | `risp` only: exactly one. |
+| `WRRS_EGRESS_SESSION_ID`, `WRRS_WORKFLOW_ID` | string | — | `risp` only: **required**. |
+| `SERVICE_BUS_CONNECTION_STRING` / `SERVICE_BUS_NAMESPACE` | secret / string | — | As §2.1. |
+| `HL7_LOG_REDACTION_ENABLED` | bool (§1.5) | `true` | As `hl7-server`. |
+
+§11.1 The `risp` flow's four `WRRS_*` rules are startup failures, all reported
+together (§1.4): `The 'risp' flow requires either WRRS_QUEUE_NAME or
+WRRS_TOPIC_NAME to be provided.`, `Cannot specify both WRRS_QUEUE_NAME and
+WRRS_TOPIC_NAME.`, `The 'risp' flow requires WRRS_EGRESS_SESSION_ID to be
+provided.`, `The 'risp' flow requires WRRS_WORKFLOW_ID to be provided.` For any
+other flow the `WRRS_*` variables are read and ignored.
+
+§11.2 There is no TCP health check on the standalone service (upstream has
+none; `/hl7MessageReceiver/ping` is the probe).
+
+---
+
+## §12 `rest-server`
+
+`Integration-Hub-Beta/servers/rest_server/rest_server/app_config.py`.
+Behaviour: [`19-rest-servers.md`](19-rest-servers.md) §9–§10.
+
+Everything in §11 applies to `PIPELINE=hl7`, with these differences:
+`HOST` defaults to `127.0.0.1`; the size limit is `MAX_REQUEST_SIZE_BYTES`
+(below), not `MAX_MESSAGE_SIZE_BYTES`; and the variables below exist.
+
+| Variable | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `PIPELINE` | string | `generic` | `generic` or `hl7`; anything else is a startup failure. |
+| `ENDPOINT_PATH` | path | `/ingest` | MUST start with `/`. `generic` only. |
+| `CONTENT_ADAPTER` | string | — | **Required** for `generic`: `soap` or `xml-raw`. |
+| `VALIDATOR_TYPE` | string | — | **Required** for `generic`: `hl7-xsd`, `hl7apy`, `xsd`, `none`. |
+| `OUTPUT_FORMAT` | string | — | **Required** for `generic`: `er7` or `raw`. |
+| `VALIDATION_SCHEMA` | string | — | **Required** for `hl7-xsd` (a schema group) and `xsd` (a file path). |
+| `ALLOWED_HL7_STRUCTURES` | csv, non-empty | `ADT_A05,ADT_A39` | `hl7-xsd` and `hl7apy`. |
+| `ALLOWED_SOURCE_IDENTIFIERS` | csv | *(empty)* | Empty means no allow-list. |
+| `SOURCE_IDENTIFIER_LOCATOR` | `/`-path | *(unset)* | `xml-raw` only. |
+| `MESSAGE_CONTROL_ID_LOCATOR` | `/`-path | *(unset)* | `xml-raw` only. |
+| `MAX_REQUEST_SIZE_BYTES` | i64 | `1048576` | `0` or unset: default. `-1`: the 100 MiB ceiling. Below `-1`, or above the ceiling: startup failure. |
+| `HEALTH_CHECK_HOST` / `HEALTH_CHECK_PORT` | string / u16 | per `05-health-check.md` | The TCP health check. |
+| `TLS_CERT_FILE` / `TLS_KEY_FILE` | path | *(unset)* | Both or neither, as §4.1. |
+
+§12.1 `CONTENT_ADAPTER`, `VALIDATOR_TYPE` and `OUTPUT_FORMAT` set while
+`PIPELINE=hl7` is a startup failure, not a silent no-op:
+`{name} is only valid when PIPELINE=generic (current PIPELINE=hl7).`
+
+§12.2 `hl7-xsd` names a `Flow` (`06-validation.md` §3.1); an unknown group
+is a startup failure. `VALIDATION_SCHEMA` is not required by `hl7apy`.
+
+§12.3 `.env` files are not read (§1; upstream loaded one with
+`python-dotenv`).

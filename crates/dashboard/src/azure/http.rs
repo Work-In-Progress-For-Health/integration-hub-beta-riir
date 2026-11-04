@@ -198,6 +198,47 @@ impl HttpsClient {
         .await
     }
 
+    /// `POST url` as a Cosmos **query** (`spec/15-dashboard.md` §10.1).
+    ///
+    /// Cosmos distinguishes a query from a create by the content type
+    /// alone: the same URL and verb with `application/json` is an attempt to
+    /// create a document named by the body.
+    ///
+    /// # Errors
+    ///
+    /// As [`HttpsClient::get_json`].
+    pub async fn post_query_with(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: String,
+    ) -> Result<serde_json::Value, HttpError> {
+        self.send(
+            Method::Post,
+            url,
+            None,
+            Some(("application/query+json", body)),
+            headers,
+        )
+        .await
+    }
+
+    /// `DELETE url` with extra headers (`spec/15-dashboard.md` §10.1).
+    ///
+    /// A successful delete answers `204` with no body, which is
+    /// [`serde_json::Value::Null`] here rather than a parse error.
+    ///
+    /// # Errors
+    ///
+    /// As [`HttpsClient::get_json`].
+    pub async fn delete_with(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<serde_json::Value, HttpError> {
+        self.send(Method::Delete, url, None, None, headers).await
+    }
+
     /// `GET url` with extra headers — the managed-identity endpoint's shape
     /// (§4.6.2), which authenticates with a header rather than a token.
     ///
@@ -326,17 +367,24 @@ impl HttpsClient {
             });
         }
 
+        // `204 No Content` is a success with nothing to parse.
+        if collected.is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+
         serde_json::from_slice(&collected).map_err(|e| HttpError::Body(e.to_string()))
     }
 }
 
-/// The two verbs used here.
+/// The verbs used here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Method {
     /// `GET`.
     Get,
     /// `POST`.
     Post,
+    /// `DELETE`.
+    Delete,
 }
 
 impl Method {
@@ -345,6 +393,7 @@ impl Method {
         match self {
             Self::Get => "GET",
             Self::Post => "POST",
+            Self::Delete => "DELETE",
         }
     }
 }
@@ -438,5 +487,6 @@ mod tests {
     fn the_verbs_are_spelled_the_way_http_spells_them() {
         assert_eq!(Method::Get.as_str(), "GET");
         assert_eq!(Method::Post.as_str(), "POST");
+        assert_eq!(Method::Delete.as_str(), "DELETE");
     }
 }

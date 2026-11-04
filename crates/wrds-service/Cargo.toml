@@ -1,0 +1,28 @@
+[package]
+name = "wrds-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "A client for the WRDS (Welsh Reference Data Service) GetResultSet SOAP operation, used to translate coded reference data between code systems."
+
+[dependencies]
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+ihb-tls.workspace = true
+roxmltree.workspace = true
+rustls-pki-types.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "time", "io-util"] }
+tokio-rustls.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
+
+[lints]
+workspace = true

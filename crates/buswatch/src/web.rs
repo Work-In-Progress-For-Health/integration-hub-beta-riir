@@ -32,6 +32,13 @@ use crate::snapshot::{Cache, Snapshot};
 /// The bundled stylesheet (§7.1).
 const STYLESHEET: &str = include_str!("../static/buswatch.css");
 
+/// The stylesheet, for a test of §7.5's themes.
+#[doc(hidden)]
+pub const STYLESHEET_FOR_TESTS: &str = STYLESHEET;
+
+/// The theme control and refresh bar (§7.5).
+const SCRIPT: &str = include_str!("../static/buswatch.js");
+
 /// The bundled logo (§7.1, copied across unchanged).
 const LOGO: &[u8] = include_bytes!("../static/DHCW-logo-RGB-White.png");
 
@@ -87,6 +94,7 @@ pub fn router<R: QueueReader>(state: Arc<AppState<R>>) -> Router {
         // directory: the binary carries them, and a path parameter under
         // `/static` would be a traversal question nobody needs to answer.
         .route("/static/buswatch.css", get(stylesheet))
+        .route("/static/buswatch.js", get(script))
         .route("/static/DHCW-logo-RGB-White.png", get(logo))
         .with_state(state)
 }
@@ -122,6 +130,8 @@ struct IndexPage {
     queues: Vec<Snapshot>,
     /// §3.4's one-shot message, if there is one to show.
     flash: Option<String>,
+    /// When this render was made, for §7.5's "Last updated".
+    updated_at: String,
 }
 
 /// One message (§5).
@@ -147,6 +157,10 @@ struct ProblemPage {
 }
 
 /// `GET /` — the queue snapshots of §4.
+///
+/// Always `200`: one unreadable queue is rendered inside the page (§6.2),
+/// never as a failed response. Queues missing from the cache are peeked
+/// before rendering, so the first load after start-up is the slow one.
 async fn index<R: QueueReader>(
     State(state): State<Arc<AppState<R>>>,
     Query(refresh): Query<Refresh>,
@@ -179,7 +193,13 @@ async fn index<R: QueueReader>(
             .collect()
     };
 
-    page(&IndexPage { queues, flash })
+    page(&IndexPage {
+        queues,
+        flash,
+        updated_at: time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string()),
+    })
 }
 
 /// Peek at several queues at once (§3.3).
@@ -187,6 +207,10 @@ async fn index<R: QueueReader>(
 /// Bounded by `BUSWATCH_MAX_PARALLEL_QUEUE_FETCHES`: the emulator's connection quota (§6.1)
 /// is exactly what an unbounded fan-out would exhaust, turning a slow page
 /// into a page of quota errors.
+///
+/// The result is in completion order, not `queues` order; the caller puts
+/// the snapshots in the cache and reads them back in configuration order,
+/// so the page order is stable.
 async fn refresh_all<R: QueueReader>(state: &AppState<R>, queues: Vec<String>) -> Vec<Snapshot> {
     use futures_util::StreamExt;
 
@@ -207,6 +231,10 @@ async fn refresh_all<R: QueueReader>(state: &AppState<R>, queues: Vec<String>) -
 }
 
 /// `GET /messages/{queue}/{sequence}` — one message, per §5.
+///
+/// `404` with a page that names the search limit when the sequence is not
+/// found. That is also the response for a queue that failed to read, since
+/// `QueueReader::detail` cannot tell the two apart.
 async fn detail<R: QueueReader>(
     State(state): State<Arc<AppState<R>>>,
     Path((queue, sequence)): Path<(String, i64)>,
@@ -237,6 +265,11 @@ async fn detail<R: QueueReader>(
 }
 
 /// `POST /queues/{queue}/clear` — clear, then redirect to `/`.
+///
+/// Destructive and unauthenticated by design: BusWatch is a local-emulator
+/// tool (`spec/14-buswatch.md` §1.1, §1.2). Failure is reported through
+/// the flash message on the redirected page, not as an error status, so the
+/// user lands back on the index either way.
 async fn clear<R: QueueReader>(
     State(state): State<Arc<AppState<R>>>,
     Path(queue): Path<String>,
@@ -259,6 +292,18 @@ async fn clear<R: QueueReader>(
 
     // §3 — redirect to `/`, so a reload does not clear the queue again.
     Redirect::to("/").into_response()
+}
+
+/// `GET /static/buswatch.js` (§7.5).
+async fn script() -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/javascript; charset=utf-8"),
+        )],
+        SCRIPT,
+    )
+        .into_response()
 }
 
 /// `GET /static/buswatch.css`.

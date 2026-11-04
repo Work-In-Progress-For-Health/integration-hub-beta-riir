@@ -141,3 +141,43 @@ pre {
     white-space: pre-wrap;
     word-break: break-word;
 }
+
+/* States added with the upstream sync (spec/15-dashboard.md §10). */
+.state.paused { background: var(--nhs-wales-blue); }
+.state.suppressed { background: var(--warning); }
+.state.scheduled { background: var(--dhcw-blue); }
+.state.active { background: var(--nhs-wales-blue); }
+.state.ended, .state.cancelled { background: var(--muted); }
+
+.muted { color: var(--muted); }
+.pause-indicator { font-size: 0.9rem; margin: 0 0 1rem; }
+
+/* Forms and buttons, shared by the pauses, contacts and network test pages. */
+form.stacked { display: grid; gap: 0.7rem; max-width: 46rem; padding: 0.9rem 1rem; }
+form.stacked label { display: grid; gap: 0.2rem; font-size: 0.82rem; font-weight: 500; }
+input[type=text], input[type=number], input[type=email], input[type=search],
+input[type=datetime-local], select, textarea {
+    font: inherit;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: #fff;
+    color: var(--ink);
+}
+button, a.button {
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0.4rem 0.9rem;
+    border: 1px solid var(--nhs-wales-blue);
+    border-radius: 4px;
+    background: var(--nhs-wales-blue);
+    color: #fff;
+    cursor: pointer;
+    text-decoration: none;
+}
+button.secondary { background: #fff; color: var(--nhs-wales-blue); }
+button.danger { background: var(--critical); border-color: var(--critical); }
+.form-message { font-size: 0.85rem; min-height: 1.2em; }
+.form-message.error { color: var(--critical); }
+.form-message.ok { color: var(--healthy); }
+[hidden] { display: none !important; }

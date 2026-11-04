@@ -22,7 +22,9 @@ use time::format_description::well_known::Rfc3339;
 /// The column order is §2.1's, and the insert depends on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
-    /// `ReceivedAt`, from the event's `MessageReceivedAt`.
+    /// `ReceivedAt`, from the event's `MessageReceivedAt`. The moment the
+    /// message reached the Hub, not the moment it was stored (that is
+    /// `StoredAt`, set once per batch by `stored_at_now`).
     pub received_at: OffsetDateTime,
     /// `CorrelationId`.
     pub correlation_id: String,
@@ -32,7 +34,7 @@ pub struct Record {
     pub processing_component: String,
     /// `TargetSystem`, nullable.
     pub target_system: Option<String>,
-    /// `RawPayload`, in full and unredacted (§2.3).
+    /// `RawPayload`, in full and unredacted (§2.3). Patient data: never log it.
     pub raw_payload: String,
     /// `XmlPayload`, nullable.
     pub xml_payload: Option<String>,
@@ -68,10 +70,12 @@ pub enum RecordError {
     },
 }
 
-/// When a document carries no correlation id to report (§3.3).
+/// What a [`RecordError::MissingField`] reports when the document has no
+/// `CorrelationId` to name (§3.3).
 pub const UNKNOWN_CORRELATION_ID: &str = "UNKNOWN";
 
-/// The keys §3.3 requires.
+/// The keys §3.3 requires, in the order [`build`] checks them (and so the
+/// order in which a document missing several reports its first gap).
 pub const REQUIRED: [&str; 6] = [
     "MessageReceivedAt",
     "CorrelationId",
@@ -176,7 +180,12 @@ pub fn build(body: &str) -> Result<Record, RecordError> {
     })
 }
 
-/// A string field, or `None` when absent or JSON `null`.
+/// A string field, or `None` when absent, JSON `null`, or not a string.
+///
+/// A non-string value (a number, an object) is treated as absent rather
+/// than coerced: coercing would store a rendering of it that no producer
+/// wrote. For a required key that surfaces as a missing-field error, which
+/// names the key but not the value (`spec/index.md` §0.8 clause 3).
 fn string(document: &serde_json::Value, key: &str) -> Option<String> {
     document.get(key)?.as_str().map(ToString::to_string)
 }

@@ -33,22 +33,31 @@ pub const DEFAULT_PORT: u16 = 2576;
 /// ```
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Where the MLLP listener binds.
+    /// Where the MLLP listener binds (`HOST`, default `127.0.0.1`, and
+    /// `PORT`, default [`DEFAULT_PORT`]). An unparseable `HOST` falls back
+    /// to loopback rather than failing (a hostname is not resolved).
     pub listen: SocketAddr,
-    /// Where the health check binds.
+    /// Where the health check binds (`HEALTH_CHECK_HOST`/`HEALTH_CHECK_PORT`),
+    /// kept separate from [`Self::listen`] so a probe never touches MLLP.
     pub health_check: SocketAddr,
     /// `EGRESS_QUEUE_NAME`. **Required** — a mock with nowhere to forward
     /// to still answers, but it must say which queue it is standing in for.
     pub egress_queue_name: String,
-    /// `EGRESS_SESSION_ID`, for a session-enabled queue.
+    /// `EGRESS_SESSION_ID`, for a session-enabled queue. A session-enabled
+    /// queue refuses a message with no session id, so it is stamped on every
+    /// forwarded message when set.
     pub egress_session_id: Option<String>,
-    /// `SERVICE_BUS_CONNECTION_STRING`.
+    /// `SERVICE_BUS_CONNECTION_STRING`. A [`Secret`] because it embeds a
+    /// shared-access key and must never reach a log line.
     pub connection_string: Option<Secret>,
-    /// `SERVICE_BUS_NAMESPACE`.
+    /// `SERVICE_BUS_NAMESPACE`, for Entra ID authentication in place of a
+    /// connection string.
     pub namespace: Option<String>,
-    /// `MAX_MESSAGE_SIZE_BYTES`.
+    /// `MAX_MESSAGE_SIZE_BYTES`: the MLLP framer's per-frame limit, in
+    /// bytes. Defaults to [`hl7_2_mllp::DEFAULT_LIMIT`] (16 MiB).
     pub max_message_size: usize,
-    /// `HL7_LOG_REDACTION_ENABLED`.
+    /// `HL7_LOG_REDACTION_ENABLED`, default `true`. Read for parity with
+    /// the other HL7 services' environment; this mock never logs a payload.
     pub redaction_enabled: bool,
 }
 
@@ -118,7 +127,11 @@ impl Config {
 }
 
 /// `HOST`/`PORT` as a socket address.
-fn socket_addr(host: &str, port: u16) -> SocketAddr {
+///
+/// A `HOST` that is not an IP literal (a hostname) becomes loopback rather
+/// than an error: the mock is a developer tool, and refusing to start over
+/// a bind address would be a worse failure than binding locally.
+pub(crate) fn socket_addr(host: &str, port: u16) -> SocketAddr {
     let ip = host
         .parse::<IpAddr>()
         .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));

@@ -44,6 +44,11 @@ pub const ACCEPTED_MESSAGE_TYPES: &[&str] = &[
 /// (`spec/07-hl7-server.md` §3.3.2).
 pub const MPI_TRIGGERS: &[&str] = &["A28", "A31", "A40"];
 
+/// The triggers Paris may send (`spec/07-hl7-server.md` §3.3.3). The same
+/// three as [`MPI_TRIGGERS`] today, kept apart because they are two flows'
+/// rules and upstream edits them separately.
+pub const PARIS_TRIGGERS: &[&str] = &["A28", "A31", "A40"];
+
 /// The earliest year a date of birth may name
 /// (`spec/07-hl7-server.md` §3.3.1).
 pub const EARLIEST_BIRTH_YEAR: i32 = 1800;
@@ -61,6 +66,10 @@ pub struct Rejection {
     pub reason: String,
     /// The `validation_result` for the `MESSAGE_FAILED` event.
     pub validation_result: &'static str,
+    /// `MSA-1` of the NACK this rejection is answered with
+    /// (`spec/07-hl7-server.md` §4.3): `AR` for a message that is invalid,
+    /// `AE` for one the server could not process.
+    pub ack_code: &'static str,
 }
 
 impl Rejection {
@@ -70,6 +79,7 @@ impl Rejection {
         Self {
             reason: reason.into(),
             validation_result: "Validation failed",
+            ack_code: crate::ack::REJECT,
         }
     }
 
@@ -79,6 +89,7 @@ impl Rejection {
         Self {
             reason: detail.into(),
             validation_result: "Unsupported message type",
+            ack_code: crate::ack::ERROR,
         }
     }
 
@@ -88,6 +99,7 @@ impl Rejection {
         Self {
             reason: detail.into(),
             validation_result: "Invalid HL7 message format",
+            ack_code: crate::ack::ERROR,
         }
     }
 }
@@ -257,6 +269,29 @@ pub fn check_mpi(message: &Message) -> Result<(), Rejection> {
     Ok(())
 }
 
+/// §3.3.3 — the Paris message-type rules (upstream `9e797ac`).
+///
+/// # Errors
+///
+/// [`Rejection`] with one of the two messages in §3.3.3's table.
+pub fn check_paris(message: &Message) -> Result<(), Rejection> {
+    let trigger = read(message, "MSH-9.2");
+
+    if trigger.is_empty() {
+        return Err(Rejection::validation(
+            "MSH.9.2 MessageType is missing from the Paris message",
+        ));
+    }
+
+    if !PARIS_TRIGGERS.contains(&trigger.as_str()) {
+        return Err(Rejection::validation(format!(
+            "Unsupported message type '{trigger}' for Paris flow"
+        )));
+    }
+
+    Ok(())
+}
+
 /// The field-level layers of §3.1 to §3.3, in the specified order.
 ///
 /// Ordering is normative: a message failing both the version check and the
@@ -303,6 +338,7 @@ pub fn check_fields(
     match flow_name {
         Some("phw") => check_phw(message),
         Some("mpi") => check_mpi(message),
+        Some("paris") => check_paris(message),
         _ => Ok(()),
     }
 }
@@ -432,6 +468,37 @@ mod tests {
     }
 
     #[test]
+    fn every_row_of_the_paris_table() {
+        // spec/07-hl7-server.md §3.3.3, and that a missing PID is not a
+        // Paris rejection (unlike §3.3.2).
+        let message = |msh9: &str| {
+            parse(&format!(
+                "MSH|^~\\&|169|169|100|100|20250505232328||{msh9}|M1|P|2.5.1\rPID"
+            ))
+        };
+
+        assert_eq!(
+            check_paris(&message("ADT")).unwrap_err().reason,
+            "MSH.9.2 MessageType is missing from the Paris message"
+        );
+        assert_eq!(
+            check_paris(&message("ADT^A05^ADT_A05")).unwrap_err().reason,
+            "Unsupported message type 'A05' for Paris flow"
+        );
+        for trigger in PARIS_TRIGGERS {
+            assert!(check_paris(&message(&format!("ADT^{trigger}"))).is_ok());
+        }
+    }
+
+    #[test]
+    fn the_paris_rule_runs_only_for_the_paris_flow() {
+        let a05 = parse("MSH|^~\\&|169|169|100|100|20250505232328||ADT^A05^ADT_A05|M1|P|2.5.1");
+
+        assert!(check_fields(&a05, None, &[], Some("paris")).is_err());
+        assert!(check_fields(&a05, None, &[], Some("chemo")).is_ok());
+    }
+
+    #[test]
     fn the_allow_list_accepts_both_forms_and_nothing_else() {
         // spec/07-hl7-server.md §7 — every registered key, plus the shapes
         // that must not be accepted.
@@ -490,16 +557,11 @@ mod tests {
 
     #[test]
     fn a_flow_with_no_field_rules_passes_the_third_layer() {
-        // spec/07-hl7-server.md §3.3.3 — paris, chemo, pims, wds and mosaiq
-        // have no field-level rules; their checking is the schema.
+        // spec/07-hl7-server.md §3.3.4 — chemo, pims, wds and mosaiq have no
+        // field-level rules; their checking is the schema. (Paris has its
+        // own, §3.3.3, tested below.)
         let message = phw("");
-        for flow in [
-            Some("paris"),
-            Some("chemo"),
-            Some("pims"),
-            Some("wds"),
-            None,
-        ] {
+        for flow in [Some("chemo"), Some("pims"), Some("wds"), None] {
             assert!(
                 check_fields(&message, None, &[], flow).is_ok(),
                 "{flow:?} should have no field rules of its own"

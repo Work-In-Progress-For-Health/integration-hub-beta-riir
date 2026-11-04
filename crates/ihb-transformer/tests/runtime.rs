@@ -168,7 +168,7 @@ async fn a_transform_failure_is_not_handled_and_forwards_nothing() {
         "§1.6's exact wording: {reason}"
     );
 
-    assert!(bus.all_sent(EGRESS).is_empty());
+    assert_eq!(bus.all_sent(EGRESS), Vec::new());
 }
 
 #[tokio::test]
@@ -193,7 +193,7 @@ async fn a_failure_stops_the_rest_of_the_batch() {
         "the two behind it are not attempted, so they have no outcome"
     );
     assert!(!outcomes[0].is_handled());
-    assert!(bus.all_sent(EGRESS).is_empty());
+    assert_eq!(bus.all_sent(EGRESS), Vec::new());
 }
 
 #[tokio::test]
@@ -253,5 +253,45 @@ async fn a_body_that_is_not_utf8_is_refused() {
     let outcomes = runtime.process_batch(std::slice::from_ref(&message)).await;
 
     assert!(!outcomes[0].is_handled());
-    assert!(egress.all_sent(EGRESS).is_empty());
+    assert_eq!(egress.all_sent(EGRESS), Vec::new());
+}
+
+/// A transformer that corrects one outgoing property, as PIMS does.
+struct Retyper;
+
+impl Transformer for Retyper {
+    fn name(&self) -> &'static str {
+        "Test"
+    }
+
+    fn transform(&mut self, message: &Message) -> Result<Message, TransformError> {
+        Ok(message.clone())
+    }
+
+    fn egress_properties(&self, incoming: &Properties, transformed: &Message) -> Properties {
+        let mut properties = incoming.clone();
+        properties.insert(
+            "MessageType".into(),
+            ihb_fields::read(transformed, "MSH-9.2"),
+        );
+        properties
+    }
+}
+
+#[tokio::test]
+async fn a_transformer_may_correct_an_outgoing_property() {
+    // spec/09-transformers.md §1.3.3: the override's result is what is sent,
+    // and every other incoming property is still carried (§1.3.1).
+    let bus = FakeBus::new();
+    let mut runtime = Runtime::new(config(), Retyper, bus.sender(EGRESS));
+    let mut properties = tracking();
+    properties.insert("MessageType".into(), "A04".into());
+    let message = received(MESSAGE, properties).await;
+
+    let outcomes = runtime.process_batch(std::slice::from_ref(&message)).await;
+    assert_eq!(outcomes, vec![Outcome::Handled]);
+
+    let sent = bus.all_sent(EGRESS);
+    assert_eq!(sent[0].properties["MessageType"], "A31");
+    assert_eq!(sent[0].properties["CorrelationId"], "minted-at-ingress");
 }

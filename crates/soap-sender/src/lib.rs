@@ -9,4 +9,4 @@ pub mod client;
 pub mod envelope;
 
 pub use client::{Endpoint, SoapClient};
-pub use envelope::{escape, evaluate, wrap};
+pub use envelope::{Format, escape, evaluate, wrap, wrap_wis};

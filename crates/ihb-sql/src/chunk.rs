@@ -2,14 +2,16 @@
 //!
 //! Implements `spec/12-message-store.md` §5.6.
 
-/// The most parameters TDS accepts in one statement.
+/// The most parameters TDS accepts in one statement (`spec/12-message-store.md`
+/// §5.6). Exceeding it is a server-side error, not a client-side one.
 pub const MAX_PARAMETERS: usize = 2100;
 
 /// Parameters per row of `monitoring.Message`
 /// (`spec/12-message-store.md` §2.1).
 pub const PARAMETERS_PER_ROW: usize = 9;
 
-/// Rows per statement: `2100 / 9`, floored.
+/// Rows per statement: `2100 / 9`, floored, so 233 rows use 2097 parameters;
+/// a 234th would need 2106 and fail.
 pub const ROWS_PER_STATEMENT: usize = MAX_PARAMETERS / PARAMETERS_PER_ROW;
 
 /// Split `rows` into runs that each fit one statement.

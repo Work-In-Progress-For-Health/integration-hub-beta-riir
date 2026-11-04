@@ -28,10 +28,17 @@ parameters:
       - 'HL7 Sender'
       - 'HL7 Subscription Sender'
       - 'HL7 SOAP Server'
+      - 'HL7 REST Server'
+      - 'REST Server'
       - 'HL7 Phw Transformer'
       - 'HL7 Chemo Transformer'
       - 'HL7 Pims Transformer'
       - 'HL7 Mock Receiver'
+      - 'HL7 Topic Mock Receiver'
+      - 'HL7 WDS Transformer'
+      - 'HL7 LIMS WRRS Transformer'
+      - 'Database Sender'
+      - 'HL7 Core Reference Transformer'
       - 'Message Store Service'
       - 'Message Replay Job'
       - 'Dashboard'
@@ -124,6 +131,40 @@ stages:
             azureServiceConnection: $(azureServiceConnection)
             POOL_NAME: ${{ variables.POOL_NAME }}
             SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'HL7 REST Server') }}:
+    - stage: BuildAndPush_hl7restserver
+      displayName: 'Build — HL7 REST Server'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHl7RestServer'
+            displayName: 'Build and Push HL7 REST Server'
+            appName: 'hl7restserver'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=hl7-rest-server'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'REST Server') }}:
+    - stage: BuildAndPush_restserver
+      displayName: 'Build — REST Server'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushRestServer'
+            displayName: 'Build and Push REST Server'
+            appName: 'restserver'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=rest-server'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
   - ${{ if containsValue(parameters.appsToBuild, 'HL7 Phw Transformer') }}:
     - stage: BuildAndPush_hl7phwtransformer
       displayName: 'Build — HL7 Phw Transformer'
@@ -188,6 +229,91 @@ stages:
             dockerfilePath: 'docker/Dockerfile'
             buildContext: '.'
             buildArgs: 'BIN=hl7-mock-receiver'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'HL7 Topic Mock Receiver') }}:
+    - stage: BuildAndPush_hl7topicmockreceiver
+      displayName: 'Build — HL7 Topic Mock Receiver'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHl7TopicMockReceiver'
+            displayName: 'Build and Push HL7 Topic Mock Receiver'
+            appName: 'hl7topicmockreceiver'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=hl7-topic-mock-receiver'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'HL7 WDS Transformer') }}:
+    - stage: BuildAndPush_hl7wdstransformer
+      displayName: 'Build — HL7 WDS Transformer'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHl7WdsTransformer'
+            displayName: 'Build and Push HL7 WDS Transformer'
+            appName: 'wds-hl7transformer'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=hl7-wds-transformer'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'HL7 LIMS WRRS Transformer') }}:
+    - stage: BuildAndPush_hl7limswrrstransformer
+      displayName: 'Build — HL7 LIMS WRRS Transformer'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHl7LimsWrrsTransformer'
+            displayName: 'Build and Push HL7 LIMS WRRS Transformer'
+            appName: 'lims-wrrs-hl7transformer'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=hl7-lims-wrrs-transformer'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'Database Sender') }}:
+    - stage: BuildAndPush_dbsender
+      displayName: 'Build — Database Sender'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushDbSender'
+            displayName: 'Build and Push Database Sender'
+            appName: 'dbsender'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=db-sender'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'HL7 Core Reference Transformer') }}:
+    - stage: BuildAndPush_hl7corereferencetransformer
+      displayName: 'Build — HL7 Core Reference Transformer'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushHl7CoreReferenceTransformer'
+            displayName: 'Build and Push HL7 Core Reference Transformer'
+            appName: 'core-reference-hl7transformer'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=hl7-core-reference-transformer'
             acrName: $(acrName)
             azureServiceConnection: $(azureServiceConnection)
             POOL_NAME: ${{ variables.POOL_NAME }}

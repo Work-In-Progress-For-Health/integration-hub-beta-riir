@@ -101,6 +101,9 @@ pub enum ValidationError {
 
 impl ValidationError {
     /// A parse failure.
+    ///
+    /// `reason` must describe the structure of the failure, never quote the
+    /// message: it reaches logs and HTTP bodies.
     #[must_use]
     pub fn parse(reason: impl std::fmt::Display) -> Self {
         Self::Parse {
@@ -129,7 +132,8 @@ impl ValidationError {
         }
     }
 
-    /// A v2.xml failure.
+    /// A v2.xml failure (conversion of ER7 to, or reading of, the v2.xml
+    /// form). As with [`Self::parse`], `reason` must not quote the message.
     #[must_use]
     pub fn xml(reason: impl std::fmt::Display) -> Self {
         Self::Xml {

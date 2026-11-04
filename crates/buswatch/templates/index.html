@@ -14,6 +14,15 @@
 <p class="flash">{{ message }}</p>
 {% endif %}
 
+{# §7.5 -- without JavaScript these are plain links. #}
+<div class="refresh-bar" id="refresh-bar" data-interval="30">
+  <span>Last updated <strong id="refresh-updated">{{ updated_at }}</strong></span>
+  <button type="button" class="secondary" id="refresh-now" hidden>Refresh now</button>
+  <label id="auto-label" hidden><input type="checkbox" id="auto-refresh"> Auto refresh (30 s)</label>
+  <span class="countdown" id="refresh-countdown" aria-live="off"></span>
+  <span class="status" id="refresh-status" role="status"></span>
+</div>
+
 <div class="toolbar">
   {# §3.1 — `refresh_all=true` refreshes every queue. #}
   <a class="button" href="/?refresh_all=true">Refresh all</a>

@@ -319,6 +319,10 @@ fn copy_whole_field(source: &Message, target: &mut Message, from: &str, to: &str
 }
 
 /// `PID-13` becomes `("PID", 13)`. `None` for anything else.
+///
+/// The index is 1-based, as in the mapping tables. `None` (not a panic) for
+/// a component path such as `PID-13.1` or a non-numeric index, so a typo in
+/// a table row degrades to a no-op rather than aborting a clinical message.
 fn split_field_path(path: &str) -> Option<(&str, usize)> {
     let (segment, index) = path.split_once('-')?;
     Some((segment, index.parse().ok()?))
@@ -903,8 +907,11 @@ mod tests {
         // The MPI outbound validation depends on this being empty rather
         // than an error: spec/07-hl7-server.md §3.3.2.
         let message = message();
-        assert!(authority_codes(&message, 2).is_empty());
-        assert!(authority_codes(&message, 99).is_empty());
+        assert_eq!(authority_codes(&message, 2), [] as [std::string::String; 0]);
+        assert_eq!(
+            authority_codes(&message, 99),
+            [] as [std::string::String; 0]
+        );
     }
 
     #[test]

@@ -18,6 +18,9 @@
 use std::collections::BTreeMap;
 
 /// Why a payload could not be read (§2.5.6).
+///
+/// `Malformed` carries the XML parser's reason, which reports a position and
+/// markup names rather than the document's text content.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ParseError {
     /// The payload was empty or whitespace.
@@ -51,7 +54,12 @@ pub fn normalise_key(field_name: &str) -> String {
         .collect()
 }
 
-/// A read-only view over a parsed payload.
+/// A read-only view over a parsed payload: every leaf element, keyed by
+/// [`normalise_key`], so a mapper asks for a field by any of its aliases
+/// (§6.0) without caring which dialect the payload used.
+///
+/// Holds source values, so it is patient data: do not log it or format it
+/// into an error.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PromsMessage {
     /// Leaf values, by normalised name.
@@ -91,13 +99,14 @@ impl PromsMessage {
         self.get(aliases).is_some()
     }
 
-    /// How many leaves were indexed.
+    /// How many leaves were indexed (non-empty elements only, §2.5.2).
     #[must_use]
     pub fn len(&self) -> usize {
         self.fields.len()
     }
 
-    /// Whether anything was indexed.
+    /// Whether no leaf was indexed; a well-formed document with only empty
+    /// elements is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.fields.is_empty()

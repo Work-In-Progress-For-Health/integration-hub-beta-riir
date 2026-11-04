@@ -1,0 +1,30 @@
+[package]
+name = "hl7-wds-transformer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+description = "The WDS → WIS transformer: lets A28 and A31 through unchanged and refuses everything else, over the shared transformer runtime."
+
+[lib]
+name = "hl7_wds_transformer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hl7-wds-transformer"
+path = "src/main.rs"
+
+[dependencies]
+hl7-2.workspace = true
+ihb-bus.workspace = true
+ihb-fields.workspace = true
+ihb-transformer.workspace = true
+ihb-validation.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
+tracing.workspace = true
+
+[lints]
+workspace = true

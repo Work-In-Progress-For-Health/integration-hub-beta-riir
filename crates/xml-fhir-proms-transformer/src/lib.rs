@@ -4,6 +4,15 @@
 //!
 //! [`spec/16-proms-transformer.md`]: ../../../spec/16-proms-transformer.md
 //!
+//! Where it fits: the PROMs flow is WPAS (the Welsh patient administration
+//! system) XML in, a FHIR `message` Bundle out to Promptly. The data path is
+//! [`parse`] (XML to a flat, alias-tolerant view), [`message_type`] (which
+//! bundle shape), [`bundle`] and [`identity`] (slots and their UUIDs),
+//! [`resources`] (one builder per FHIR resource, using the constants in
+//! [`fhir`] and the lookups in [`source_system`] and [`reference_data`]), and
+//! [`transform`] (the orchestration that [`Proms`] calls). Every module cites
+//! the section of `spec/16-proms-transformer.md` it implements.
+//!
 //! # Independent of the HL7 v2 pipeline
 //!
 //! §1.1 makes this a transformer in the runtime sense — same receive loop,
@@ -39,10 +48,15 @@ pub struct Proms {
     /// does not change while the process runs, and a `getenv` per bundle
     /// would be a syscall on the hot path.
     endpoints: std::collections::BTreeMap<String, String>,
+    /// `PROMPTLY_DESTINATION_ENDPOINT` (§10.3), read once for the same
+    /// reason. `None` when unset or blank, which selects the staging
+    /// default.
+    destination_endpoint: Option<String>,
 }
 
 impl Proms {
-    /// Read the `WPAS_SOURCE_ENDPOINT_{id}` overrides of §5.2.
+    /// Read the `WPAS_SOURCE_ENDPOINT_{id}` overrides of §5.2 and the
+    /// `PROMPTLY_DESTINATION_ENDPOINT` override of §10.3.
     #[must_use]
     pub fn from_env() -> Self {
         let endpoints = source_system::SOURCE_SYSTEMS
@@ -56,7 +70,15 @@ impl Proms {
             })
             .collect();
 
-        Self { endpoints }
+        let destination_endpoint = std::env::var(fhir::PROMPTLY_DESTINATION_ENDPOINT_ENV_VAR)
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+
+        Self {
+            endpoints,
+            destination_endpoint,
+        }
     }
 }
 
@@ -71,6 +93,7 @@ impl ihb_transformer::PayloadTransformer for Proms {
             &identity::RandomUuids,
             &reference_data::StaticResolver,
             &|system_id| self.endpoints.get(system_id).cloned(),
+            self.destination_endpoint.as_deref(),
         )
         // §2.3 and §2.5.6 are both §1.6's **first** row: an ordinary
         // transform failure, logged and abandoned. Not `Unexpected` —

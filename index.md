@@ -63,6 +63,7 @@ Written to be followed with a console open, not read.
 | [`docs/cutover-runbook.md`](docs/cutover-runbook.md) | Per-container cutover, verification, rollback |
 | [`docs/deviation-sign-off.md`](docs/deviation-sign-off.md) | The 13 deviations, for the Hub team to confirm |
 | [`docs/upstream/uppsala-id-type-resolution.md`](docs/upstream/uppsala-id-type-resolution.md) | A verified upstream bug report, ready to file |
+| [`docs/upstream-sync-2026-10.md`](docs/upstream-sync-2026-10.md) | What was ported from the Python after upstream #413, and what was not |
 
 ---
 

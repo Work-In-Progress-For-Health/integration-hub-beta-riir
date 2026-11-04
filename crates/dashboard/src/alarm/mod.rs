@@ -25,6 +25,8 @@
 use time::OffsetDateTime;
 
 pub mod cosmos_store;
+pub mod documents;
+pub mod pause;
 pub mod rules;
 pub mod store;
 

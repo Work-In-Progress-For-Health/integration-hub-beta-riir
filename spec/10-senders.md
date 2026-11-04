@@ -136,10 +136,25 @@ connection error.
 | Any other `MSA-1` | failure, logged `Negative ACK received: {code} for: {control_id}` where the control id is the reply's `MSH-10` |
 | The reply cannot be parsed | failure, logged with a backtrace |
 
-§3.7.1 `AR` (application reject) and `AE` (application error) are both
-failures and are both retried. Nothing distinguishes a permanent rejection
-from a transient one at this layer; Service Bus's `MaxDeliveryCount`
-eventually dead-letters it.
+§3.7.1 **`AR` is dead-lettered; everything else is retried.** Upstream
+`62b8c34` (`ack_processor.py :: AckOutcome`) classifies a reply as one of:
+
+| Outcome | When | Settlement | Event | Metrics |
+| --- | --- | --- | --- | --- |
+| `SUCCESS` | `MSA-1` in `{AA, CA}` | complete | `MESSAGE_PROCESSED` | `messages_sent` |
+| `AE` | any other `MSA-1` except `AR`, recognised or not | abandon; the rest of the batch waits | `MESSAGE_FAILED`, validation result `Recoverable NACK (AE) - message will be retried` | `messages_nack_ae`, `messages_retry_attempt` |
+| `AR` | `MSA-1 = AR` | **dead-letter** with reason `AR` and description `Application Reject ACK (AR) for message_id={MSH-10}, correlation_id={id}`; the rest of the batch waits | `MESSAGE_FAILED`, validation result `Non-recoverable NACK (AR) - message routed to dead-letter/escalation path` | `messages_nack_ar` |
+| `INVALID` | no `MSA`, or the reply cannot be parsed | abandon | `MESSAGE_FAILED`, validation result `Recoverable NACK (INVALID) - message will be retried` | none |
+
+The three NACK metrics carry `ack_code`, `correlation_id`, `message_id` and
+`endpoint` (`04-observability.md` §3.1.3). The dead-letter description
+carries identifiers and **never** payload (`index.md` §0.8): a dead-letter
+queue is read by people who are not entitled to the message.
+
+This supersedes the earlier rule that `AR` and `AE` were both retried until
+`MaxDeliveryCount`. It applies to the two HL7 senders only; the SOAP senders
+are unchanged (§4.4), and keep the single-state `Rejected` verdict and
+the `MESSAGE_PROCESSED` event that goes with it (§2.1).
 
 ---
 
@@ -195,6 +210,39 @@ MUST pass through redaction.
 §4.5 `WS_SECURITY_ENABLED` is reserved and MUST be `false`. A `true` value
 is a startup failure until this section specifies the header.
 
+### §4.6 The WIS envelope (`SOAP_ENVELOPE_FORMAT=wis`)
+
+Upstream `soap_sender` after `0f0164b` (the WDS → WIS flow).
+
+§4.6.1 `soap-sender` (the queue variant) reads `SOAP_ENVELOPE_FORMAT`,
+trimmed and lower-cased. `wis` selects the envelope below; **any other value,
+including unset, selects §4.2's**, as the Python does. The subscription
+variant does not read it, as the Python's does not.
+
+§4.6.2 The WIS envelope carries HL7 v2 **XML**, not ER7. The ER7 is
+converted with `ihb_validation::convert::er7_to_xml` and the result is
+escaped for `&`, `<`, `>` **and `"`** (unlike §4.2) and placed as text:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<ns1:Envelope xmlns:ns1="http://Cypris.Nhs.Wales.Uk/CaptureFromFiorona/Input">
+  <ns1:Body>
+    <ns3:CaptureFromFiorona xmlns:ns3="http://Cypris.Nhs.Wales.Uk/">
+      <ns3:inputString>{escaped v2 XML}</ns3:inputString>
+    </ns3:CaptureFromFiorona>
+  </ns1:Body>
+</ns1:Envelope>
+```
+
+§4.6.3 A message that cannot be converted is a delivery failure of the
+`Unexpected` class (§2.6): abandoned and retried, not posted. The error text
+carries the converter's structural reason, never message content.
+
+§4.6.4 §4.3 and §4.4 apply unchanged. Tests: the Python's four envelope
+assertions (element names, escaped namespace `urn:hl7-org:v2xml`, the
+`ADT_A05` structure, well-formed XML), `"` escaped, the default format
+unchanged, and an unconvertible message not posted.
+
 ---
 
 ## §5 The subscription variant
@@ -239,3 +287,98 @@ connection and answer on the second.
 
 §6.8 Integration: `soap-sender` against `wiremock` covering every row of
 §4.4.
+
+---
+
+## §7 Database sender (`db-sender`)
+
+Reference implementation: `Integration-Hub-Beta/senders/db_sender/`
+(upstream `#422`, `#433`, after `9e797ac`; the local service was renamed
+`wrrs-stmsg-dbsender` in `#433`). Implemented by `crates/db-sender`.
+
+§7.1 **Shape.** A generic outbound service: one topic subscription in, one
+SQL Server stored procedure call out, per message. It is **not** the §2
+pipeline: no throttle, no message-store write, no acknowledgement to
+evaluate. The first deployment is RISP → WRRS (`dbo.prQueueMessage` in
+database `DRS`); another database flow is a new environment file, not new
+code. §1.1 holds: a message is completed only after the procedure
+**committed**.
+
+§7.2 **Per message**, in order:
+
+```
+1  decode the body as UTF-8 (invalid: dead-letter, reason InvalidMessageEncoding)
+2  read the incoming application_properties for the correlation id
+3  extract the MSH only, for logging (§7.5)
+4  MESSAGE_RECEIVED event, text "Message received for execution of {proc}"
+5  BEGIN; EXEC {proc} @Message, @IsPriority; COMMIT
+6  messages_sent metric, best effort
+7  MESSAGE_PROCESSED event, best effort: the procedure has committed, so a
+   logging failure MUST NOT cause redelivery
+8  complete the message
+```
+
+§7.3 **Failure classes** (`db_client.py`):
+
+| Class | Meaning | Action |
+| --- | --- | --- |
+| Transient | connection or login transport failure, timeout, deadlock (`1205`), `233`, `10054`, `10060`, or a message containing `timeout`, `deadlock` or `communication link failure` (case-insensitive) | log at warn, **abandon** the message and the rest of the batch (`03-message-bus.md` §5.2.2); no `MESSAGE_FAILED` |
+| Fatal | any other error the server reported (procedure missing `2812`, permission, conversion, login `18456`) | `MESSAGE_FAILED` event, **dead-letter** with reason `StoredProcedureExecutionFailed` and description `SQLState: {state}, Code: {code}: {message}`; the batch continues |
+| Unexpected | anything else | log, abandon |
+
+TDS does not carry a SQLSTATE, so `{state}` is `UNKNOWN`, which is the
+Python's own default. The connection is discarded after **any** failure
+(`12-message-store.md` §5.2).
+
+§7.4 **Server messages are sanitised before they are logged, evented or
+dead-lettered.** SQL Server echoes parameter values into some messages;
+those would carry a patient identifier into a dead-letter description.
+Three patterns are replaced, case-insensitively: the parenthesised list
+after `The duplicate key value is` becomes `(***)`; the quoted text after
+`Truncated value:` becomes `'***'`; the quoted text after `converting [the]
+[type] value` becomes `'***'`. Quotes may contain a doubled `''`.
+
+§7.5 **Only the MSH is ever logged** (Caldicott principle 3). The extractor
+accepts ER7 (the first line starting `MSH`) or HL7 v2 XML (the `MSH` element,
+at any depth, namespaced or not) and returns the MSH text, `MSH-10` and
+`MSH-9`. Empty input, a body with no MSH and a malformed XML body return the
+placeholders `[Empty message body]`, `[No MSH segment identified]` and
+`[XML MSH extraction failed - structure malformed]`, with `UNKNOWN` ids.
+The MSH text goes only to the audit events (which redact, `04-observability.md`
+§2). Deviation from the Python: **tracing log lines carry the control id and
+message type, never the MSH text.**
+
+§7.6 **Configuration**, in addition to the shared variables
+(`SERVICE_BUS_CONNECTION_STRING` / `SERVICE_BUS_NAMESPACE`,
+`HEALTH_CHECK_HOST`, `HEALTH_CHECK_PORT`, `HL7_LOG_REDACTION_ENABLED`):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `INGRESS_TOPIC_NAME`, `INGRESS_SUBSCRIPTION_NAME` | — | **Required** |
+| `INGRESS_SESSION_ID` | *(unset)* | Session; unset is a plain subscription receiver |
+| `DB_SERVER`, `DB_PORT`, `DB_NAME` | `localhost`, `1433`, `DRS` | |
+| `DB_STORED_PROCEDURE` | `dbo.prQueueMessage` | One to three `.`-separated identifiers (`[A-Za-z0-9_@#$]`). Anything else is a startup failure: the name is spliced into `EXEC` |
+| `DB_USERNAME`, `DB_PASSWORD` | `sa`/`MSSQL_SA_PASSWORD` fallback | Both or neither |
+| `DB_ENCRYPT`, `DB_TRUST_SERVER_CERTIFICATE` | `Yes`, `No` | `Yes`/`No` only |
+| `DB_CONNECTION_TIMEOUT`, `DB_COMMAND_TIMEOUT` | `30`, `60` | Seconds, positive |
+| `MANAGED_IDENTITY_CLIENT_ID` | *(unset)* | |
+| `DEFAULT_IS_PRIORITY` | `0` | Non-zero sets `@IsPriority` |
+| `MAX_BATCH_SIZE` | `10` | |
+| `WORKFLOW_ID`, `MICROSERVICE_ID` | `risp-to-wrrs`, `wrrs_stmsg_dbsender` | |
+| `HEALTH_BOARD`, `PEER_SERVICE` | `SHARED`, `WRRS` | |
+
+Deviations, both from `12-message-store.md` §5.8: this build cannot encrypt
+to SQL, so `DB_ENCRYPT=Yes` (the default) is a **startup failure** naming
+§5.8, not a plaintext connection; and managed-identity authentication (no
+username and password) is likewise a startup failure until it is
+implemented. The connection is lazy and long-lived (§5.1).
+
+§7.7 Tests: the Python's configuration, MSH-extractor and sanitiser cases;
+the application cases against a fake procedure runner (success calls once
+with the exact body; fatal dead-letters with the sanitised description and a
+`MESSAGE_FAILED`; transient abandons with no `MESSAGE_FAILED`; unexpected
+abandons; a body that is not UTF-8 dead-letters without a call; patient
+data absent from every dead-letter description). The Python's "a failing
+`MESSAGE_PROCESSED` still completes" case has no counterpart: the event
+logger cannot fail here, and step 7 follows the commit; and §7.3's classification table.
+**Not run here:** a test against a real SQL Server, for want of one.

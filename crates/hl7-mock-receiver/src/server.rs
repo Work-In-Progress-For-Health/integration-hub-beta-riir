@@ -39,6 +39,9 @@ pub struct Receiver<S> {
 
 impl<S: MessageSink> Receiver<S> {
     /// A receiver forwarding to `sink`.
+    ///
+    /// `session_id` is stamped on every forwarded message; `max_message_size`
+    /// is in bytes and bounds a single MLLP frame.
     pub const fn new(sink: S, session_id: Option<String>, max_message_size: usize) -> Self {
         Self {
             sink,
@@ -98,6 +101,10 @@ where
 }
 
 /// Read frames from one connection and answer each in turn.
+///
+/// Replies are written in arrival order, one per frame, so a pipelined
+/// sender can match them up positionally. Returns `Ok` on a clean close or
+/// a framing error (logged); `Err` only for a socket read or write failure.
 async fn handle<S: MessageSink>(mut stream: TcpStream, receiver: &Receiver<S>) -> io::Result<()> {
     let mut framer = Framer::new().with_limit(receiver.max_message_size);
     let mut buffer = vec![0_u8; READ_BUFFER];
@@ -143,11 +150,12 @@ async fn respond<S: MessageSink>(payload: &[u8], receiver: &Receiver<S>) -> Vec<
     let control_id = control_id(payload);
     tracing::info!(control_id = %control_id, bytes = payload.len(), "message received");
 
-    // §1.1 — the `fail` trigger, checked before forwarding so a test can
-    // drive the unhappy path without a broker refusing anything.
-    if ack::should_reject(payload) {
-        tracing::info!(control_id = %control_id, "rejecting on request");
-        return ack::reply(payload, AckCode::Error, &timestamp);
+    // §1.1 — the `fail` and `reject` triggers, checked before forwarding so
+    // a test can drive either unhappy path without a broker refusing
+    // anything.
+    if let Some(code) = ack::requested_nack(payload) {
+        tracing::info!(control_id = %control_id, ?code, "answering with a NACK on request");
+        return ack::reply(payload, code, &timestamp);
     }
 
     let message = Outgoing::new(payload.to_vec())

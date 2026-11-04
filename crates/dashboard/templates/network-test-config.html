@@ -1,0 +1,60 @@
+{# `spec/15-dashboard.md` §10.4.5's flow source servers screen. #}
+{% extends "base.html" %}
+
+{% block title %}Integration Hub — flow source servers{% endblock %}
+
+{% block content %}
+{% if unavailable %}
+<p class="unavailable">The flow source servers could not be read.</p>
+{% endif %}
+{% if !persistence_configured %}
+<p class="unavailable" style="background:#e6f0fa"><code>COSMOS_ENDPOINT</code> is not set, so sources cannot be stored.</p>
+{% endif %}
+
+<p><a href="/network-test">Back to the network test</a></p>
+
+<section class="panel">
+  <h2>Flow source servers ({{ sources.len() }})</h2>
+  {% if sources.is_empty() %}
+  <p class="empty">None configured.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Description</th><th>Host</th><th>Port</th><th></th></tr></thead>
+    <tbody>
+      {% for source in sources %}
+      <tr>
+        <td>{{ source.description }}</td><td class="mono">{{ source.url }}</td><td class="num">{{ source.port }}</td>
+        <td>
+          <button class="secondary" data-edit="{{ source.id }}|{{ source.description }}|{{ source.url }}|{{ source.port }}">Edit</button>
+          <button class="danger" data-delete="{{ source.id }}">Delete</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2 id="form-title">Add a flow source server</h2>
+  <form class="stacked" id="source-form">
+    <input type="hidden" name="id">
+    <label>Description <input type="text" name="description" maxlength="200" required></label>
+    <label>Host <input type="text" name="url" maxlength="253" required></label>
+    <label>Port <input type="number" name="port" min="1" max="65535" required></label>
+    <div><button type="submit">Save</button> <button type="button" class="secondary" id="source-reset">Clear</button></div>
+    <p class="form-message" id="source-message" role="status"></p>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Import from CSV</h2>
+  <form class="stacked" id="import-form">
+    <p class="muted">Columns: description, url, port.</p>
+    <label>CSV file <input type="file" name="file" accept=".csv,text/csv" required></label>
+    <div><button type="submit">Import</button></div>
+    <p class="form-message" id="import-message" role="status"></p>
+  </form>
+</section>
+<script src="/static/network-test-config.js"></script>
+{% endblock %}

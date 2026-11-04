@@ -35,6 +35,21 @@ a host-run process and wrong inside Compose, where it is overridden to
 from `local/ServiceBusEmulatorConfig.json`. Discovery reads
 `UserConfig.Namespaces[].Queues[].Name`.
 
+§2.2.1 **Topic subscriptions are browsable** (upstream `45751ba`). Discovery
+also reads `UserConfig.Namespaces[].Topics[].Subscriptions[].Name`, and each
+subscription is listed beside the queues under the entity name
+**`topic:subscription`** — a colon, because the name is a path segment in
+`/messages/{queue}/{sequence}` and `/queues/{queue}/clear`, where the
+`topic/subscription` spelling of `03-message-bus.md` §2.2 would be two
+segments. A name containing a colon with text on both sides is a
+subscription; any other name is a queue. A subscription with
+`Properties.RequiresSession: true` is session-enabled and is read as §4.4
+says for queues. Peeking a subscription reads its active messages and does
+not consume them (§4.3). *Clearing* a subscription deletes messages the
+topic's other subscribers do not share, and is offered exactly as it is for
+a queue. The names are discovered only when `BUSWATCH_QUEUE_NAMES` is blank;
+when it is set, a subscription is named in it as `topic:subscription`.
+
 §2.3 The Python also reads a `config.ini` beside the package as a fallback.
 The Rust does not: environment variables and the discovery of §2.2 are the
 only sources.
@@ -185,6 +200,29 @@ match.
 Somebody has to be able to learn that BusWatch applies no redaction without
 reading a specification.
 
+§7.5 **UI aligned with the dashboard** (upstream `45751ba`). BusWatch shares
+the dashboard's shell and behaviour so the two tools feel like one:
+
+- **Light and dark themes.** The palette is defined as variables; dark values
+  apply when the viewer's system prefers dark, and a header control overrides
+  that (remembered in the browser, and the page renders correctly if storage
+  is unavailable).
+- **A refresh bar** on the queue index: when the page was last updated, a
+  *Refresh now* control that re-reads every queue and swaps the page's
+  content **in place** (no navigation, so scroll position and the theme
+  survive), and an *Auto refresh* option (off by default, every 30 s) with a
+  countdown. Off by default because each refresh opens a link per queue
+  against §6.1's connection quota; the cached view (§3.2) is never
+  auto-refreshed into a broker call the developer did not ask for.
+- The bar works without JavaScript as plain links (`?refresh_all=true`).
+
+*Deviation:* upstream vendors Bootstrap, Bootstrap Icons and the Inter
+typeface (about 1 MB of third-party files). They are not vendored: the
+existing stylesheet already carries the brand (§7.2), the controls here are
+a handful of buttons, and every file added to the binary is one more thing to
+review in `deny.toml`'s terms. The dashboard's own look is reproduced with the
+shared variables, not with its framework.
+
 §7.4 Message bodies are attacker-influenced: an HL7 field arrives from an
 upstream clinical system, and BusWatch renders it on a page a developer is
 logged into. Every rendered value MUST be escaped. This is the one security
@@ -195,6 +233,13 @@ obligation a tool that "only" displays things still carries.
 ---
 
 ## §8 Tests
+
+§8.1.1 Unit: §2.2.1's subscription discovery and entity-name splitting,
+against the real `ServiceBusEmulatorConfig.json`, including a name that has a
+colon at either end (a queue).
+
+§8.1.2 Integration: the refresh bar and theme control render on the index, the
+script is served, and every value on the page is still escaped (§7.4).
 
 §8.1 Unit: §2.2's discovery, against the real
 `ServiceBusEmulatorConfig.json`.

@@ -293,3 +293,29 @@ async fn an_endpoint_that_is_not_there_fails_without_retrying() {
         "Message sending failed - connection/timeout error"
     );
 }
+
+#[tokio::test]
+async fn the_wis_format_posts_the_wis_envelope() {
+    // spec/10-senders.md §4.6.2, over a real socket, and §4.4 unchanged.
+    let server = answering(200, "<Envelope><Status>AA</Status></Envelope>").await;
+    let mut sender = client(&server, Duration::from_secs(5)).with_format(soap_sender::Format::Wis);
+
+    let verdict = sender.deliver(MESSAGE).await.unwrap();
+
+    assert!(verdict.is_accepted());
+    let posted = server.received.lock().unwrap()[0].clone();
+    assert!(posted.contains("CaptureFromFiorona"), "{posted}");
+    assert!(!posted.contains("SendHL7Message"), "{posted}");
+}
+
+#[tokio::test]
+async fn an_unconvertible_message_is_not_posted_under_the_wis_format() {
+    // spec/10-senders.md §4.6.3 — an `Unexpected` failure, and no request.
+    let server = answering(200, "").await;
+    let mut sender = client(&server, Duration::from_secs(5)).with_format(soap_sender::Format::Wis);
+
+    let error = sender.deliver("not HL7 at all").await.unwrap_err();
+
+    assert!(matches!(error, DeliveryError::Unexpected(_)), "{error:?}");
+    assert_eq!(server.requests.load(Ordering::SeqCst), 0);
+}

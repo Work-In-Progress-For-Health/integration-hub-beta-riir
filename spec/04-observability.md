@@ -204,6 +204,13 @@ absent from the result, and a test for each of §2.3, §2.4, §2.6, §2.8.
 | `messages_received` | counter, +1 | Ingress servers, on receipt |
 | `messages_sent` | counter, +1 | Senders, on a positive acknowledgement |
 | `retry_delay_seconds` | histogram, unit `s` | The receive loop, per [`03-message-bus.md`](03-message-bus.md) §5.4.4 |
+| `messages_nack_ae` | counter, +1 | HL7 senders, on a recoverable negative acknowledgement (`MSA-1 = AE`, or an unrecognised code) |
+| `messages_nack_ar` | counter, +1 | HL7 senders, on `MSA-1 = AR`; the message is dead-lettered |
+| `messages_retry_attempt` | counter, +1 | HL7 senders, alongside `messages_nack_ae` |
+
+§3.1.3 The three NACK counters carry the attributes `ack_code` (`UNKNOWN`
+when there was none), `correlation_id`, `message_id` and `endpoint`
+(`host:port`). Added upstream in `62b8c34`.
 
 §3.1.1 A counter or histogram is created lazily on first use and cached by
 name.

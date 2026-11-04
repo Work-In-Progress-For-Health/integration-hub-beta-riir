@@ -57,7 +57,9 @@ pub struct Throttle {
     last_target: Option<Instant>,
 }
 
-/// A rate that cannot be honoured.
+/// A rate that cannot be honoured: `MAX_MESSAGES_PER_MINUTE=0` would mean a
+/// division by zero for the interval, and "never send" is not a throttle but
+/// a misconfiguration (`spec/10-senders.md` §2.4.3).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("MAX_MESSAGES_PER_MINUTE must be greater than zero")]
 pub struct InvalidRate;

@@ -120,9 +120,13 @@ pub struct Config {
     /// `EGRESS_SESSION_ID`. Required: every pipeline queue needs a session
     /// (`spec/01-architecture.md` §2.3.1).
     pub egress_session_id: String,
-    /// `MESSAGE_STORE_QUEUE_NAME`. Absent means no store sender, and the
-    /// non-blocking step 10 of `spec/07-hl7-server.md` §5 does nothing.
+    /// `MESSAGE_STORE_QUEUE_NAME`, when `MESSAGE_STORE_ENABLED` is true
+    /// (`spec/02-configuration.md` §2.1.2). Absent means no store sender, and
+    /// the non-blocking step 10 of `spec/07-hl7-server.md` §5 does nothing.
     pub message_store_queue: Option<String>,
+    /// A `MESSAGE_STORE_QUEUE_NAME` that was ignored because the store is
+    /// off (§2.1.2c), kept so startup can say so.
+    pub message_store_unused_queue: Option<String>,
     /// `SERVICE_BUS_CONNECTION_STRING`.
     pub connection_string: Option<Secret>,
     /// `SERVICE_BUS_NAMESPACE`.
@@ -185,6 +189,7 @@ impl Config {
         let validation_flow_name = reader.optional_string("HL7_VALIDATION_FLOW");
         let validation_flow = read_flow(&mut reader, validation_flow_name.as_deref());
 
+        let store = ihb_config::message_store(&reader);
         let config = Self {
             workflow_id,
             microservice_id,
@@ -194,7 +199,8 @@ impl Config {
             health_check: read_health_check(&mut reader),
             egress,
             egress_session_id,
-            message_store_queue: reader.optional_string("MESSAGE_STORE_QUEUE_NAME"),
+            message_store_queue: store.queue,
+            message_store_unused_queue: store.unused_queue,
             connection_string: reader.optional_secret("SERVICE_BUS_CONNECTION_STRING"),
             namespace: reader.optional_string("SERVICE_BUS_NAMESPACE"),
             hl7_version: reader.optional_string("HL7_VERSION"),
@@ -480,11 +486,9 @@ mod tests {
     #[test]
     fn a_blank_sending_app_disables_the_check() {
         // spec/07-hl7-server.md §3.2.1, via spec/02 §1.1.
-        assert!(
-            with(&[("SENDING_APP", "  ")])
-                .unwrap()
-                .sending_apps
-                .is_empty()
+        assert_eq!(
+            with(&[("SENDING_APP", "  ")]).unwrap().sending_apps,
+            Vec::<String>::new()
         );
         assert_eq!(
             with(&[("SENDING_APP", "245, 212 ,192")])

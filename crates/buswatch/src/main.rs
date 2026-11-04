@@ -20,7 +20,10 @@ use std::collections::BTreeSet;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use buswatch::config::{Config, discover_queues, discover_session_queues};
+use buswatch::config::{
+    Config, discover_queues, discover_session_queues, discover_session_subscriptions,
+    discover_subscriptions,
+};
 use buswatch::live::LiveReader;
 use buswatch::web::{AppState, router};
 use ihb_bus::connection::Endpoint;
@@ -72,6 +75,10 @@ async fn run() -> ExitCode {
     // §2.2 — blank means discover.
     if config.queue_names.is_empty() {
         config.queue_names = discover_queues(EMULATOR_CONFIG);
+        // §2.2.1 -- topic subscriptions are browsable beside the queues.
+        config
+            .queue_names
+            .extend(discover_subscriptions(EMULATOR_CONFIG));
         tracing::info!(
             discovered = config.queue_names.len(),
             "BUSWATCH_QUEUE_NAMES is blank, so queues were discovered from \
@@ -115,7 +122,8 @@ async fn run() -> ExitCode {
     // §4.4 — which queues need a session receiver. Discovered even when the
     // names came from the environment, because the *names* being configured
     // says nothing about whether they are sessionful.
-    let session_queues: BTreeSet<String> = discover_session_queues(EMULATOR_CONFIG);
+    let mut session_queues: BTreeSet<String> = discover_session_queues(EMULATOR_CONFIG);
+    session_queues.extend(discover_session_subscriptions(EMULATOR_CONFIG));
 
     let reader = match LiveReader::connect(&endpoint, session_queues).await {
         Ok(reader) => reader,

@@ -38,6 +38,9 @@ fn main() -> ExitCode {
 }
 
 /// Everything after the runtime exists.
+// A start-up sequence whose order is the contract (config, then telemetry,
+// then bind, then serve); splitting it would scatter that order.
+#[allow(clippy::too_many_lines)]
 async fn run() -> ExitCode {
     let config = match Config::from_env() {
         Ok(config) => config,
@@ -117,12 +120,23 @@ async fn run() -> ExitCode {
         }
     };
 
-    let store = match bus.sender(&config.message_store_queue).await {
-        Ok(sender) => sender,
-        Err(error) => {
-            tracing::error!(%error, queue = %config.message_store_queue, "could not open the message-store sender");
-            return ExitCode::FAILURE;
+    let store = if config.message_store_enabled {
+        match bus.sender(&config.message_store_queue).await {
+            Ok(sender) => Some(sender),
+            Err(error) => {
+                tracing::error!(%error, queue = %config.message_store_queue, "could not open the message-store sender");
+                return ExitCode::FAILURE;
+            }
         }
+    } else {
+        // spec/02-configuration.md §2.1.2c — the queue name is required here,
+        // so it is always set; the switch is the only thing keeping the audit
+        // trail off, and that must not be silent.
+        tracing::warn!(
+            queue = %config.message_store_queue,
+            "MESSAGE_STORE_ENABLED is not true; no message will be stored"
+        );
+        None
     };
 
     let address = config.health_check;
