@@ -121,6 +121,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
+      # The first run that got past the Podman socket died here, partway
+      # through the test build, with "No space left on device" on the
+      # runner itself: the stack's images plus an all-features build of 34
+      # crates outgrow the free disk of a standard runner. These toolchains
+      # are preinstalled, large, and used by nothing in this job.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
       # `local/.secrets` is not committed. The password is a local-stack
       # credential for a container that exists for the length of this job
       # and is reachable only from it.
