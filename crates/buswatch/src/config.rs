@@ -338,10 +338,13 @@ mod tests {
         // queue added to the stack is a queue BusWatch shows.
         let queues = discover_queues(EMULATOR);
 
-        // Eight, not nine: upstream #427 moved the PIMS flow from a queue to
-        // topics, so `local-inthub-pims-transformer-ingress` is gone from the
-        // file. A drop below this means a queue was lost, not migrated.
-        assert!(queues.len() >= 8, "found {}: {queues:?}", queues.len());
+        // Seven, not eight: upstream moved the PIMS flow (#427) and then the
+        // LIMS ingress from queues to topics, so neither
+        // `local-inthub-pims-transformer-ingress` nor
+        // `local-inthub-lims-transformer-ingress` is a queue in the file any
+        // more (the latter is a topic, spec/01 §2.1.3a). A drop below this
+        // means a queue was lost, not migrated.
+        assert!(queues.len() >= 7, "found {}: {queues:?}", queues.len());
         assert!(queues.contains(&"local-inthub-phw-transformer-ingress".to_string()));
         assert!(queues.contains(&"local-inthub-messagestore".to_string()));
         assert!(queues.contains(&"local-inthub-priority-messagequeue".to_string()));

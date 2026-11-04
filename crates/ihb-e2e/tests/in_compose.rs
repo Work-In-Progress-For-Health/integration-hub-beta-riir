@@ -36,11 +36,10 @@
 //! for the version its transformer was written against fails here.
 //!
 //! `lims-to-mpi` is covered separately, by
-//! [`the_lims_soap_flow_reaches_its_queue`]. It differs twice over: its
-//! ingress is SOAP over HTTP rather than MLLP, and it **ends at a queue**.
-//! `spec/01-architecture.md` §2.1 marks its transformer *(future)*, so
-//! there is nothing downstream to deliver to and the mock receiver is not
-//! the assertion.
+//! [`the_lims_soap_flow_reaches_its_topic`]. It differs twice over: its
+//! ingress is SOAP over HTTP rather than MLLP, and the assertion is taken
+//! **at the LIMS topic**, from a subscription nothing in that profile
+//! consumes (`spec/01-architecture.md` §2.1.3), not at the mock receiver.
 //!
 //! # Running it
 //!
@@ -267,6 +266,8 @@ const ALL_PROFILES: &[&str] = &[
     "mosaiq-to-mpi",
     "risp-to-mpi",
     "lims-to-mpi",
+    "lims-to-wrrs",
+    "lims-to-trrr",
     "mpi-to-topic",
     "dashboard",
     "replay",
@@ -488,32 +489,33 @@ async fn every_mllp_flow_carries_its_sample_through_the_containers() {
 
 /// The LIMS flow, which is shaped differently from the other five.
 ///
-/// `spec/01-architecture.md` §2.1: LIMS → MPI runs
+/// `spec/01-architecture.md` §2.1.3: LIMS → MPI runs
 ///
 /// ```text
-/// SOAP/HTTP → hl7-soap-server → local-inthub-lims-transformer-ingress → (future)
+/// SOAP/HTTP → hl7-soap-server → topic local-inthub-lims-transformer-ingress
+///                                 ├─ …-ingress-sub        → lims-mpi-hl7-sender
+///                                 ├─ …-lims-wrrs-transformer-sub (A31/A40 only)
+///                                 └─ …-ingress-trrr-sub   → lims-trrr-hl7-sender
 /// ```
 ///
-/// The transformer does not exist yet, so the flow **terminates at the
-/// queue**. Asserting arrival at the mock receiver would be asserting
-/// something the architecture does not claim — the message correctly sits
-/// on the ingress queue with nothing to collect it.
-///
-/// Worth knowing: the `lims-to-mpi` Compose profile also starts
-/// `mpi-hl7-sender` and `mpi-hl7-mock-receiver`, and neither can receive
-/// anything from this flow, because nothing bridges
-/// `lims-transformer-ingress` to `mpi-sender-ingress`. They are idle in
-/// this profile. See `spec/18-deployment.md` §5.2.1.
+/// The assertion is taken at the **topic**, from the `-trrr-sub`
+/// subscription. The `lims-to-mpi` profile runs `lims-mpi-hl7-sender`, which
+/// owns `-ingress-sub` and would race this test for its messages; nothing in
+/// that profile reads `-trrr-sub`, so a copy of every message waits there.
+/// The session receiver is a *subscription* receiver, as the session-enabled
+/// subscriptions of `local/ServiceBusEmulatorConfig.json` require.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_lims_soap_flow_reaches_its_queue() {
+async fn the_lims_soap_flow_reaches_its_topic() {
     /// The SOAP ingress, published by `local/docker-compose.yml`.
     const SOAP_PORT: u16 = 8082;
     /// `SOAP_ENDPOINT_PATH` in `local/lims-soap-hl7-server.env`.
     const SOAP_PATH: &str = "/soap";
-    /// Where the SOAP server writes (`EGRESS_QUEUE_NAME`).
+    /// Where the SOAP server writes (`EGRESS_TOPIC_NAME`).
     const LIMS_INGRESS: &str = "local-inthub-lims-transformer-ingress";
+    /// A subscription no container of the `lims-to-mpi` profile consumes.
+    const LIMS_SUBSCRIPTION: &str = "local-inthub-lims-transformer-ingress-trrr-sub";
     /// `EGRESS_SESSION_ID`.
-    const LIMS_SESSION: &str = "lims-soapserver";
+    const LIMS_SESSION: &str = "lims-to-mpi";
     /// The control id in the sample, replaced per run.
     const SAMPLE_CONTROL_ID: &str = "6778031837018553261z82215";
 
@@ -537,12 +539,20 @@ async fn the_lims_soap_flow_reaches_its_queue() {
         "the SOAP ingress returned a fault:\n{response}"
     );
 
-    // A session receiver: this queue is session-enabled like every other
-    // pipeline queue (`spec/01-architecture.md` §2.3.1).
-    let receiver = bus
-        .session_receiver(LIMS_INGRESS, LIMS_SESSION)
-        .await
-        .expect("the LIMS ingress queue exists and its session can be accepted");
+    // The session may not exist until the first message has been copied to
+    // the subscription, so ask again for a while, as the MLLP flows do.
+    let mut accepted = None;
+    for _ in 0..60 {
+        if let Ok(receiver) = bus
+            .subscription_receiver(LIMS_INGRESS, LIMS_SUBSCRIPTION, LIMS_SESSION)
+            .await
+        {
+            accepted = Some(receiver);
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    let receiver = accepted.expect("the LIMS topic's subscription session became available");
 
     let mut arrived = false;
     for _ in 0..8 {
@@ -563,7 +573,7 @@ async fn the_lims_soap_flow_reaches_its_queue() {
 
     assert!(
         arrived,
-        "the SOAP ingress accepted the message but {marker} never reached {LIMS_INGRESS}"
+        "the SOAP ingress accepted the message but {marker} never reached {LIMS_INGRESS}/{LIMS_SUBSCRIPTION}"
     );
 
     let _ = receiver.close().await;

@@ -819,9 +819,10 @@ and gate-checked except where noted.
   [`spec/09`](spec/09-transformers.md) §5.10–§5.12
 - [x] PROMS FHIR mapping revision (also #346, #370) —
   [`spec/16`](spec/16-proms-transformer.md) §10
-- [ ] **Open:** LIMS ingress is still a queue locally, so the LIMS WRRS
-  transformer and TRRR sender have no feed; moving `hl7-server` and
-  `hl7-soap-server` to publish to a topic is outstanding.
+- [x] LIMS ingress is a topic locally (`01-architecture.md` §2.1.3a): emulator
+  topic with its three subscriptions, `hl7-soap-server` and `rest-server`
+  publish to it, `lims-mpi-hl7-sender` added, and the WRRS transformer and
+  TRRR sender have a feed. `ihb-e2e` `the_lims_soap_flow_reaches_its_topic`.
 - [ ] **Open:** the PIMS client sends `X-API-Key`; with lookup auth on it
   needs a bearer token. Needs a decision.
 - [x] `cargo deny` advisories cleared by a lock-file bump of rustls,

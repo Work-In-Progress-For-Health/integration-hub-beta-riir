@@ -335,13 +335,16 @@ A stack is ready when something reports `(healthy)`, nothing reports
 `(starting)` or `(unhealthy)`, and that has held for several consecutive
 readings. One reading is a race.
 
-§5.2.3 The `lims-to-mpi` profile starts `mpi-hl7-sender` and
-`mpi-hl7-mock-receiver`, and **neither can receive anything from that
-flow**: the LIMS SOAP server writes to
-`local-inthub-lims-transformer-ingress`, whose transformer
-`01-architecture.md` §2.1 marks *(future)*, so nothing bridges it to
-`mpi-sender-ingress`. They are idle in this profile. Harmless, and recorded
-so their silence is not read as a fault.
+§5.2.3 The `lims-to-mpi` profile starts `hl7-soap-server`,
+`lims-mpi-hl7-sender` and the topic mock receiver. The SOAP server publishes
+to the topic `local-inthub-lims-transformer-ingress` with session
+`lims-to-mpi`; the sender reads `…-ingress-sub` and delivers to the topic mock
+receiver (`01-architecture.md` §2.1.3a). The shared `mpi-hl7-sender` and the
+queue mock receiver are **not** in this profile: they read
+`mpi-sender-ingress`, which this flow never writes, and were idle there.
+`lims-to-wrrs` and `lims-to-trrr` also start `hl7-soap-server`, so each has a
+feed; run one profile at a time (the emulator's connection quota, `14-buswatch.md`
+§6.1).
 
 §5.3 `local/ServiceBusEmulatorConfig.json` and
 `local/sample_messages/` are copied across unchanged and are the fixtures of

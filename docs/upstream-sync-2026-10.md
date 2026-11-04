@@ -44,6 +44,19 @@ nothing in the gap is missed.
 | `330f1a7` | `hl7-mock-receiver`: `reject` trigger answers `AR`, beats `fail` | `11-mock-receivers.md` §1.1 |
 | `bd6c697` | Already true: `hl7-sender` `is_stale` treats a socket error as closed | none needed |
 
+### LIMS ingress moved to a topic
+
+Upstream's `local-inthub-lims-transformer-ingress` is a topic with three
+subscriptions. Done here: emulator config copied exactly (queue removed; the
+`buswatch` queue floor drops from eight to seven), `lims-soap-hl7-server.env`
+and `rest-server-lims.env` use `EGRESS_TOPIC_NAME` with session `lims-to-mpi`,
+new `lims-mpi-hl7-sender` (upstream `lims-mpi-hl7-sender.env`), and the
+`lims-to-wrrs` / `lims-to-trrr` profiles start `hl7-soap-server`. The code
+already supported topic egress (`hl7-soap-server`, and `rest-server` via the
+shared `Identity`); tests were added for `rest-server`. Deviation: upstream's
+TRRR sender uses session `lims-soapserver`, which nothing publishes, so ours
+uses `lims-to-mpi` (`01-architecture.md` §2.1.3a).
+
 ### Left on the shared queue on purpose
 
 `8c1d012` also moved the shared `local-inthub-mpi-sender-ingress` (PHW,

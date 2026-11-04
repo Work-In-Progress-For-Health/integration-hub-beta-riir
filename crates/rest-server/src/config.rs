@@ -496,8 +496,40 @@ mod tests {
 
     #[test]
     fn queue_and_topic_together_are_refused() {
-        // test_cannot_configure_both_queue_and_topic
-        assert!(with(&[("EGRESS_TOPIC_NAME", "egress-topic")]).is_err());
+        // test_cannot_configure_both_queue_and_topic; spec/02-configuration.md §3.1.
+        let error = with(&[("EGRESS_TOPIC_NAME", "egress-topic")])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("Cannot specify both EGRESS_QUEUE_NAME and EGRESS_TOPIC_NAME"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn neither_queue_nor_topic_is_refused() {
+        // spec/02-configuration.md §3.1: exactly one egress is required.
+        let error = without("EGRESS_QUEUE_NAME").unwrap_err().to_string();
+        assert!(
+            error.contains("Either EGRESS_QUEUE_NAME or EGRESS_TOPIC_NAME must be provided"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_topic_alone_is_a_topic_egress() {
+        // The LIMS ingress is a topic (spec/01-architecture.md §2.1.3), so
+        // `local/rest-server-lims.env` sets `EGRESS_TOPIC_NAME` alone.
+        let pairs: Vec<(&str, &str)> = BASE
+            .into_iter()
+            .filter(|(k, _)| *k != "EGRESS_QUEUE_NAME")
+            .chain([
+                ("EGRESS_TOPIC_NAME", "egress-topic"),
+                ("OUTPUT_FORMAT", "raw"),
+            ])
+            .collect();
+        let config = Config::from_pairs(pairs).unwrap();
+        assert_eq!(config.identity.egress, Egress::Topic("egress-topic".into()));
     }
 
     #[test]

@@ -280,6 +280,14 @@ and `{MSH-9.1}_{MSH-9.2}` when `MSH-9.3` is absent (`ADT^A28` publishes
 (`EGRESS_TOPIC_NAME`, `WRRS_TOPIC_NAME`; `01-architecture.md` §2.1.3); the
 queue variants of `02-configuration.md` §11 remain valid configuration.
 
+§7.2.3 The `generic` pipeline takes the same egress choice, read by the same
+function as `hl7-rest-server` (§0.1): exactly one of `EGRESS_QUEUE_NAME` and
+`EGRESS_TOPIC_NAME`, with `02-configuration.md` §3.1's two messages for both
+and for neither. LIMS publishes to a topic (`local/rest-server-lims.env`;
+`01-architecture.md` §2.1.3a). Tests: `rest-server`
+`queue_and_topic_together_are_refused`, `neither_queue_nor_topic_is_refused`,
+`a_topic_alone_is_a_topic_egress`.
+
 ---
 
 ## §8 `hl7-rest-server` configuration

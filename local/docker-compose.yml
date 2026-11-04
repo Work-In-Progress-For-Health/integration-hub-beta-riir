@@ -194,15 +194,17 @@ services:
       - sb-emulator
     profiles:
       - lims-to-mpi
+      - lims-to-wrrs
+      - lims-to-trrr
     networks:
       integration-hub:
         aliases:
           - "hl7-soap-server"
 
   # The REST ingress, configured as hl7-soap-server (spec/19-rest-servers.md
-  # §9). One profile, ingress only: its egress queue is the LIMS transformer's,
-  # so run it alone against the emulator rather than beside `lims-to-mpi`,
-  # which would put two servers on one queue.
+  # §9). One profile, ingress only: its egress topic is the LIMS one, so run it
+  # alone against the emulator rather than beside `lims-to-mpi`, which would
+  # put two servers on one topic.
   rest-server:
     container_name: "ihb-rs-rest-server"
     image: "ihb-rs/rest-server:${IHB_TAG:-dev}"
@@ -278,7 +280,6 @@ services:
       - sb-emulator
     profiles:
       - phw-to-mpi
-      - lims-to-mpi
       - chemo-to-mpi
     networks:
       integration-hub:
@@ -431,9 +432,38 @@ services:
         aliases:
           - "wrrs-stmsg-dbsender"
 
+  # Dedicated LIMS -> MPI sender (spec/18-deployment.md §5.2.3): subscription ingress from
+  # the topic hl7-soap-server publishes to, delivering to the topic mock receiver. It
+  # replaces the shared queue-based mpi-hl7-sender in this profile, which nothing fed.
+  lims-mpi-hl7-sender:
+    container_name: "ihb-rs-lims-mpi-hl7-sender"
+    image: "ihb-rs/hl7-sender:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: hl7-sender
+    env_file:
+      - ./lims-mpi-hl7-sender.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - lims-to-mpi
+    networks:
+      integration-hub:
+        aliases:
+          - "lims-mpi-hl7-sender"
+
   # Classifies LIMS A31/A40 and fans out one message per matching rule to
-  # local-inthub-lims-wrrs-classified (spec/09-transformers.md section 10). Its own profile:
-  # the LIMS topic it reads is not fed by this stack's lims-soap-hl7-server (a queue here).
+  # local-inthub-lims-wrrs-classified (spec/09-transformers.md section 10). Its own profile,
+  # fed by hl7-soap-server publishing to the LIMS topic.
   lims-wrrs-hl7-transformer:
     container_name: "ihb-rs-lims-wrrs-hl7-transformer"
     image: "ihb-rs/hl7-lims-wrrs-transformer:${IHB_TAG:-dev}"
@@ -461,7 +491,7 @@ services:
           - "lims-wrrs-hl7-transformer"
 
   # Dedicated LIMS -> TRRR sender (upstream #429): a second subscription on the LIMS topic,
-  # delivering to the topic mock receiver locally. Same topic caveat as the transformer above.
+  # delivering to the topic mock receiver locally.
   lims-trrr-hl7-sender:
     container_name: "ihb-rs-lims-trrr-hl7-sender"
     image: "ihb-rs/hl7-sender:${IHB_TAG:-dev}"
@@ -511,7 +541,6 @@ services:
       - sb-emulator
     profiles:
       - phw-to-mpi
-      - lims-to-mpi
       - chemo-to-mpi
       - pims-to-mpi
       - mpi-to-topic
@@ -807,6 +836,7 @@ services:
     profiles:
       - phw-to-mpi
       - lims-to-mpi
+      - lims-to-trrr
       - paris-to-mpi
       - chemo-to-mpi
       - pims-to-mpi
