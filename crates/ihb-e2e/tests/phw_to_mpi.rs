@@ -301,7 +301,7 @@ async fn flow() {
     // The correlation id minted at ingress — the value the whole audit
     // trail rests on (`spec/03-message-bus.md` §4).
     let correlation_id = batch[0].properties["CorrelationId"].clone();
-    assert!(!correlation_id.is_empty());
+    assert_ne!(correlation_id, "");
 
     let outcomes = runtime.process_batch(&batch).await;
     assert_eq!(outcomes, vec![Handled::Handled; batch.len()]);

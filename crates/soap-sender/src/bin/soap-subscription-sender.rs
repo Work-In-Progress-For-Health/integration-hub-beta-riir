@@ -37,14 +37,14 @@ fn main() -> ExitCode {
                 )
             }) {
                 return Err(
-                    "WS_SECURITY_ENABLED is reserved and must be false;                      spec/10-senders.md §4.5"
+                    "WS_SECURITY_ENABLED is reserved and must be false; spec/10-senders.md §4.5"
                         .to_string(),
                 );
             }
 
             if read("SOAP_CLIENT_CERT_PATH").is_some() {
                 return Err(
-                    "SOAP_CLIENT_CERT_PATH is configured, but mTLS is not yet                      implemented by this sender"
+                    "SOAP_CLIENT_CERT_PATH is configured, but mTLS is not yet implemented by this sender"
                         .to_string(),
                 );
             }
