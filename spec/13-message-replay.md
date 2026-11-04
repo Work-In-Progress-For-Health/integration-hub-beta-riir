@@ -96,7 +96,12 @@ is traceable to its first passage through the Hub. `ReplayId` and
 suppress a deliberate replay.
 
 §4.2 The page is sent as a batch, split by size per
-[`03-message-bus.md`](03-message-bus.md) §3.3.
+[`03-message-bus.md`](03-message-bus.md) §3.3. The implementation calls
+`MessageSink::send_batch`, whose `LiveSender` override is a real Service Bus
+batch; a failed attempt therefore delivers nothing from the batch it failed
+in, and the §5.2 retry cannot re-send rows that already arrived. (An earlier
+revision sent rows one at a time and could. Found in the 2026-10 upstream
+sync, corrected 2026-11-04.)
 
 §4.3 **Redirecting a topic-fed sender to the priority queue** (upstream
 `8c1d012`, `docs/MESSAGE_REPLAY.md`). A sender reads either a queue or a

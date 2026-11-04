@@ -43,10 +43,9 @@ struct Config {
     batch_id: Uuid,
     /// `REPLAY_BATCH_SIZE` — rows per page (default 100). `i32` because it
     /// is bound as the `TOP (@P1)` parameter, which TDS types as `int`.
-    /// Read with `integer_or`, so `0` is accepted although
-    /// `spec/02-configuration.md` §7.2 says "must be a positive integer";
-    /// a `0` fetches nothing and the job reports success having replayed
-    /// nothing.
+    /// Read by [`replay_batch_size`], which rejects `0`
+    /// (`spec/02-configuration.md` §7.2): a `0` would fetch nothing and the
+    /// job would report success having replayed nothing.
     batch_size: i32,
     /// `PRIORITY_QUEUE_NAME` — where replayed messages go.
     priority_queue_name: String,
@@ -56,6 +55,18 @@ struct Config {
     namespace: Option<String>,
     /// The database settings of `spec/12-message-store.md` §5.
     sql: SqlConfig,
+}
+
+/// `REPLAY_BATCH_SIZE`: positive, or a startup failure; blank is the default.
+///
+/// `spec/02-configuration.md` §7.2. The Python rejects zero too
+/// (`app_config.py`, `_read_replay_batch_size`): a zero-row page would
+/// fetch nothing and exit 0 as "complete", which is the worst possible
+/// answer for a replay.
+fn replay_batch_size(reader: &mut Reader) -> usize {
+    reader
+        .optional_positive_integer("REPLAY_BATCH_SIZE")
+        .unwrap_or(100_usize)
 }
 
 /// Read everything, reporting every problem at once
@@ -73,7 +84,7 @@ fn config() -> Result<Config, ihb_config::ConfigErrors> {
     // exit 0, which is the worst possible answer.
     let batch_id = reader.required_uuid("REPLAY_BATCH_ID");
     let priority_queue_name = reader.required_string("PRIORITY_QUEUE_NAME");
-    let batch_size: usize = reader.integer_or("REPLAY_BATCH_SIZE", 100_usize);
+    let batch_size = replay_batch_size(&mut reader);
 
     let sql = SqlConfig::read(&mut reader)?;
 
@@ -218,5 +229,38 @@ fn telemetry_config() -> ihb_telemetry::otel::Config {
         azure_log_level: read("AZURE_LOG_LEVEL").unwrap_or_else(|| "WARN".to_string()),
         rust_log: read("RUST_LOG"),
         connection_string: read("APPLICATIONINSIGHTS_CONNECTION_STRING"),
+    }
+}
+
+#[cfg(test)]
+// Tests may unwrap: a panic is the failure report.
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_blank_batch_size_is_the_default_of_one_hundred() {
+        // spec/02-configuration.md §7.2 — blank means the default.
+        for pairs in [vec![], vec![("REPLAY_BATCH_SIZE", "  ")]] {
+            let mut reader = Reader::from_pairs(pairs);
+            assert_eq!(replay_batch_size(&mut reader), 100);
+            reader.finish().unwrap();
+        }
+    }
+
+    #[test]
+    fn a_batch_size_of_zero_is_a_startup_failure() {
+        // spec/02-configuration.md §7.2 — "must be a positive integer". A
+        // zero would fetch nothing and report the replay complete.
+        let mut reader = Reader::from_pairs([("REPLAY_BATCH_SIZE", "0")]);
+        let _ = replay_batch_size(&mut reader);
+        assert!(reader.finish().is_err());
+    }
+
+    #[test]
+    fn a_positive_batch_size_is_used() {
+        let mut reader = Reader::from_pairs([("REPLAY_BATCH_SIZE", "25")]);
+        assert_eq!(replay_batch_size(&mut reader), 25);
+        reader.finish().unwrap();
     }
 }

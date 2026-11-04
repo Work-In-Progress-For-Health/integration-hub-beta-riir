@@ -824,8 +824,11 @@ and gate-checked except where noted.
   `hl7-soap-server` to publish to a topic is outstanding.
 - [ ] **Open:** the PIMS client sends `X-API-Key`; with lookup auth on it
   needs a bearer token. Needs a decision.
-- [ ] **Open:** `cargo deny` advisories (rustls, webpki-roots, tokio) —
-  dependency bump, unrelated to this port.
+- [x] `cargo deny` advisories cleared by a lock-file bump of rustls,
+  rustls-webpki, tokio and webpki-roots.
+- [x] Replay job sends a page as one batch (`spec/13` §4.2) and rejects
+  `REPLAY_BATCH_SIZE=0` (`spec/02` §7.2); `wrds-service`'s non-200 handling
+  confirmed against the Python (`spec/09` §9.3.1).
 - [ ] **Open:** nothing here has run against a real Service Bus or SQL Server.
 
 ---

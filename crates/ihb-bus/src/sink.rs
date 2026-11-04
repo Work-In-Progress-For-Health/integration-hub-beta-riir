@@ -77,6 +77,32 @@ pub trait MessageSink: Send + Sync {
     /// [`BusError::MessageTooLarge`] when it never could be.
     fn send(&self, message: Outgoing) -> impl Future<Output = Result<(), BusError>> + Send;
 
+    /// Send several messages as one unit, as far as the transport allows.
+    ///
+    /// The default sends them one at a time and stops at the first failure,
+    /// which is the best an implementation without batching can do.
+    /// [`crate::live::LiveSender`] overrides it with a real Service Bus
+    /// batch, split by size (`spec/03-message-bus.md` §3.3), so that a
+    /// failed attempt delivers nothing from the batch it failed in. A
+    /// caller that cares about not duplicating a message on retry
+    /// (`spec/13-message-replay.md` §4.2, §5.3) should use this rather than
+    /// looping over [`MessageSink::send`].
+    ///
+    /// # Errors
+    ///
+    /// As [`MessageSink::send`].
+    fn send_batch(
+        &self,
+        messages: Vec<Outgoing>,
+    ) -> impl Future<Output = Result<(), BusError>> + Send {
+        async move {
+            for message in messages {
+                self.send(message).await?;
+            }
+            Ok(())
+        }
+    }
+
     /// The queue or topic this sends to.
     ///
     /// For error messages and log lines. A failure that does not say where

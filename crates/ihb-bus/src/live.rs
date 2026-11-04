@@ -1005,6 +1005,12 @@ impl MessageSink for LiveSender {
         Self::send(self, message).await
     }
 
+    /// [`LiveSender::send_batch`]: one Service Bus batch per fitting group,
+    /// so a failed attempt does not leave half a page on the queue.
+    async fn send_batch(&self, messages: Vec<Outgoing>) -> Result<(), BusError> {
+        Self::send_batch(self, messages).await.map(|_sent| ())
+    }
+
     fn entity(&self) -> &str {
         &self.entity
     }

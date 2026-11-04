@@ -824,6 +824,13 @@ error carrying its `faultstring`. Otherwise each `Row` of
 `GetResultSetResponse` becomes one map from `Attribute/Name` to `Value`
 (empty when absent); a pair with no name is skipped.
 
+§9.3.1 **A non-`200` status is never parsed**, so a SOAP fault returned with
+status `500` surfaces as the HTTP-status error, not as a fault. This is the
+Python's behaviour (`wrds_service.py`: the status check raises
+`WRDSServiceError("... returned HTTP n")` before the body is read, and the
+fault branch is reachable only from a `200`). Verified against upstream
+2026-11-04; `wrds-service` matches, and a change here would be a deviation.
+
 §9.4 **Translation is client-side.** `to_code(rows, from_code, type)` returns
 the `ToCode` of the **first** row whose `FromCode` equals `from_code` and
 whose `type` equals `type`, comparing attribute **names** case-insensitively

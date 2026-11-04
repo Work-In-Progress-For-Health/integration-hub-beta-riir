@@ -156,20 +156,18 @@ pub async fn send<S: MessageSink>(sink: &S, page: &[Row]) -> Result<(), JobError
         .map_err(|error| JobError::Send(error.to_string()))
 }
 
-/// One send attempt: every row of the page, in order.
+/// One send attempt: the whole page, as a batch.
 ///
-/// Rows go one `send` at a time, stopping at the first failure. Note that
-/// `spec/13-message-replay.md` §4.2 says the page is sent as a size-split
-/// batch (the Python builds one `ServiceBus` batch per attempt, so a failed
-/// attempt delivers nothing). Sent singly, a failure part-way leaves the
-/// earlier rows on the queue and the retry in [`send`] sends them again,
-/// so a retry of any kind can duplicate rows; §5.3's duplicate warning is
-/// only given for timeouts.
+/// `spec/13-message-replay.md` §4.2 — the page goes as a size-split batch,
+/// as the Python builds one `ServiceBus` batch per attempt. A failed attempt
+/// therefore delivers nothing from the batch it failed in, so the retry in
+/// [`send`] does not re-send rows that already arrived. (Sent one row at a
+/// time, a failure part-way would leave the earlier rows on the queue and
+/// the retry would duplicate them.) A sink without real batching falls back
+/// to one-at-a-time; see [`MessageSink::send_batch`].
 async fn send_once<S: MessageSink>(sink: &S, page: &[Row]) -> Result<(), ihb_bus::error::BusError> {
-    for row in page {
-        sink.send(message_for(row)).await?;
-    }
-    Ok(())
+    sink.send_batch(page.iter().map(message_for).collect())
+        .await
 }
 
 /// Mark a page's rows (§6), returning how many were submitted.
@@ -314,6 +312,44 @@ mod tests {
         fn entity(&self) -> &str {
             self.inner.entity()
         }
+    }
+
+    /// A sink that records whether the page arrived as one batch.
+    struct Batching {
+        batches: std::sync::Mutex<Vec<usize>>,
+    }
+
+    // The trait methods are `async`; this stub has nothing to await.
+    #[allow(clippy::unused_async_trait_impl)]
+    impl MessageSink for Batching {
+        async fn send(&self, _message: ihb_bus::message::Outgoing) -> Result<(), BusError> {
+            unreachable!("a page must go through send_batch")
+        }
+
+        async fn send_batch(
+            &self,
+            messages: Vec<ihb_bus::message::Outgoing>,
+        ) -> Result<(), BusError> {
+            self.batches.lock().unwrap().push(messages.len());
+            Ok(())
+        }
+
+        fn entity(&self) -> &str {
+            QUEUE
+        }
+    }
+
+    #[tokio::test]
+    async fn a_page_is_sent_as_one_batch() {
+        // spec/13-message-replay.md §4.2 — a size-split batch, so a failed
+        // attempt delivers nothing and the retry cannot duplicate rows.
+        let sink = Batching {
+            batches: std::sync::Mutex::new(Vec::new()),
+        };
+
+        send(&sink, &rows(5)).await.unwrap();
+
+        assert_eq!(*sink.batches.lock().unwrap(), vec![5]);
     }
 
     fn flaky(bus: &FakeBus, failures: usize, error: BusError) -> Flaky {
