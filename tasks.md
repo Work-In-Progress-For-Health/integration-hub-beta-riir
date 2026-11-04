@@ -823,8 +823,10 @@ and gate-checked except where noted.
   topic with its three subscriptions, `hl7-soap-server` and `rest-server`
   publish to it, `lims-mpi-hl7-sender` added, and the WRRS transformer and
   TRRR sender have a feed. `ihb-e2e` `the_lims_soap_flow_reaches_its_topic`.
-- [ ] **Open:** the PIMS client sends `X-API-Key`; with lookup auth on it
-  needs a bearer token. Needs a decision.
+- [ ] **Open, upstream:** the PIMS client sends `X-API-Key`, which the
+  lookup service does not accept; the Python has the same gap. Written up in
+  [`docs/upstream/pims-lookup-auth-mismatch.md`](docs/upstream/pims-lookup-auth-mismatch.md)
+  for the Hub team to decide; not filed.
 - [x] `cargo deny` advisories cleared by a lock-file bump of rustls,
   rustls-webpki, tokio and webpki-roots.
 - [x] Replay job sends a page as one batch (`spec/13` §4.2) and rejects
