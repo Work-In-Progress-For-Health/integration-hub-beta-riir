@@ -406,6 +406,19 @@ them freely; every `#[allow]` in non-test code carries a comment justifying
 it. CI runs clippy with `-D warnings`, so an unjustified allow fails the
 build.
 
+### Continuous integration
+
+The gate is one command, `cargo xtask gate`, that git hooks, developers and
+every CI call; no CI file lists the steps ([`spec/21`](spec/21-local-ci.md)
+§1). It has tiers (fast, gate, stack, flows) so the cheap ones run on every
+push and the container-backed ones run when it matters. A local run writes a
+record of what ran and may post it as a commit status; that status is
+self-attested, so the hosted `gate` stays required alongside it
+([`spec/21`](spec/21-local-ci.md) §3.4). Release artifacts are never built
+on a developer machine (§4.1). The evidence and the options weighed, including
+the ones rejected, are in
+[`docs/local-ci-assessment.md`](docs/local-ci-assessment.md).
+
 ### Tests
 
 Four layers, all required (see `spec/17-testing-and-quality.md`):
@@ -608,6 +621,14 @@ and deliberately last.
 Dockerfiles, the Compose stack, the ADO pipeline definitions, and the
 cutover runbook. Spec `18`.
 
+### Phase 10 — Local CI
+
+`cargo xtask gate`, tiered; git hooks; the evidence record and commit
+status; scheduled local runs of the stack and flow tiers; a `cargo-nextest`
+trial. Spec `21`. First, though, repair the hosted `emulator-backed` job,
+which has never passed. Independent of the other phases; it can run
+alongside any of them.
+
 ---
 
 ## 11. Definition of done
@@ -643,4 +664,7 @@ the same sample messages and the same asserted outputs as the Python.
 | `hl7apy` mapping behaviour has undocumented edge cases | High | Medium — a field lands in the wrong place | The golden corpus from the Python's own test fixtures is the oracle; the mapping tables in `spec/09` are derived from the Python source line by line. |
 | Azure Monitor telemetry shape changes and breaks Log Analytics queries or dashboard alarms | Medium | Medium | Event and metric names and dimensions are frozen in `spec/04`, with tests asserting the exact strings. |
 | Scope: the dashboard is 6.5k lines of Python with Azure ARM, Log Analytics, Cosmos and SMTP integrations | High | Medium | Sequenced last, behind everything the pipeline needs. It can ship after cutover of the message path, or stay on Python indefinitely, without blocking anything. |
+| A local gate result is treated as proof, but it is self-attested (anyone with a token can post it) | Medium | High — a failing change merges on a claim | The hosted `gate` stays required; the record carries the sha, a clean-tree flag, versions and timings; a dirty tree is never posted ([`spec/21`](spec/21-local-ci.md) §3). |
+| Local CI drifts from the hosted gate and each passes what the other fails | Medium | Medium | One definition in code that both call, and a test that the workflow only calls it ([`spec/21`](spec/21-local-ci.md) §1, §9.1). |
+| A self-hosted runner on a public repository executes a fork's pull request on a developer machine | Low | High | [`spec/21`](spec/21-local-ci.md) §5.1 forbids it. |
 | Deviation in [§9](#9-deliberate-deviations-from-the-python) turns out to matter to a real peer system | Low | High | Each deviation is confirmed with the Hub team before the affected container is cut over, and each is individually revertible. |

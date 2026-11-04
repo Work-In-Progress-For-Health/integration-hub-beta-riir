@@ -421,3 +421,11 @@ waiting.
 
 §9.4 A merge with a failing gate is not possible. There is no
 "fix it in the next commit" for a workspace whose output is clinical data.
+
+§9.5 **The gate can run locally, and one command defines it.** §1's list
+and `.github/workflows/gate.yml` had drifted apart (`--all-features`,
+`verify-pipelines`), and the hosted `emulator-backed` job of §9.2 failed in
+every run inspected on 2026-11-04, so the emulator tier had no hosted
+coverage. [`21-local-ci.md`](21-local-ci.md) specifies `cargo xtask gate`,
+its tiers, and how a local run is evidenced; once it lands, §1's list is
+generated from it rather than maintained beside it.

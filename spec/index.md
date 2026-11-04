@@ -35,6 +35,7 @@ directory says what "built" means.
 | [`18-deployment.md`](18-deployment.md) | Container contract, images, Compose, cutover |
 | [`19-rest-servers.md`](19-rest-servers.md) | REST ingress: `hl7-rest-server` (RISP REST to HL7) and `rest-server` (generic SOAP / XML) |
 | [`20-lookup-service.md`](20-lookup-service.md) | Reference-data lookup service for transformers (Phase 1, not production ready) |
+| [`21-local-ci.md`](21-local-ci.md) | Running the gate locally: one `cargo xtask gate`, tiers, hooks, the evidence of a run, what must stay hosted |
 | [`integration-hub-tester-component-preview.md`](integration-hub-tester-component-preview.md) | Integration Hub tester: developer tool that previews one component's logic on one message, no Service Bus |
 | [`ultra7-test-message-sender.md`](ultra7-test-message-sender.md) | Ultra7: developer tool that sends synthetic test messages (MLLP, REST, SOAP) |
 | [`rust-msrv-n-minus-3.md`](rust-msrv-n-minus-3.md) | The minimum supported Rust version, and why |

@@ -49,6 +49,7 @@ specification is right and the code is a defect.
 | [`16-proms-transformer.md`](spec/16-proms-transformer.md) | WPAS XML → FHIR PROMs |
 | [`17-testing-and-quality.md`](spec/17-testing-and-quality.md) | Tests, fixtures, lints, the gate |
 | [`18-deployment.md`](spec/18-deployment.md) | Containers, Compose, pipelines, cutover |
+| [`21-local-ci.md`](spec/21-local-ci.md) | Local CI: one gate command, tiers, hooks, evidence |
 | [`rust-msrv-n-minus-3.md`](spec/rust-msrv-n-minus-3.md) | The minimum supported Rust version |
 | [`agents-directory-name-is-lowercase.md`](spec/agents-directory-name-is-lowercase.md) | What an agents directory is called |
 
@@ -64,6 +65,7 @@ Written to be followed with a console open, not read.
 | [`docs/deviation-sign-off.md`](docs/deviation-sign-off.md) | The 13 deviations, for the Hub team to confirm |
 | [`docs/upstream/uppsala-id-type-resolution.md`](docs/upstream/uppsala-id-type-resolution.md) | A verified upstream bug report, ready to file |
 | [`docs/upstream/pims-lookup-auth-mismatch.md`](docs/upstream/pims-lookup-auth-mismatch.md) | PIMS sends `X-API-Key`; the lookup service accepts only bearer tokens. Decision for the Hub team |
+| [`docs/local-ci-assessment.md`](docs/local-ci-assessment.md) | Local CI/CD: the evidence, the options weighed, the recommendation |
 | [`docs/upstream-sync-2026-10.md`](docs/upstream-sync-2026-10.md) | What was ported from the Python after upstream #413, and what was not |
 
 ---

@@ -805,6 +805,49 @@ mocks.
 
 ---
 
+## Phase 10 — Local CI
+
+Specified in [`spec/21`](spec/21-local-ci.md); the evidence and the options
+weighed are in [`docs/local-ci-assessment.md`](docs/local-ci-assessment.md).
+Not started. Independent of the other phases.
+
+- [ ] **P10.1** **Repair the hosted `emulator-backed` job.** It fails at
+  `Start the local stack` in every run inspected: `podman compose` finds no
+  Podman socket on `ubuntu-latest`. Start the user socket or use the
+  runner's Docker Compose, add a `timeout-minutes` (one run hung for six
+  hours), and **prove it with a hosted run** before ticking.
+  [`spec/21`](spec/21-local-ci.md) §8.1, §8.3
+- [ ] **P10.2** **`cargo xtask gate`**, tiered (`fast`, `gate`, `stack`,
+  `flows`), `--keep-going`, tier 1 independent of Podman, MSRV only when
+  the toolchain inputs changed. Make `gate.yml` and `AGENTS.md` call it and
+  point `spec/17` §1 at it; add the test that the workflow only calls it.
+  [`spec/21`](spec/21-local-ci.md) §1, §2, §8.2, §9.1
+- [ ] **P10.3** **`cargo xtask install-hooks`**: `core.hooksPath` to a
+  committed `.githooks/`; pre-commit tier 0, pre-push tier 1; never touches
+  global git config. [`spec/21`](spec/21-local-ci.md) §7
+- [ ] **P10.4** **The evidence record** `target/gate/<sha>.json`, and
+  `gate --post` for a `local/<tier>` commit status. Refuses a dirty tree, a
+  mismatched commit or a failed tier; carries no secret. Tests per §9.2.
+  [`spec/21`](spec/21-local-ci.md) §3
+- [ ] **P10.5** **A container-runtime helper** that detects whether
+  `podman compose` or `podman-compose` works, says which it used, and waits
+  on a real connection rather than a port or a container health state.
+  [`spec/21`](spec/21-local-ci.md) §6
+- [ ] **P10.6** **Scheduled local runs** of tiers 2 and 3 (launchd), one
+  Compose profile at a time, writing the record of P10.4.
+  [`spec/21`](spec/21-local-ci.md) §2.2
+- [ ] **P10.7** **Trial `cargo-nextest`** (installed): time the workspace
+  against `cargo test`, confirm the emulator tests keep their isolation
+  (`spec/17` §9.2.1), and keep `cargo test --doc` since nextest does not run
+  doctests. Adopt only on a measured, repeatable gain.
+- [ ] **P10.8** **Decide, with the Hub team, whether Azure DevOps minutes
+  are the real cost** on the private estate. If so, a self-hosted ADO agent
+  (free tier: one self-hosted parallel job, unlimited minutes), after
+  confirming the organisation's plan and whether the estate runs `amd64`
+  while this machine is `arm64`. Not decided; not started.
+
+---
+
 ## Upstream sync — October 2026
 
 Python changes after #413, ported in `docs/upstream-sync-2026-10.md`. Done
