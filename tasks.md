@@ -829,6 +829,8 @@ and gate-checked except where noted.
 - [x] Replay job sends a page as one batch (`spec/13` §4.2) and rejects
   `REPLAY_BATCH_SIZE=0` (`spec/02` §7.2); `wrds-service`'s non-200 handling
   confirmed against the Python (`spec/09` §9.3.1).
+- [x] `http-mock-receiver` vs `spec/11` §3.2/§3.4 recorded as a
+  deliberate deviation (§3.8.1) after checking the Python.
 - [ ] **Open:** nothing here has run against a real Service Bus or SQL Server.
 
 ---

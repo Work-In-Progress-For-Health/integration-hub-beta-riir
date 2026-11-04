@@ -146,6 +146,27 @@ external references, as
 `defusedxml` here even though this is only a mock, and the Rust keeps that
 posture.
 
+§3.8.1 **Deviation from §3.2 and §3.4: the Rust mock does not build an XML
+tree.** It scans the body text for the §3.4 element names, which is what
+makes it immune to DTDs and entity expansion without a parser (§3.8). Two
+consequences, both confined to what is *logged* or *forwarded*, never to the
+reply a caller receives:
+
+1. A malformed body produces **no** warn line. §3.2's "logged at warn" is
+   met by the Python's `defusedxml` parse failing; there is no parse here to
+   fail.
+2. The payload element is the first match for a §3.4 name **anywhere** in
+   the body, not only an immediate child of `Body`. They differ only for a
+   request that nests a payload-named element inside another element and
+   also carries one as a direct child of `Body`.
+
+Neither affects §1.1's reply rules or §3.7's fault. Chosen because the
+mock's value is that it always answers (§1.2), and a parser is a new way to
+fail to. Checked against the Python (`soap_handler.py`: `SafeET.fromstring`,
+`_find_body`, immediate-child walk) on 2026-11-04. If a test ever needs the
+Python's exact payload choice on such a request, the fix is a tree walk
+confined to `Body`'s children, not a change to this clause.
+
 §3.9 Forwarding to `EGRESS_QUEUE_NAME` is optional; absent means log-only
 mode.
 
