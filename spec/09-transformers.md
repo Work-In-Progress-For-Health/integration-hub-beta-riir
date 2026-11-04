@@ -620,7 +620,7 @@ with both values percent-encoded (everything except `A-Za-z0-9-_.~`), sending
 removed. `http` and `https` are both accepted; `https` verifies against
 `ihb_tls`'s roots (`18-deployment.md` §4).
 
-§5.10.5 **Known gap, shared with the Python.** `X-API-Key` is not a credential
+§5.10.4a **Known gap, shared with the Python.** `X-API-Key` is not a credential
 the lookup service accepts (`20-lookup-service.md` §12: bearer or Easy Auth
 only), so with lookup auth on this client is refused. Reproduced, not
 introduced; see
