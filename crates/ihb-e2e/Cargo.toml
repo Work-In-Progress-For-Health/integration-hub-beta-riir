@@ -41,6 +41,8 @@ ihb-sender.workspace = true
 ihb-telemetry.workspace = true
 ihb-validation.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
+tiberius.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 
 [lints]

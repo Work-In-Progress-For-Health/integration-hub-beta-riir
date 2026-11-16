@@ -397,6 +397,21 @@ upstream rejected. The structure check (§9.5) and the allow-list are
 unaffected. Deployments that need the stricter check use `hl7-xsd`, whose
 flow schema does require the segment.
 
+§9.5.4 **`ALLOWED_TRIGGER_EVENTS`** (upstream `#455`; `generic` pipeline). A
+comma-separated list; empty means any. After the source allow-list (step 5)
+and before the output is built, the extracted trigger event (`MSH-9.2`) must be
+in the list, else `Client.Validation` / **400**
+`Unsupported HL7 trigger event '{event}'. Allowed values: {sorted, ", "}`,
+where an absent trigger reads `unknown`. Nothing is stored or sent. The LIMS
+deployment sets `A28,A31,A40`, so a message the downstream subscriptions would
+never route is refused at the door.
+
+**Not ported from `#455`:** the secondary WRRS destination (`WRRS_TOPIC_NAME`
+and `WRRS_QUEUE_NAME` for non-`risp` flows, with `WRRS_TRIGGER_EVENTS`),
+which no deployed environment here configures (LIMS reaches WRRS through the
+topic's subscription filter instead), and the `hl7apy` validator's
+trigger-to-structure tolerance.
+
 §9.6 `OUTPUT_FORMAT=er7` failure is `Client.Validation` / 400 `Unable to
 convert XML payload to ER7 format.`.
 

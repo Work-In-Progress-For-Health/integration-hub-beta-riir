@@ -493,13 +493,13 @@ async fn every_mllp_flow_carries_its_sample_through_the_containers() {
 /// `spec/01-architecture.md` §2.1.3: LIMS → MPI runs
 ///
 /// ```text
-/// SOAP/HTTP → hl7-soap-server → topic local-inthub-lims-transformer-ingress
-///                                 ├─ …-ingress-sub        → lims-mpi-hl7-sender
-///                                 ├─ …-lims-wrrs-transformer-sub (A31/A40 only)
-///                                 └─ …-ingress-trrr-sub   → lims-trrr-hl7-sender
+/// SOAP/HTTP → rest-server (generic, soap) → topic local-inthub-lims-hl7-input
+///                                 ├─ …-lims-mpi-sender-sub   → lims-mpi-hl7-sender
+///                                 ├─ …-lims-trrr-sender-sub  → lims-trrr-hl7-sender (A31/A40, 328)
+///                                 └─ …-lims-wrrs-sender-sub  → wrrs-idupd-dbsender  (A31/A40, 328)
 /// ```
 ///
-/// The assertion is taken at the **topic**, from the `-trrr-sub`
+/// The assertion is taken at the **topic**, from the `-trrr-sender-sub`
 /// subscription. The `lims-to-mpi` profile runs `lims-mpi-hl7-sender`, which
 /// owns `-ingress-sub` and would race this test for its messages; nothing in
 /// that profile reads `-trrr-sub`, so a copy of every message waits there.
@@ -509,17 +509,14 @@ async fn every_mllp_flow_carries_its_sample_through_the_containers() {
 async fn the_lims_soap_flow_reaches_its_topic() {
     /// The SOAP ingress, published by `local/docker-compose.yml`.
     const SOAP_PORT: u16 = 8082;
-    /// `SOAP_ENDPOINT_PATH` in `local/lims-soap-hl7-server.env`.
+    /// `ENDPOINT_PATH` in `local/rest-server-lims.env`.
     const SOAP_PATH: &str = "/soap";
     /// Where the SOAP server writes (`EGRESS_TOPIC_NAME`).
-    const LIMS_INGRESS: &str = "local-inthub-lims-transformer-ingress";
+    const LIMS_INGRESS: &str = "local-inthub-lims-hl7-input";
     /// A subscription no container of the `lims-to-mpi` profile consumes.
-    const LIMS_SUBSCRIPTION: &str = "local-inthub-lims-transformer-ingress-trrr-sub";
+    const LIMS_SUBSCRIPTION: &str = "local-inthub-lims-trrr-sender-sub";
     /// `EGRESS_SESSION_ID`.
-    const LIMS_SESSION: &str = "lims-to-mpi";
-    /// The control id in the sample, replaced per run.
-    const SAMPLE_CONTROL_ID: &str = "6778031837018553261z82215";
-
+    const LIMS_SESSION: &str = "lims-soapserver";
     tear_down();
     bring_up("lims-to-mpi");
 
@@ -527,8 +524,7 @@ async fn the_lims_soap_flow_reaches_its_topic() {
     let bus = connect_when_ready(&endpoint).await;
 
     let marker = marker("lims");
-    let envelope = include_str!("../../../local/sample_messages/lims-to-mpi.sample.xml")
-        .replace(SAMPLE_CONTROL_ID, &marker);
+    let envelope = lims_a31(&marker, &marker);
 
     let response = post_soap(SOAP_PORT, SOAP_PATH, &envelope).await;
     assert!(
@@ -667,6 +663,158 @@ async fn the_wpas_flow_reaches_the_promptly_mock() {
     let _ = receiver.close().await;
     let _ = bus.close().await;
     tear_down();
+}
+
+/// The LIMS sample as an `A31` carrying an NHS number.
+///
+/// The sample is an `A28`, which the topic's `A31`/`A40` subscriptions
+/// deliberately drop (`spec/01-architecture.md` §2.1.3a), so the flows that
+/// read those subscriptions need a message they keep. `control_id` replaces
+/// the sample's `MSH-10`; `nhs` becomes a second `PID-3` repetition.
+fn lims_a31(control_id: &str, nhs: &str) -> String {
+    /// The control id in the sample.
+    const SAMPLE_CONTROL_ID: &str = "6778031837018553261z82215";
+    let sample = include_str!("../../../local/sample_messages/lims-to-mpi.sample.xml")
+        .replace(SAMPLE_CONTROL_ID, control_id)
+        .replace("<ns0:MSG.2>A28</ns0:MSG.2>", "<ns0:MSG.2>A31</ns0:MSG.2>");
+    let repetition = format!(
+        "<ns0:PID.3><ns0:CX.1>{nhs}</ns0:CX.1><ns0:CX.4><ns0:HD.1>NHS</ns0:HD.1></ns0:CX.4>\
+         <ns0:CX.5>NH</ns0:CX.5></ns0:PID.3>"
+    );
+    let end = sample.find("</ns0:PID.3>").expect("the sample has a PID-3") + "</ns0:PID.3>".len();
+    format!("{}{repetition}{}", &sample[..end], &sample[end..])
+}
+
+/// The LIMS flow to WRRS: SOAP in, a `dbo.QueueIdUpdate` row out.
+///
+/// `lims-soap-hl7-server` (the REST server) → topic → `wrrs-idupd-dbsender` (its own
+/// subscription, filtered to `A31`/`A40` from `328`) → `dbo.prQueueIdUpdate`.
+/// The assertion is taken **in SQL Server**, so it proves what the whole
+/// chain exists for: the identifiers reached the table as the six parameters.
+///
+/// Nothing applies `local/sql/init-drs-db.sql` on start-up (Edge ships no
+/// `sqlcmd`, `spec/18-deployment.md` §5.3.5), so the test does, after the
+/// containers are up. The sender connects lazily, so it does not mind.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_lims_flow_writes_a_queue_id_update_row() {
+    /// The SOAP ingress, published by `local/docker-compose.yml`.
+    const SOAP_PORT: u16 = 8082;
+
+    tear_down();
+    bring_up("lims-to-wrrs");
+    apply_drs_script().await;
+
+    let marker = marker("idupd");
+    let nhs = marker.chars().take(20).collect::<String>();
+    let response = post_soap(SOAP_PORT, "/soap", &lims_a31(&marker, &nhs)).await;
+    assert!(
+        !response.contains("Fault"),
+        "the SOAP ingress faulted:\n{response}"
+    );
+
+    let mut found = None;
+    for _ in 0..90 {
+        found = drs_scalar(&format!(
+            "SELECT CONCAT(ProviderPatientIdentifier, '|', ProviderAssigningAuthority, '|', \
+             ISNULL(OldIdentifier, 'NULL'), '|', NewIdentifier, '|', NewIdentifierAssigningAuthority) \
+             FROM dbo.QueueIdUpdate WHERE NewIdentifier = '{nhs}'"
+        ))
+        .await;
+        if found.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+
+    // B0000010612 is the LIMS identifier in the sample, authority 328.
+    assert_eq!(
+        found,
+        Some(format!("B0000010612|328|NULL|{nhs}|NHS")),
+        "the A31 was accepted but no QueueIdUpdate row for {nhs} appeared"
+    );
+    tear_down();
+}
+
+/// The `sa` password the compose stack was started with (`local/.secrets`).
+fn sql_password() -> String {
+    std::fs::read_to_string(root().join("local/.secrets"))
+        .expect("local/.secrets exists (spec/18-deployment.md §5)")
+        .lines()
+        .find_map(|line| line.strip_prefix("MSSQL_SA_PASSWORD="))
+        .map(|value| value.trim().trim_matches('"').to_string())
+        .expect("local/.secrets sets MSSQL_SA_PASSWORD")
+}
+
+/// A raw client to the compose stack's SQL, retried until it will log in
+/// (the port opens before the server accepts a login, as the emulator's does).
+async fn sql_client(
+    database: &str,
+) -> tiberius::Client<tokio_util::compat::Compat<tokio::net::TcpStream>> {
+    use tokio_util::compat::TokioAsyncWriteCompatExt;
+    let started = Instant::now();
+    loop {
+        let mut config = tiberius::Config::new();
+        config.host("127.0.0.1");
+        config.port(1433);
+        config.database(database);
+        config.encryption(tiberius::EncryptionLevel::NotSupported);
+        config.authentication(tiberius::AuthMethod::sql_server("sa", sql_password()));
+        config.trust_cert();
+        let attempt = async {
+            let stream = TcpStream::connect("127.0.0.1:1433").await.ok()?;
+            stream.set_nodelay(true).ok()?;
+            tiberius::Client::connect(config, stream.compat_write())
+                .await
+                .ok()
+        }
+        .await;
+        match attempt {
+            Some(client) => return client,
+            None if started.elapsed() < HEALTHY_WITHIN => {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+            None => panic!("SQL Server never accepted a login within {HEALTHY_WITHIN:?}"),
+        }
+    }
+}
+
+/// Apply `local/sql/init-drs-db.sql`, batch by batch (`GO` is a client-side
+/// separator).
+async fn apply_drs_script() {
+    let mut client = sql_client("master").await;
+    let mut batches = Vec::new();
+    let mut batch = String::new();
+    for line in include_str!("../../../local/sql/init-drs-db.sql").lines() {
+        if line.trim().eq_ignore_ascii_case("go") {
+            batches.push(std::mem::take(&mut batch));
+        } else {
+            batch.push_str(line);
+            batch.push('\n');
+        }
+    }
+    batches.push(batch);
+    for batch in batches.iter().filter(|b| !b.trim().is_empty()) {
+        client
+            .simple_query(batch.as_str())
+            .await
+            .unwrap_or_else(|error| panic!("applying the DRS script: {error}\n{batch}"))
+            .into_results()
+            .await
+            .expect("the batch completes");
+    }
+}
+
+/// The first column of the first row of `sql` in `DRS`, as text.
+async fn drs_scalar(sql: &str) -> Option<String> {
+    let mut client = sql_client("DRS").await;
+    client
+        .query(sql, &[])
+        .await
+        .ok()?
+        .into_row()
+        .await
+        .ok()?
+        .and_then(|row| row.get::<&str, _>(0).map(str::to_string))
 }
 
 /// `POST` XML and return the whole response, status line included.

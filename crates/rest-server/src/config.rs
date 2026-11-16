@@ -59,6 +59,10 @@ pub struct Generic {
     pub validator: Validator,
     /// `ALLOWED_SOURCE_IDENTIFIERS`. Empty means no allow-list.
     pub allowed_source_identifiers: Vec<String>,
+    /// `ALLOWED_TRIGGER_EVENTS` (upstream `#455`). Empty means any. Checked
+    /// against `MSH-9.2` after the source allow-list (`spec/19-rest-servers.md`
+    /// §9.5.4).
+    pub allowed_trigger_events: Vec<String>,
     /// `OUTPUT_FORMAT`.
     pub output_format: OutputFormat,
 }
@@ -257,6 +261,7 @@ fn read_generic(reader: &mut Reader, endpoint_path: String) -> Option<Generic> {
         adapter,
         validator,
         allowed_source_identifiers: reader.list("ALLOWED_SOURCE_IDENTIFIERS"),
+        allowed_trigger_events: reader.list("ALLOWED_TRIGGER_EVENTS"),
         output_format: if output_name.as_deref()? == "er7" {
             OutputFormat::Er7
         } else {
@@ -367,6 +372,7 @@ mod tests {
         assert_eq!(config.listen.to_string(), "127.0.0.1:8080");
         assert_eq!(generic(&config).endpoint_path, "/ingest");
         assert_eq!(generic(&config).allowed_source_identifiers.len(), 0);
+        assert_eq!(generic(&config).allowed_trigger_events.len(), 0);
         assert_eq!(config.max_request_size, 1_048_576);
         assert!(matches!(
             generic(&config).adapter,

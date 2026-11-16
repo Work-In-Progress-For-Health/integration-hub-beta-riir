@@ -56,7 +56,7 @@ validation profile.
 | WDS → MPI | `wds-to-mpi` | 2582 | `hl7-server` | *(none)* | *(none)* | `…-mpi-sender-ingress` (queue here; a topic upstream, §2.1.3) | MPI |
 | Mosaiq → MPI | `mosaiq-to-mpi` | 2583 | `hl7-server` | *(none)* | *(none)* | topic `…-mosaiq-mpi-sender-ingress` (§2.1.3) | MPI |
 | RISP → MPI | `risp-to-mpi` | 8080 | `hl7-rest-server` | topic `…-core-reference-transformer-ingress` | `hl7-core-reference-transformer` | topic `…-risp-mpi-sender-ingress` (§2.1.3) | MPI (and WRRS, topic `…-wrrs-outbound`) |
-| LIMS → MPI | `lims-to-mpi` | 8082 (container 8080) | `hl7-soap-server` | topic `…-lims-transformer-ingress` (§2.1.3) | *(none)*; `hl7-lims-wrrs-transformer` is a second subscriber | subscription `…-lims-transformer-ingress-sub` (`lims-mpi-hl7-sender`) | MPI (and WRRS, TRRR) |
+| LIMS → MPI | `lims-to-mpi` | 8082 (container 8080) | `rest-server` (generic pipeline, SOAP adapter; §2.1.3a) | topic `…-lims-hl7-input` (§2.1.3a) | *(none)*; `wrrs-idupd-dbsender` and `lims-trrr-hl7-sender` are further subscribers | subscription `…-lims-mpi-sender-sub` (`lims-mpi-hl7-sender`) | MPI (and WRRS, TRRR) |
 
 §2.1.1 Queue names shown as `…-` are prefixed by the namespace and
 environment: locally `local-inthub-`. The full name always comes from an
@@ -74,18 +74,29 @@ Paris, RISP and LIMS; each delivers to the *topic* mock receiver
 (`11-mock-receivers.md` §5). Every subscription requires sessions, as every
 queue does (§4.1).
 
-§2.1.3a **LIMS.** `local-inthub-lims-transformer-ingress` is a topic with
-three subscriptions, copied exactly from upstream's emulator configuration:
-`…-ingress-sub` (read by `lims-mpi-hl7-sender`), `…-lims-wrrs-transformer-sub`
-(with the SQL rule `LIMS_WRRS_FILTER`, `MessageType IN ('A31','A40') AND
-SourceSystem = '328'`; read by `hl7-lims-wrrs-transformer`) and
-`…-ingress-trrr-sub` (read by `lims-trrr-hl7-sender`). `hl7-soap-server` and
-`rest-server` publish with `EGRESS_TOPIC_NAME` and `EGRESS_SESSION_ID=
-"lims-to-mpi"`. A session-enabled subscription only yields its own session, so
-every reader of this topic MUST use `INGRESS_SESSION_ID="lims-to-mpi"`.
-**Deviation:** upstream's `lims-trrr-hl7-sender.env` sets `"lims-soapserver"`,
-which no publisher uses, so that sender receives nothing locally; ours is
-matched to the publisher.
+§2.1.3a **LIMS.** `local-inthub-lims-hl7-input` is a topic with three
+subscriptions, copied exactly from upstream's emulator configuration after
+`#455`: `…-lims-mpi-sender-sub` (read by `lims-mpi-hl7-sender`),
+`…-lims-trrr-sender-sub` (rule `lims-trrr-filter`, `MessageType IN
+('A31','A40') AND SourceSystem = '328'`; read by `lims-trrr-hl7-sender`) and
+`…-lims-wrrs-sender-sub` (rule `lims-wrrs-filter`, the same expression; read by
+`wrrs-idupd-dbsender`, `10-senders.md` §7.8). The LIMS ingress is the
+`rest-server` (generic pipeline, SOAP adapter, `19-rest-servers.md` §9);
+`hl7-soap-server` can publish to it too but is **not** run in Compose, because
+it stamps no `MessageType` and the two filtered subscriptions below match on
+it (found by the `lims-to-wrrs` compose test). Either publishes with `EGRESS_TOPIC_NAME` and `EGRESS_SESSION_ID=
+"lims-soapserver"`. A session-enabled subscription only yields its own session,
+so every reader of this topic MUST use `INGRESS_SESSION_ID="lims-soapserver"`.
+
+*History.* Before `#455` the topic was `local-inthub-lims-transformer-ingress`,
+the session `lims-to-mpi`, and a **classifier** (`hl7-lims-wrrs-transformer`,
+`09-transformers.md` §10) sat between the topic and WRRS, fanning one message
+out to a second topic `…-lims-wrrs-classified`. Upstream removed that hop: the
+database sender now reads `A31` and `A40` straight from the filtered
+subscription and picks the procedure parameters itself. The classifier crate
+and its pipeline are kept; its local env file, Compose service and the
+classified topic are gone. (The earlier deviation, that upstream's TRRR env
+used a session no publisher wrote, is resolved: the publishers now use it.)
 
 §2.1.4 **Not migrated here: PHW, ChemoCare, PIMS and WDS.** Upstream's
 `8c1d012` also moved their shared `…-mpi-sender-ingress` to a topic. That
@@ -235,7 +246,7 @@ an idle queue.
 | `local-inthub-phw-transformer-ingress` | queue | PHW server → PHW transformer |
 | `local-inthub-chemo-transformer-ingress` | queue | Chemo server → Chemo transformer |
 | `local-inthub-pims-transformer-ingress` | queue | PIMS server → PIMS transformer |
-| `local-inthub-lims-transformer-ingress` / `-ingress-sub`, `-lims-wrrs-transformer-sub`, `-ingress-trrr-sub` | topic / subscriptions | LIMS SOAP and REST servers → LIMS MPI sender, LIMS WRRS transformer, LIMS TRRR sender (§2.1.3a) |
+| `local-inthub-lims-hl7-input` / `-lims-mpi-sender-sub`, `-lims-trrr-sender-sub`, `-lims-wrrs-sender-sub` | topic / subscriptions | LIMS SOAP and REST servers → LIMS MPI sender, LIMS TRRR sender, WRRS Queue ID Update (§2.1.3a) |
 | `local-inthub-mpi-sender-ingress` | queue | Transformers, WDS server → MPI sender |
 | `local-inthub-mpi-mock-receiver` | queue, **no session** | Mock receiver's forwarding sink |
 | `local-inthub-cav-paris-mpi-sender-ingress` / `-sub` | topic / subscription | Paris server → Paris MPI sender (§2.1.3) |

@@ -335,14 +335,16 @@ A stack is ready when something reports `(healthy)`, nothing reports
 `(starting)` or `(unhealthy)`, and that has held for several consecutive
 readings. One reading is a race.
 
-§5.2.3 The `lims-to-mpi` profile starts `hl7-soap-server`,
+§5.2.3 The `lims-to-mpi` profile starts `lims-soap-hl7-server` (the `rest-server`
+binary, `rest-server-lims.env`; `01-architecture.md` §2.1.3a),
 `lims-mpi-hl7-sender` and the topic mock receiver. The SOAP server publishes
-to the topic `local-inthub-lims-transformer-ingress` with session
-`lims-to-mpi`; the sender reads `…-ingress-sub` and delivers to the topic mock
+to the topic `local-inthub-lims-hl7-input` with session
+`lims-soapserver`; the sender reads `…-lims-mpi-sender-sub` and delivers to the topic mock
 receiver (`01-architecture.md` §2.1.3a). The shared `mpi-hl7-sender` and the
 queue mock receiver are **not** in this profile: they read
 `mpi-sender-ingress`, which this flow never writes, and were idle there.
-`lims-to-wrrs` and `lims-to-trrr` also start `hl7-soap-server`, so each has a
+`lims-to-wrrs` (with `wrrs-idupd-dbsender`) and `lims-to-trrr` also start
+`lims-soap-hl7-server`, so each has a
 feed; run one profile at a time (the emulator's connection quota, `14-buswatch.md`
 §6.1).
 

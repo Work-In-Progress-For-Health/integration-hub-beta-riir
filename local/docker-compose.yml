@@ -171,16 +171,21 @@ services:
         aliases:
           - "phw-hl7-server"
 
-  hl7-soap-server:
-    container_name: "ihb-rs-hl7-soap-server"
-    image: "ihb-rs/hl7-soap-server:${IHB_TAG:-dev}"
+  # The LIMS ingress (spec/19-rest-servers.md section 9): the generic REST pipeline
+  # configured as the SOAP server it replaced. Upstream deleted `hl7_soap_server` in #455
+  # for exactly this, and it matters: the subscriptions of the LIMS topic filter on
+  # `MessageType`, which the generic pipeline sets (spec/19 section 10.1) and the legacy
+  # `hl7-soap-server` does not. The `hl7-soap-server` crate is kept but is not run here.
+  lims-soap-hl7-server:
+    container_name: "ihb-rs-lims-soap-hl7-server"
+    image: "ihb-rs/rest-server:${IHB_TAG:-dev}"
     build:
       context: ..
       dockerfile: docker/Dockerfile
       args:
-        BIN: hl7-soap-server
+        BIN: rest-server
     env_file:
-      - ./lims-soap-hl7-server.env
+      - ./rest-server-lims.env
     ports:
       - "8082:8080"
     restart: on-failure
@@ -199,39 +204,7 @@ services:
     networks:
       integration-hub:
         aliases:
-          - "hl7-soap-server"
-
-  # The REST ingress, configured as hl7-soap-server (spec/19-rest-servers.md
-  # §9). One profile, ingress only: its egress topic is the LIMS one, so run it
-  # alone against the emulator rather than beside `lims-to-mpi`, which would
-  # put two servers on one topic.
-  rest-server:
-    container_name: "ihb-rs-rest-server"
-    image: "ihb-rs/rest-server:${IHB_TAG:-dev}"
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-      args:
-        BIN: rest-server
-    env_file:
-      - ./rest-server-lims.env
-    ports:
-      - "8083:8080"
-    restart: on-failure
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/health-probe"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
-    depends_on:
-      - sb-emulator
-    profiles:
-      - rest-server
-    networks:
-      integration-hub:
-        aliases:
-          - "rest-server"
+          - "lims-soap-hl7-server"
 
   phw-hl7-transformer:
     container_name: "ihb-rs-phw-hl7-transformer"
@@ -544,7 +517,7 @@ services:
           - "promptly-mock-receiver"
 
   # Dedicated LIMS -> MPI sender (spec/18-deployment.md §5.2.3): subscription ingress from
-  # the topic hl7-soap-server publishes to, delivering to the topic mock receiver. It
+  # the topic lims-soap-hl7-server publishes to, delivering to the topic mock receiver. It
   # replaces the shared queue-based mpi-hl7-sender in this profile, which nothing fed.
   lims-mpi-hl7-sender:
     container_name: "ihb-rs-lims-mpi-hl7-sender"
@@ -572,19 +545,22 @@ services:
         aliases:
           - "lims-mpi-hl7-sender"
 
-  # Classifies LIMS A31/A40 and fans out one message per matching rule to
-  # local-inthub-lims-wrrs-classified (spec/09-transformers.md section 10). Its own profile,
-  # fed by hl7-soap-server publishing to the LIMS topic.
-  lims-wrrs-hl7-transformer:
-    container_name: "ihb-rs-lims-wrrs-hl7-transformer"
-    image: "ihb-rs/hl7-lims-wrrs-transformer:${IHB_TAG:-dev}"
+  # WRRS Queue ID Update (spec/10-senders.md section 7.8; upstream #455): the generic
+  # db-sender on its own subscription of the LIMS topic, calling dbo.prQueueIdUpdate. It
+  # replaces the classifier transformer upstream retired from the local stack; the crate
+  # (`hl7-lims-wrrs-transformer`) is kept. `sql/init-drs-db.sql` creates DRS and the
+  # procedure but nothing applies it on start-up (no sqlcmd in Edge).
+  wrrs-idupd-dbsender:
+    container_name: "ihb-rs-wrrs-idupd-dbsender"
+    image: "ihb-rs/db-sender:${IHB_TAG:-dev}"
     build:
       context: ..
       dockerfile: docker/Dockerfile
       args:
-        BIN: hl7-lims-wrrs-transformer
+        BIN: db-sender
     env_file:
-      - ./lims-wrrs-hl7-transformer.env
+      - ./wrrs-idupd-dbsender.env
+      - ./.secrets
     restart: on-failure
     healthcheck:
       test: ["CMD", "/usr/local/bin/health-probe"]
@@ -594,12 +570,13 @@ services:
       start_period: 5s
     depends_on:
       - sb-emulator
+      - sqledge
     profiles:
       - lims-to-wrrs
     networks:
       integration-hub:
         aliases:
-          - "lims-wrrs-hl7-transformer"
+          - "wrrs-idupd-dbsender"
 
   # Dedicated LIMS -> TRRR sender (upstream #429): a second subscription on the LIMS topic,
   # delivering to the topic mock receiver locally.

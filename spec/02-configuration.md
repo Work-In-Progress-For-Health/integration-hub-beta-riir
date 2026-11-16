@@ -540,6 +540,7 @@ Everything in §11 applies to `PIPELINE=hl7`, with these differences:
 | `VALIDATION_SCHEMA` | string | — | **Required** for `hl7-xsd` (a schema group) and `xsd` (a file path). |
 | `ALLOWED_HL7_STRUCTURES` | csv, non-empty | `ADT_A05,ADT_A39` | `hl7-xsd` and `hl7apy`. |
 | `ALLOWED_SOURCE_IDENTIFIERS` | csv | *(empty)* | Empty means no allow-list. |
+| `ALLOWED_TRIGGER_EVENTS` | csv | *(empty)* | Empty means any trigger. Otherwise `MSH-9.2` must be listed, else 400 (`19-rest-servers.md` §9.5.4). |
 | `SOURCE_IDENTIFIER_LOCATOR` | `/`-path | *(unset)* | `xml-raw` only. |
 | `MESSAGE_CONTROL_ID_LOCATOR` | `/`-path | *(unset)* | `xml-raw` only. |
 | `MAX_REQUEST_SIZE_BYTES` | i64 | `1048576` | `0` or unset: default. `-1`: the 100 MiB ceiling. Below `-1`, or above the ceiling: startup failure. |

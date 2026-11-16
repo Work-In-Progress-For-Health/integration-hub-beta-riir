@@ -194,6 +194,9 @@ impl<E: MessageSink, S: MessageSink, M: Mint> GenericProcessor<E, S, M> {
             )));
         }
 
+        // ---- Step 5b: the trigger allow-list (upstream `#455`). --------
+        self.check_trigger(extracted.message_type.as_deref())?;
+
         // ---- Step 6: the output format. --------------------------------
         let output = match self.settings.output_format {
             OutputFormat::Raw => extracted.payload_xml.clone(),
@@ -300,6 +303,25 @@ impl<E: MessageSink, S: MessageSink, M: Mint> GenericProcessor<E, S, M> {
         }
     }
 
+    /// Step 5b: `ALLOWED_TRIGGER_EVENTS` (`spec/19-rest-servers.md` §9.5.4).
+    fn check_trigger(&self, trigger: Option<&str>) -> Result<(), Fault> {
+        let allowed = &self.settings.allowed_trigger_events;
+        if allowed.is_empty() || trigger.is_some_and(|t| allowed.iter().any(|a| a == t)) {
+            return Ok(());
+        }
+        let mut sorted: Vec<&str> = allowed.iter().map(String::as_str).collect();
+        sorted.sort_unstable();
+        Err(Fault::Request(RequestError::new(
+            "Client.Validation",
+            format!(
+                "Unsupported HL7 trigger event '{}'. Allowed values: {}",
+                trigger.filter(|t| !t.is_empty()).unwrap_or("unknown"),
+                sorted.join(", ")
+            ),
+            400,
+        )))
+    }
+
     /// Step 8 — the audit copy. Never fatal.
     async fn store_message(&self, raw_body: &str, payload_xml: &str, tracking: &Tracking) {
         let Some(store) = self.store.as_ref() else {
@@ -392,6 +414,7 @@ mod tests {
             },
             validator,
             allowed_source_identifiers: allowed.iter().map(ToString::to_string).collect(),
+            allowed_trigger_events: vec![],
             output_format: output,
         }
     }
@@ -402,6 +425,7 @@ mod tests {
             adapter: ContentAdapter::Soap,
             validator: Validator::None,
             allowed_source_identifiers: vec![],
+            allowed_trigger_events: vec![],
             output_format: output,
         }
     }
@@ -624,6 +648,68 @@ mod tests {
             StoreEvent::from_json(&bus.all_sent("store-queue")[0].text().unwrap()).unwrap();
         assert!(stored.raw_payload.starts_with("<soapenv:Envelope"));
         assert!(stored.xml_payload.unwrap().starts_with("<ADT_A05"));
+    }
+
+    #[tokio::test]
+    async fn only_the_allowed_trigger_events_pass_and_the_refusal_is_a_400_before_the_bus() {
+        // spec/19 §9.5.4 (upstream `#455`).
+        let mut settings = soap_settings(OutputFormat::Er7);
+        settings.allowed_trigger_events = vec!["A40".into(), "A28".into()];
+        let (processor, bus) = rig(settings);
+
+        let reply = processor.process(&soap(ADT)).await;
+
+        assert_eq!(reply.status, 400, "{}", reply.body);
+        assert!(
+            reply
+                .body
+                .contains("<faultcode>Client.Validation</faultcode>"),
+            "{}",
+            reply.body
+        );
+        assert!(
+            reply.body.contains(
+                "Unsupported HL7 trigger event &apos;A31&apos;. Allowed values: A28, A40"
+            ),
+            "{}",
+            reply.body
+        );
+        assert_eq!(bus.all_sent("egress-queue").len(), 0);
+        assert!(
+            bus.all_sent("store-queue").is_empty(),
+            "refused before the store"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_listed_trigger_passes_and_an_empty_list_allows_any() {
+        let mut settings = soap_settings(OutputFormat::Er7);
+        settings.allowed_trigger_events = vec!["A31".into()];
+        assert_eq!(rig(settings).0.process(&soap(ADT)).await.status, 200);
+        assert_eq!(
+            rig(soap_settings(OutputFormat::Er7))
+                .0
+                .process(&soap(ADT))
+                .await
+                .status,
+            200
+        );
+    }
+
+    #[tokio::test]
+    async fn a_message_with_no_trigger_is_refused_when_triggers_are_listed() {
+        let mut settings = soap_settings(OutputFormat::Raw);
+        settings.allowed_trigger_events = vec!["A31".into()];
+        let no_type = ADT.replace("<MSG.2>A31</MSG.2>", "");
+        let reply = rig(settings).0.process(&soap(&no_type)).await;
+        assert_eq!(reply.status, 400);
+        assert!(
+            reply
+                .body
+                .contains("Unsupported HL7 trigger event &apos;unknown&apos;"),
+            "{}",
+            reply.body
+        );
     }
 
     #[tokio::test]

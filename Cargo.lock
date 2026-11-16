@@ -1960,7 +1960,9 @@ dependencies = [
  "ihb-telemetry",
  "ihb-transformer",
  "ihb-validation",
+ "tiberius",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 

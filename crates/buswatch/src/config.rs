@@ -341,7 +341,7 @@ mod tests {
         // Seven, not eight: upstream moved the PIMS flow (#427) and then the
         // LIMS ingress from queues to topics, so neither
         // `local-inthub-pims-transformer-ingress` nor
-        // `local-inthub-lims-transformer-ingress` is a queue in the file any
+        // `local-inthub-lims-hl7-input` (once `…-lims-transformer-ingress`) is a queue in the file any
         // more (the latter is a topic, spec/01 §2.1.3a). A drop below this
         // means a queue was lost, not migrated.
         assert!(queues.len() >= 7, "found {}: {queues:?}", queues.len());
