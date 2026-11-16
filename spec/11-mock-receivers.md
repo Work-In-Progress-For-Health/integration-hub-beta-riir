@@ -170,6 +170,44 @@ confined to `Body`'s children, not a change to this clause.
 §3.9 Forwarding to `EGRESS_QUEUE_NAME` is optional; absent means log-only
 mode.
 
+§3.10 **The Promptly mock** (upstream `#442`, `#454`). The same binary also
+answers the WPAS-Promptly `$process-message` asynchronous API, so
+`fhir-sender` ([`10-senders.md`](10-senders.md) §8) can be tested without
+Promptly. `crates/http-mock-receiver/src/fhir.rs`.
+
+| Request | Answer |
+| --- | --- |
+| `POST /fhir/r4/$process-message` | `202` and an absolute `Content-Location` built on the request's `Host`; or a rejection chosen by `Bundle.id` |
+| `GET /fhir/r4/status/{id}` | `202` (`X-Progress: Processing`, `Retry-After: 1`) until the job's polls run out, then its final answer; `404` for an unknown id |
+
+A body that is not JSON, or not a `Bundle` of `type` `message`, is a `400`
+`OperationOutcome`. Everything else on any other path is the SOAP endpoint of
+§3.1 to §3.8, unchanged.
+
+Behaviour is chosen by `Bundle.id`:
+
+| `Bundle.id` | Behaviour |
+| --- | --- |
+| anything else | `202`, two `202` polls, then `200` success |
+| `mock-slow` | six `202` polls, then success |
+| `mock-error-outcome` | `200` with an `error` `OperationOutcome` |
+| `mock-status-400` | the final poll answers `400` |
+| `mock-400`, `-401`, `-403`, `-404`, `-409`, `-429`, `-500` | the `POST` is rejected with that status; `429` adds `Retry-After: 1` |
+| `mock-429-once`, `mock-500-once` | the first `POST` for that id fails; the retry is accepted |
+
+State is in memory. A finished job keeps answering the same way for five
+minutes (so a repeated `GET` after a dropped connection is consistent), then
+is forgotten.
+
+§3.10.1 **Forwarding.** An accepted (`202`) Bundle is forwarded, raw, to
+`EGRESS_QUEUE_NAME` when one is configured, with `EGRESS_SESSION_ID`. A
+rejected `POST` is **not**, so a `*-once` scenario puts one message on the
+queue, and an end-to-end test can read the queue to confirm a message reached
+the end of the flow. **Deviation:** upstream logs a failed forward and still
+answers `202`. Here it answers `500`, for the reason §3.9 gives for SOAP: a
+`202` that forwarded nothing makes a test waiting on the queue hang rather
+than fail, and `fhir-sender` treats a `500` as transient and retries.
+
 ---
 
 ## §4 Tests
@@ -191,6 +229,15 @@ asserting a message reaches the fake bus and the sender completes it.
 
 §4.7 Integration: `soap-sender` against `http-mock-receiver` end to end,
 including the `fail` trigger producing a fault that the sender rejects.
+
+§4.8 Unit: every scenario of §3.10, the retention of a finished job against
+an explicit clock, and the status URL built on the given origin.
+
+§4.9 Integration: `fhir-sender`'s real client against the Promptly mock over a
+socket: a success is polled to the end and forwarded once; a rejected `POST` is
+`Permanent` and not forwarded; an error `OperationOutcome` after a `202` is
+`Permanent`; a `403` is an authorization failure; `mock-500-once` is delivered
+and forwarded once.
 
 ---
 

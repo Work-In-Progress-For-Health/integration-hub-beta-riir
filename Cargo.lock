@@ -1677,6 +1677,7 @@ dependencies = [
 name = "http-mock-receiver"
 version = "0.1.0"
 dependencies = [
+ "fhir-sender",
  "hl7-2-soap",
  "http-body-util",
  "hyper",
@@ -1689,10 +1690,12 @@ dependencies = [
  "ihb-sender",
  "ihb-telemetry",
  "ihb-tls",
+ "serde_json",
  "soap-sender",
  "tokio",
  "tokio-test",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

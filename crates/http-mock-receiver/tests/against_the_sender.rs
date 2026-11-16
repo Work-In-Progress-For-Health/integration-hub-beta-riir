@@ -54,6 +54,7 @@ async fn mock(forwarding: bool) -> Mock {
     drop(listener);
 
     let receiver = Arc::new(Receiver {
+        fhir: http_mock_receiver::fhir::FhirMock::new(),
         sink,
         session_id: Some("mpi".to_string()),
     });

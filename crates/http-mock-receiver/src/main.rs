@@ -90,6 +90,7 @@ async fn run() -> ExitCode {
     let receiver = Arc::new(Receiver {
         sink,
         session_id: read("EGRESS_SESSION_ID"),
+        fhir: http_mock_receiver::fhir::FhirMock::new(),
     });
 
     match serve(listen, receiver, shutdown.watcher()).await {

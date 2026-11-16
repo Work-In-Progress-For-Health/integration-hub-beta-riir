@@ -432,6 +432,57 @@ services:
         aliases:
           - "wrrs-stmsg-dbsender"
 
+  # WPAS -> PROMS egress (spec/10-senders.md section 8): consumes the session-enabled
+  # queue the PROMs transformer writes and delivers Bundles to the Promptly mock.
+  fhir-sender:
+    container_name: "ihb-rs-fhir-sender"
+    image: "ihb-rs/fhir-sender:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: fhir-sender
+    env_file:
+      - ./fhir-sender.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+      - promptly-mock-receiver
+    profiles:
+      - wpas-to-proms
+    networks:
+      integration-hub:
+        aliases:
+          - "fhir-sender"
+
+  # Mock of the Promptly $process-message async API (spec/11-mock-receivers.md section 3.10).
+  # Bundle.id selects a scenario (mock-400, mock-429-once, ...).
+  promptly-mock-receiver:
+    container_name: "ihb-rs-promptly-mock-receiver"
+    image: "ihb-rs/http-mock-receiver:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: http-mock-receiver
+    env_file:
+      - ./promptly-mock-receiver.env
+    ports:
+      - "127.0.0.1:8085:8080"
+    restart: on-failure
+    profiles:
+      - wpas-to-proms
+    networks:
+      integration-hub:
+        aliases:
+          - "promptly-mock-receiver"
+
   # Dedicated LIMS -> MPI sender (spec/18-deployment.md §5.2.3): subscription ingress from
   # the topic hl7-soap-server publishes to, delivering to the topic mock receiver. It
   # replaces the shared queue-based mpi-hl7-sender in this profile, which nothing fed.

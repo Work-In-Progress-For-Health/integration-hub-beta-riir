@@ -30,9 +30,12 @@ ihb-runtime.workspace = true
 ihb-telemetry.workspace = true
 ihb-tls.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
+serde_json.workspace = true
 tracing.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
+fhir-sender = { version = "0.1", path = "../fhir-sender" }
 ihb-sender.workspace = true
 soap-sender = { version = "0.1", path = "../soap-sender" }
 tokio-test.workspace = true

@@ -28,6 +28,8 @@ pub struct Receiver<S> {
     /// `EGRESS_SESSION_ID`, stamped on every forwarded message; a
     /// session-enabled queue refuses a message that has none.
     pub session_id: Option<String>,
+    /// The Promptly mock (§3.10); its state is shared by every connection.
+    pub fhir: crate::fhir::FhirMock,
 }
 
 /// Serve until the watcher says stop.
@@ -96,6 +98,29 @@ async fn handle<S: MessageSink>(
     request: Request<Incoming>,
     receiver: Arc<Receiver<S>>,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
+    // §3.10 — the Promptly mock lives beside the SOAP endpoint.
+    let path = request.uri().path().to_string();
+    let is_process_message =
+        request.method() == hyper::Method::POST && path == crate::fhir::PROCESS_MESSAGE_PATH;
+    let status_id = (request.method() == hyper::Method::GET)
+        .then(|| path.strip_prefix(&format!("{}/", crate::fhir::STATUS_PATH)))
+        .flatten()
+        .map(str::to_string);
+    let origin = request
+        .headers()
+        .get(hyper::header::HOST)
+        .and_then(|host| host.to_str().ok())
+        .map_or_else(
+            || "http://localhost".to_string(),
+            |host| format!("http://{host}"),
+        );
+
+    if let Some(job_id) = status_id {
+        let result = receiver.fhir.status(&job_id);
+        tracing::info!(status = result.status, "FHIR status poll");
+        return Ok(fhir_response(&result));
+    }
+
     let collected = match request.into_body().collect().await {
         Ok(collected) => collected.to_bytes(),
         Err(error) => {
@@ -104,6 +129,10 @@ async fn handle<S: MessageSink>(
         }
     };
     let body = String::from_utf8_lossy(&collected).into_owned();
+
+    if is_process_message {
+        return Ok(process_message(&receiver, &body, &origin).await);
+    }
 
     // §3.3 — detected from the raw text, so a body that does not parse
     // still gets the right reply shape.
@@ -183,4 +212,60 @@ fn respond(
             *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
             response
         })
+}
+
+/// `POST /fhir/r4/$process-message` (§3.10).
+///
+/// Only an **accepted** Bundle is forwarded, so a rejected-then-retried
+/// scenario puts one message on the queue, not two. A forward that fails is a
+/// `500` rather than an acknowledgement, for the reason §3.9 gives.
+async fn process_message<S: MessageSink>(
+    receiver: &Receiver<S>,
+    body: &str,
+    origin: &str,
+) -> Response<Full<Bytes>> {
+    let result = receiver.fhir.submit(body, origin);
+    tracing::info!(bytes = body.len(), status = result.status, "FHIR POST");
+
+    if result.status == 202
+        && let Some(sink) = receiver.sink.as_ref()
+    {
+        let outgoing =
+            Outgoing::new(body.to_string()).with_optional_session(receiver.session_id.as_deref());
+        if let Err(error) = sink.send(outgoing).await {
+            tracing::error!(%error, "could not forward the Bundle; rejecting");
+            return fhir_response(&crate::fhir::MockResponse {
+                status: 500,
+                body: Some(crate::fhir::operation_outcome(
+                    "error",
+                    "transient",
+                    "Could not forward the message",
+                )),
+                headers: vec![],
+            });
+        }
+    }
+    fhir_response(&result)
+}
+
+/// A [`crate::fhir::MockResponse`] as HTTP.
+fn fhir_response(result: &crate::fhir::MockResponse) -> Response<Full<Bytes>> {
+    let bytes = result
+        .body
+        .as_ref()
+        .map_or_else(Bytes::new, |body| Bytes::from(body.to_string()));
+    let mut builder = Response::builder()
+        .status(result.status)
+        .header(hyper::header::CONTENT_LENGTH, bytes.len());
+    if result.body.is_some() {
+        builder = builder.header(CONTENT_TYPE, "application/fhir+json");
+    }
+    for (name, value) in &result.headers {
+        builder = builder.header(name, value);
+    }
+    builder.body(Full::new(bytes)).unwrap_or_else(|_| {
+        let mut response = Response::new(Full::new(Bytes::new()));
+        *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        response
+    })
 }

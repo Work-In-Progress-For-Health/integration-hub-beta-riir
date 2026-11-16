@@ -860,10 +860,13 @@ and gate-checked except where noted.
   for a malformed frame, the WDS trigger check —
   [`spec/07`](spec/07-hl7-server.md) §2.6, §3.3.3a
 - [x] FHIR sender (`fhir-sender`) — [`spec/10`](spec/10-senders.md) §8.
-  Not yet: its Compose service (needs the Promptly mock), and the items
-  below.
-- [ ] **Upstream, 3–13 Nov, not yet ported:** `http-mock-receiver` FHIR
-  handler and egress forward (`#442`, `#454`), non-HL7 payloads in the
+  Compose: `fhir-sender` and `promptly-mock-receiver` (profile
+  `wpas-to-proms`); the PROMs transformer has no Compose service or WPAS
+  topic yet, so nothing feeds it locally.
+- [x] Promptly mock in `http-mock-receiver` —
+  [`spec/11`](spec/11-mock-receivers.md) §3.10
+- [ ] **Upstream, 3–13 Nov, not yet ported:**
+  non-HL7 payloads in the
   transformer base (`#452`), `mock_db_receiver` (`#446`), the PROMS referral
   mapping (`#423`, `#435`, `#437`–`#440`); `#455` and `#457` not yet read.
 - [x] Lookup service auth and trial switch —

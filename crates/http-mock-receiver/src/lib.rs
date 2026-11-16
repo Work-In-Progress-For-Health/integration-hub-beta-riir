@@ -12,5 +12,6 @@
 //! expansion attacks that `spec/11-mock-receivers.md` §3.8 requires a real
 //! parser to be hardened against.
 
+pub mod fhir;
 pub mod server;
 pub mod soap;
