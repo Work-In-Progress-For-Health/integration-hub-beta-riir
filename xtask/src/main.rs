@@ -67,6 +67,7 @@ const MEMBERS: &[&str] = &[
     "hl7-wds-transformer",
     "hl7-lims-wrrs-transformer",
     "db-sender",
+    "fhir-sender",
     "wrds-service",
     "hl7-core-reference-transformer",
     "hl7-rest-server",

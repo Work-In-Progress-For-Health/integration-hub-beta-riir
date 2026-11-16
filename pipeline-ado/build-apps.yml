@@ -38,6 +38,7 @@ parameters:
       - 'HL7 WDS Transformer'
       - 'HL7 LIMS WRRS Transformer'
       - 'Database Sender'
+      - 'FHIR Sender'
       - 'HL7 Core Reference Transformer'
       - 'Message Store Service'
       - 'Message Replay Job'
@@ -297,6 +298,23 @@ stages:
             dockerfilePath: 'docker/Dockerfile'
             buildContext: '.'
             buildArgs: 'BIN=db-sender'
+            acrName: $(acrName)
+            azureServiceConnection: $(azureServiceConnection)
+            POOL_NAME: ${{ variables.POOL_NAME }}
+            SEMANTIC_VERSION: ${{ parameters.SEMANTIC_VERSION }}
+  - ${{ if containsValue(parameters.appsToBuild, 'FHIR Sender') }}:
+    - stage: BuildAndPush_fhirsender
+      displayName: 'Build — FHIR Sender'
+      dependsOn: CodeQuality
+      jobs:
+        - template: templates/docker-build-push-template.yml
+          parameters:
+            jobName: 'BuildPushFhirSender'
+            displayName: 'Build and Push FHIR Sender'
+            appName: 'proms-fhirsender'
+            dockerfilePath: 'docker/Dockerfile'
+            buildContext: '.'
+            buildArgs: 'BIN=fhir-sender'
             acrName: $(acrName)
             azureServiceConnection: $(azureServiceConnection)
             POOL_NAME: ${{ variables.POOL_NAME }}

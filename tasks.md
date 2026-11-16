@@ -856,6 +856,16 @@ and gate-checked except where noted.
 - [x] LIMS WRRS classifier (`hl7-lims-wrrs-transformer`) —
   [`spec/09`](spec/09-transformers.md) §10
 - [x] WRRS database sender (`db-sender`) — [`spec/10`](spec/10-senders.md) §7
+- [x] `hl7-server` November changes: `MLLP_TIMEOUT_SECONDS`, control-id NACK
+  for a malformed frame, the WDS trigger check —
+  [`spec/07`](spec/07-hl7-server.md) §2.6, §3.3.3a
+- [x] FHIR sender (`fhir-sender`) — [`spec/10`](spec/10-senders.md) §8.
+  Not yet: its Compose service (needs the Promptly mock), and the items
+  below.
+- [ ] **Upstream, 3–13 Nov, not yet ported:** `http-mock-receiver` FHIR
+  handler and egress forward (`#442`, `#454`), non-HL7 payloads in the
+  transformer base (`#452`), `mock_db_receiver` (`#446`), the PROMS referral
+  mapping (`#423`, `#435`, `#437`–`#440`); `#455` and `#457` not yet read.
 - [x] Lookup service auth and trial switch —
   [`spec/20`](spec/20-lookup-service.md) §2.7–§2.9, §12
 - [x] PIMS reference-data enrichment and topic flow —

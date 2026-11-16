@@ -382,3 +382,138 @@ data absent from every dead-letter description). The Python's "a failing
 `MESSAGE_PROCESSED` still completes" case has no counterpart: the event
 logger cannot fail here, and step 7 follows the commit; and §7.3's classification table.
 **Not run here:** a test against a real SQL Server, for want of one.
+
+---
+
+## §8 FHIR sender (`fhir-sender`)
+
+Reference implementation: `Integration-Hub-Beta/senders/fhir_sender/`
+(upstream `#441`, `#442`, `#448`). Implemented by `crates/fhir-sender`. The
+WPAS → PROMS flow's last hop: the Bundle `xml-fhir-proms-transformer`
+produces ([`16-proms-transformer.md`](16-proms-transformer.md)) goes to
+Promptly.
+
+§8.1 **Shape.** One session on one queue in, one `$process-message`
+delivery to Promptly out, per message. Like §7 it is **not** the §2
+pipeline: no throttle, no message-store write, no HL7 acknowledgement. §1.1
+holds: a message is completed only when Promptly reported a non-error
+`OperationOutcome`.
+
+The WPAS-Promptly IG's asynchronous pattern:
+
+```
+POST  {FHIR_ENDPOINT_URL}          Content-Type: application/fhir+json
+  202 Accepted + Content-Location  (or 200 + OperationOutcome: done)
+GET   {Content-Location}           until 200 + OperationOutcome
+```
+
+§8.2 **Outcomes.** One class per failure, each with one Service Bus action.
+
+| Result | Class | Action |
+| --- | --- | --- |
+| `200`, or `202` then `200`, with an `OperationOutcome` having no `error`/`fatal` issue | | complete |
+| `400`, `404`, `409`, any other `4xx` | `Permanent` | **dead-letter**, reason `PromptlyRejected` |
+| `200` with an `error` or `fatal` issue | `Permanent` | dead-letter, reason `PromptlyRejected` |
+| `401`, with OAuth2: one retry with a fresh token | | |
+| `401` otherwise, `403`, a token endpoint that rejects the client | `Authorization` | log `ALERT`, **abandon** (redrive after the credentials are fixed) |
+| `429` | | wait `Retry-After` (capped by `FHIR_MAX_RETRY_AFTER_SECONDS`), else the backoff; counts as an attempt |
+| `5xx`, network error, timeout | | exponential backoff from `FHIR_BACKOFF_SECONDS`, up to `FHIR_MAX_ATTEMPTS`; then `Transient`, **abandon** |
+| `202` without `Content-Location`; a `200` that is not an `OperationOutcome` | `Transient` | abandon |
+| polling past `FHIR_POLL_TIMEOUT_SECONDS` | `Transient` | abandon |
+| body is not a `Bundle` of `type=message`, or not UTF-8 | | dead-letter without a request, reason `InvalidFhirBundle` |
+
+A dead-letter description is at most 1000 characters; a detail taken from
+an `OperationOutcome` is at most 500 (`severity/code: details.text`, else
+`diagnostics`, joined by `; `).
+
+§8.3 **Authentication**, one mechanism per environment (`FHIR_AUTH_MODE`,
+default `api_key`):
+
+- `api_key`: `X-API-Key: {FHIR_API_KEY}`. A blank key is refused.
+- `oauth2`: client-credentials grant against `FHIR_OAUTH_TOKEN_URL` (`https`
+  only), sent as a form (`grant_type`, `client_id`, `client_secret`,
+  `scope`), `Authorization: Bearer`. The token is cached and refreshed 60
+  seconds before `expires_in` (default 3600). A `400`, `401` or `403` from
+  the token endpoint is an `Authorization` failure; any other non-`200`, an
+  unreachable endpoint or an unreadable response is `Transient`. The
+  response body is never echoed.
+
+Credentials are never printed: they are `Secret`s and appear in no `Debug`
+output.
+
+§8.4 **Safeguards.** (a) The endpoint MUST be `https`; plain `http` only
+with `FHIR_ALLOW_INSECURE_HTTP=true` (exactly that word), for local mocks.
+(b) Redirects are **never followed**: a `3xx` is a `Permanent` rejection.
+(c) The status URL (`Content-Location`, absolute, scheme-relative,
+path-absolute or relative) MUST have the endpoint's scheme and host and
+port, because the credentials are sent to it; otherwise `Permanent`
+(`Status URL origin differs from the configured endpoint`) **before** any
+request is made to it. (d) A response is read to at most 1 MiB. (e) Every
+request is bounded by `FHIR_TIMEOUT_SECONDS`, shortened to what remains of
+the polling deadline.
+
+§8.5 **Per message**, in order:
+
+```
+1  decode the body as UTF-8 (invalid: dead-letter, reason InvalidFhirBundle)
+2  MESSAGE_RECEIVED event
+3  the body is a Bundle with type "message" (else dead-letter, MESSAGE_FAILED)
+4  deliver (§8.2): POST, then poll
+5  Complete:   messages_sent metric, MESSAGE_PROCESSED event, complete
+   Permanent:  MESSAGE_FAILED, dead-letter
+   Authorization / Transient: MESSAGE_FAILED, abandon the message and the rest of the batch
+```
+
+§8.6 **No Bundle reaches a log or an event.** A message Bundle is a patient
+record. Upstream passes the whole body to `MESSAGE_RECEIVED`,
+`MESSAGE_PROCESSED` and `MESSAGE_FAILED`; this port records
+`FHIR Bundle, {n} bytes (content not logged)` instead, which is a
+deliberate deviation (`AGENTS.md`: patient data never reaches a log). The
+`OperationOutcome` detail that §8.2 puts in `MESSAGE_FAILED` and in a dead
+letter is Promptly's own text and could in principle echo a value from the
+Bundle; it is kept because it is what an operator needs, and bounded to 500
+characters. **Open:** confirm with Promptly that diagnostics never echo
+patient values; if they can, redact them as §7.4 does for SQL server messages.
+
+§8.7 **Configuration.**
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FHIR_ENDPOINT_URL` | — | **Required.** The full `$process-message` URL |
+| `FHIR_AUTH_MODE` | `api_key` | `api_key` or `oauth2` (case-insensitive); anything else is a startup failure |
+| `FHIR_API_KEY` | — | Required for `api_key` |
+| `FHIR_OAUTH_TOKEN_URL`, `FHIR_OAUTH_CLIENT_ID`, `FHIR_OAUTH_CLIENT_SECRET`, `FHIR_OAUTH_SCOPE` | — | Required for `oauth2` |
+| `FHIR_TIMEOUT_SECONDS` | `30` | Per request; positive |
+| `FHIR_MAX_ATTEMPTS` | `3` | Per request, for `429`/`5xx`/network; positive |
+| `FHIR_BACKOFF_SECONDS` | `2` | First backoff; doubles each attempt |
+| `FHIR_MAX_RETRY_AFTER_SECONDS` | `60` | Cap on a `Retry-After` wait |
+| `FHIR_POLL_INTERVAL_SECONDS` | `5` | Poll delay when none is given |
+| `FHIR_POLL_TIMEOUT_SECONDS` | `120` | Longest wait for processing to finish |
+| `FHIR_ALLOW_INSECURE_HTTP` | `false` | Local mocks only |
+| `INGRESS_QUEUE_NAME` | — | **Required** |
+| `INGRESS_SESSION_ID` | — | **Required.** The queue MUST be session-enabled: only a session receiver renews its lock (`03-message-bus.md` §5.1), and a status poll can outlast the queue's lock duration |
+| `MAX_BATCH_SIZE` | `1` | Keep small: each message may poll for the full timeout, and a renewed lock is capped at five minutes |
+| `SERVICE_BUS_CONNECTION_STRING`, `SERVICE_BUS_NAMESPACE` | | One of |
+| `WORKFLOW_ID`, `MICROSERVICE_ID`, `HEALTH_BOARD`, `PEER_SERVICE` | — | **Required** |
+| `HEALTH_CHECK_HOST`, `HEALTH_CHECK_PORT` | | As the other services |
+| `LOG_LEVEL` | `ERROR` | As upstream; the local env file sets `INFO` |
+
+Every problem is reported together (`02-configuration.md` §1.4). Numbers
+that are unparseable, zero, negative or not finite are startup failures,
+as upstream's `_read_positive_number`.
+
+§8.8 **Tests.** The policy runs against a scripted transport and a clock
+that advances when it sleeps, so no test waits: every row of §8.2; the
+`Retry-After` cap and the backoff sequence (2 s, 4 s, none after the last
+attempt); the 401 refresh happening once; the deadline both ways (`Processing
+not complete` and `Polling deadline reached`); every origin variant of §8.4(c)
+refused with no second request; the token form, its caching and its refresh
+margin; secrets absent from `Debug`; the configuration table; the processor
+dispositions; and the batch stopping at an abandon but not at a dead letter.
+`tests/wire.rs` runs the real transport against a local socket: the headers
+that arrive, a relative `Content-Location` resolved, a `302` left unfollowed,
+and a refused connection ending `Transient`. **Not run here:** against
+Promptly, or against a TLS peer. **Known, upstream:** the IG defines no
+idempotency mechanism, so a retry after an unconfirmed `POST`, or after a
+polling timeout, can resubmit a Bundle; so can redelivery after a
+completion that failed to settle.

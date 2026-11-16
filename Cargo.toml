@@ -38,6 +38,7 @@ members = [
   "crates/hl7-wds-transformer",
   "crates/hl7-lims-wrrs-transformer",
   "crates/db-sender",
+  "crates/fhir-sender",
   "crates/wrds-service",
   "crates/hl7-core-reference-transformer",
   "crates/hl7-rest-server",

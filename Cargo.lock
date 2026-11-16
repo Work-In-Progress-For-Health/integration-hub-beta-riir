@@ -1043,6 +1043,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "fhir-sender"
+version = "0.1.0"
+dependencies = [
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "ihb-bus",
+ "ihb-config",
+ "ihb-health",
+ "ihb-runtime",
+ "ihb-telemetry",
+ "ihb-tls",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-rustls",
+ "tokio-test",
+ "tracing",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"

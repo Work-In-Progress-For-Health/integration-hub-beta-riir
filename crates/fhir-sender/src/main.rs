@@ -1,0 +1,21 @@
+//! The `fhir-sender` binary.
+//!
+//! Implements `spec/10-senders.md` §8. Everything is
+//! [`fhir_sender::main_loop::run`].
+
+// See `main_loop.rs`: `azservicebus` futures are large and one-per-process.
+#![allow(clippy::large_futures)]
+
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("fhir-sender: could not start the async runtime: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    runtime.block_on(fhir_sender::main_loop::run("fhir-sender"))
+}
