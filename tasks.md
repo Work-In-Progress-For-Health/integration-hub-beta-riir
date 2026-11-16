@@ -866,8 +866,7 @@ and gate-checked except where noted.
 - [x] Promptly mock in `http-mock-receiver` —
   [`spec/11`](spec/11-mock-receivers.md) §3.10
 - [ ] **Upstream, 3–13 Nov, not yet ported:**
-  non-HL7 payloads in the
-  transformer base (`#452`), `mock_db_receiver` (`#446`), the PROMS referral
+  `mock_db_receiver` (`#446`), the PROMS referral
   mapping (`#423`, `#435`, `#437`–`#440`); `#455` and `#457` not yet read.
 - [x] Lookup service auth and trial switch —
   [`spec/20`](spec/20-lookup-service.md) §2.7–§2.9, §12
