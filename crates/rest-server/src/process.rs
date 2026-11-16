@@ -68,6 +68,8 @@ pub struct GenericProcessor<E, S, M = RealMint> {
     egress: E,
     /// The audit copy.
     store: Option<S>,
+    /// The secondary WRRS sender, when `settings.wrrs` is set.
+    wrrs: Option<E>,
     /// Events.
     events: EventLogger,
     /// Counters.
@@ -105,10 +107,19 @@ impl<E: MessageSink, S: MessageSink, M: Mint> GenericProcessor<E, S, M> {
             settings,
             egress,
             store,
+            wrrs: None,
             events,
             metrics,
             mint,
         }
+    }
+
+    /// Attach the sender for the secondary WRRS destination
+    /// (`spec/19-rest-servers.md` §9.7). Without it, nothing is forwarded.
+    #[must_use]
+    pub fn with_wrrs(mut self, sender: E) -> Self {
+        self.wrrs = Some(sender);
+        self
     }
 
     /// The deployment's adapter, for the HTTP layer's own errors.
@@ -235,6 +246,7 @@ impl<E: MessageSink, S: MessageSink, M: Mint> GenericProcessor<E, S, M> {
             .await;
 
         // ---- Step 9: Service Bus, blocking. ----------------------------
+        let output_for_wrrs = output.clone();
         let mut outgoing = Outgoing::new(output)
             .with_session(self.identity.egress_session_id.clone())
             .with_properties(properties);
@@ -245,6 +257,15 @@ impl<E: MessageSink, S: MessageSink, M: Mint> GenericProcessor<E, S, M> {
             tracing::error!(%error, "failed to send the payload to Service Bus");
             Fault::Request(RequestError::new("Server", UNEXPECTED, 500))
         })?;
+
+        // ---- Step 9b: the secondary WRRS destination (§9.7). -----------
+        self.forward_to_wrrs(
+            &output_for_wrrs,
+            &tracking,
+            extracted.message_type.as_deref(),
+            &control_id,
+        )
+        .await?;
 
         // ---- Steps 10 and 11. ------------------------------------------
         self.metrics.message_sent();
@@ -320,6 +341,52 @@ impl<E: MessageSink, S: MessageSink, M: Mint> GenericProcessor<E, S, M> {
             ),
             400,
         )))
+    }
+
+    /// Step 9b — also send to WRRS when the trigger is one of
+    /// `WRRS_TRIGGER_EVENTS` (`spec/19-rest-servers.md` §9.7).
+    ///
+    /// Blocking and **fatal**, as the primary send: a `200` acknowledges
+    /// delivery, so a destination that was configured and did not take the
+    /// message is a `500` and the sender retries.
+    async fn forward_to_wrrs(
+        &self,
+        output: &str,
+        tracking: &Tracking,
+        trigger: Option<&str>,
+        control_id: &str,
+    ) -> Result<(), Fault> {
+        let (Some(sender), Some(wrrs)) = (self.wrrs.as_ref(), self.settings.wrrs.as_ref()) else {
+            return Ok(());
+        };
+        let Some(trigger) = trigger.filter(|t| {
+            self.settings
+                .wrrs_trigger_events
+                .iter()
+                .any(|listed| listed == t)
+        }) else {
+            return Ok(());
+        };
+
+        // Same correlation id and receipt time, the WRRS workflow id.
+        let mut properties = Tracking {
+            workflow_id: wrrs.workflow_id.clone(),
+            ..tracking.clone()
+        }
+        .to_properties();
+        properties.insert(MESSAGE_TYPE.to_string(), trigger.to_string());
+        let mut outgoing = Outgoing::new(output.to_string())
+            .with_session(wrrs.session_id.clone())
+            .with_properties(properties);
+        if !control_id.is_empty() {
+            outgoing = outgoing.with_message_id(control_id.to_string());
+        }
+        sender.send(outgoing).await.map_err(|error| {
+            tracing::error!(%error, "failed to send the payload to the WRRS destination");
+            Fault::Request(RequestError::new("Server", UNEXPECTED, 500))
+        })?;
+        tracing::info!(trigger, "forwarded the message to the WRRS destination");
+        Ok(())
     }
 
     /// Step 8 — the audit copy. Never fatal.
@@ -416,6 +483,8 @@ mod tests {
             allowed_source_identifiers: allowed.iter().map(ToString::to_string).collect(),
             allowed_trigger_events: vec![],
             output_format: output,
+            wrrs: None,
+            wrrs_trigger_events: vec!["A31".into(), "A40".into()],
         }
     }
 
@@ -427,6 +496,8 @@ mod tests {
             allowed_source_identifiers: vec![],
             allowed_trigger_events: vec![],
             output_format: output,
+            wrrs: None,
+            wrrs_trigger_events: vec!["A31".into(), "A40".into()],
         }
     }
 
@@ -648,6 +719,90 @@ mod tests {
             StoreEvent::from_json(&bus.all_sent("store-queue")[0].text().unwrap()).unwrap();
         assert!(stored.raw_payload.starts_with("<soapenv:Envelope"));
         assert!(stored.xml_payload.unwrap().starts_with("<ADT_A05"));
+    }
+
+    fn wrrs_settings(triggers: &[&str]) -> Generic {
+        let mut settings = soap_settings(OutputFormat::Er7);
+        settings.wrrs = Some(hl7_rest_server::config::Wrrs {
+            egress: hl7_rest_server::config::Egress::Queue("wrrs-queue".into()),
+            session_id: "wrrs-session".into(),
+            workflow_id: "lims-to-wrrs".into(),
+        });
+        settings.wrrs_trigger_events = triggers.iter().map(ToString::to_string).collect();
+        settings
+    }
+
+    /// A rig whose WRRS sender is on a **second** bus, so a failure can be
+    /// injected into it alone.
+    fn wrrs_rig(
+        settings: Generic,
+    ) -> (
+        GenericProcessor<FakeSender, FakeSender, Fixed>,
+        FakeBus,
+        FakeBus,
+    ) {
+        let (processor, bus) = rig(settings);
+        let wrrs_bus = FakeBus::new();
+        let processor = processor.with_wrrs(wrrs_bus.sender("wrrs-queue"));
+        (processor, bus, wrrs_bus)
+    }
+
+    #[tokio::test]
+    async fn a_listed_trigger_is_also_sent_to_wrrs_with_its_own_session_and_workflow() {
+        // spec/19 §9.7 (upstream `#455`).
+        let (processor, bus, wrrs_bus) = wrrs_rig(wrrs_settings(&["A31"]));
+
+        let reply = processor.process(&soap(ADT)).await;
+
+        assert_eq!(reply.status, 200, "{}", reply.body);
+        let primary = bus.all_sent("egress-queue");
+        let secondary = wrrs_bus.all_sent("wrrs-queue");
+        assert_eq!(primary.len(), 1);
+        assert_eq!(secondary.len(), 1);
+        assert_eq!(secondary[0].body, primary[0].body, "the same payload");
+        assert_eq!(
+            secondary[0].session_id.as_deref(),
+            Some("wrrs-session"),
+            "its own session"
+        );
+        let properties = &secondary[0].properties;
+        assert_eq!(
+            properties
+                .get(ihb_bus::metadata::WORKFLOW_ID)
+                .map(String::as_str),
+            Some("lims-to-wrrs")
+        );
+        assert_eq!(
+            properties.get("MessageType").map(String::as_str),
+            Some("A31")
+        );
+        let correlation = properties.get(ihb_bus::metadata::CORRELATION_ID);
+        assert!(correlation.is_some(), "present, not vacuously equal");
+        assert_eq!(
+            correlation,
+            primary[0].properties.get(ihb_bus::metadata::CORRELATION_ID),
+            "one correlation id across both"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unlisted_trigger_is_not_sent_to_wrrs() {
+        let (processor, bus, wrrs_bus) = wrrs_rig(wrrs_settings(&["A40"]));
+        let reply = processor.process(&soap(ADT)).await;
+        assert_eq!(reply.status, 200, "{}", reply.body);
+        assert_eq!(bus.all_sent("egress-queue").len(), 1);
+        assert!(wrrs_bus.all_sent("wrrs-queue").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_wrrs_send_failure_is_a_500_because_a_200_acknowledges_delivery() {
+        let (processor, _bus, wrrs_bus) = wrrs_rig(wrrs_settings(&["A31"]));
+        wrrs_bus.fail_next_send(down());
+
+        let reply = processor.process(&soap(ADT)).await;
+
+        assert_eq!(reply.status, 500, "{}", reply.body);
+        assert!(!reply.body.contains("Message received"), "{}", reply.body);
     }
 
     #[tokio::test]

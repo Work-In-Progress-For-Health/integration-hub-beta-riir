@@ -130,10 +130,17 @@ async fn run() -> ExitCode {
     };
 
     let handler = match config.pipeline {
-        Pipeline::Generic(generic) => RestHandler::Generic(GenericHttp::new(
-            GenericProcessor::new(config.identity, generic, egress, store),
-            config.max_request_size,
-        )),
+        Pipeline::Generic(generic) => {
+            let Ok(wrrs) = open_wrrs(&bus, generic.wrrs.as_ref()).await else {
+                return ExitCode::FAILURE;
+            };
+            let processor = GenericProcessor::new(config.identity, generic, egress, store);
+            let processor = match wrrs {
+                Some(sender) => processor.with_wrrs(sender),
+                None => processor,
+            };
+            RestHandler::Generic(GenericHttp::new(processor, config.max_request_size))
+        }
         Pipeline::Hl7(settings) => {
             let Ok(wrrs) = open_wrrs(&bus, settings.wrrs.as_ref()).await else {
                 return ExitCode::FAILURE;
@@ -179,7 +186,8 @@ async fn start_health(address: std::net::SocketAddr) -> Result<ihb_health::Healt
         .map_err(|error| tracing::error!(%error, %address, "could not start the health check"))
 }
 
-/// The WRRS sender, for the `risp` flow only.
+/// The WRRS sender: the `risp` flow's, or the `generic` pipeline's optional
+/// secondary destination (`spec/19-rest-servers.md` §9.7).
 ///
 /// `Err` has already been logged; the caller only has to stop.
 async fn open_wrrs(

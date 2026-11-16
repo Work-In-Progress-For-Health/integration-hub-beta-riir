@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use hl7_rest_server::config::{
-    Hl7Settings, Identity, SERVICE_BUS_LIMIT, Tls, read_tls, socket_addr,
+    Egress, Hl7Settings, Identity, SERVICE_BUS_LIMIT, Tls, Wrrs, read_tls, socket_addr,
 };
 use ihb_config::{ConfigErrors, Reader};
 use ihb_validation::Flow;
@@ -65,6 +65,13 @@ pub struct Generic {
     pub allowed_trigger_events: Vec<String>,
     /// `OUTPUT_FORMAT`.
     pub output_format: OutputFormat,
+    /// The secondary WRRS destination (upstream `#455`), when
+    /// `WRRS_QUEUE_NAME` or `WRRS_TOPIC_NAME` is set
+    /// (`spec/19-rest-servers.md` §9.7).
+    pub wrrs: Option<Wrrs>,
+    /// `WRRS_TRIGGER_EVENTS`, default `A31,A40`: the triggers also sent to
+    /// [`Self::wrrs`].
+    pub wrrs_trigger_events: Vec<String>,
 }
 
 /// Which pipeline this deployment runs.
@@ -267,6 +274,45 @@ fn read_generic(reader: &mut Reader, endpoint_path: String) -> Option<Generic> {
         } else {
             OutputFormat::Raw
         },
+        wrrs: read_secondary_wrrs(reader),
+        wrrs_trigger_events: reader.list_or("WRRS_TRIGGER_EVENTS", DEFAULT_WRRS_TRIGGERS),
+    })
+}
+
+/// Default `WRRS_TRIGGER_EVENTS`.
+pub const DEFAULT_WRRS_TRIGGERS: &str = "A31,A40";
+
+/// The optional second destination of the `generic` pipeline
+/// (`spec/19-rest-servers.md` §9.7).
+///
+/// Unlike the `risp` flow's, this is **optional**: nothing set means none.
+/// Once a queue or topic is named, the session and workflow are required,
+/// and every missing one is reported together.
+fn read_secondary_wrrs(reader: &mut Reader) -> Option<Wrrs> {
+    let queue = reader.optional_string("WRRS_QUEUE_NAME");
+    let topic = reader.optional_string("WRRS_TOPIC_NAME");
+    let session = reader.optional_string("WRRS_EGRESS_SESSION_ID");
+    let workflow = reader.optional_string("WRRS_WORKFLOW_ID");
+
+    let egress = match (queue, topic) {
+        (None, None) => return None,
+        (Some(_), Some(_)) => {
+            reader.conflict("Cannot specify both WRRS_QUEUE_NAME and WRRS_TOPIC_NAME.");
+            return None;
+        }
+        (Some(queue), None) => Egress::Queue(queue),
+        (None, Some(topic)) => Egress::Topic(topic),
+    };
+    if session.is_none() {
+        reader.conflict("WRRS destination requires WRRS_EGRESS_SESSION_ID to be provided.");
+    }
+    if workflow.is_none() {
+        reader.conflict("WRRS destination requires WRRS_WORKFLOW_ID to be provided.");
+    }
+    Some(Wrrs {
+        egress,
+        session_id: session?,
+        workflow_id: workflow?,
     })
 }
 
@@ -346,6 +392,52 @@ mod tests {
             pairs.push(((*key).to_string(), (*value).to_string()));
         }
         Config::from_pairs(pairs)
+    }
+
+    #[test]
+    fn no_wrrs_variable_means_no_secondary_destination() {
+        // spec/19 §9.7: optional, unlike the `risp` flow's.
+        let config = with(&[]).unwrap();
+        assert!(generic(&config).wrrs.is_none());
+        assert_eq!(generic(&config).wrrs_trigger_events, ["A31", "A40"]);
+    }
+
+    #[test]
+    fn a_named_wrrs_queue_needs_its_session_and_workflow_and_both_are_reported() {
+        let error = with(&[("WRRS_QUEUE_NAME", "wrrs")])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("WRRS_EGRESS_SESSION_ID"), "{error}");
+        assert!(error.contains("WRRS_WORKFLOW_ID"), "all together: {error}");
+    }
+
+    #[test]
+    fn a_complete_wrrs_destination_is_read_with_its_triggers() {
+        let config = with(&[
+            ("WRRS_TOPIC_NAME", "wrrs-topic"),
+            ("WRRS_EGRESS_SESSION_ID", "s"),
+            ("WRRS_WORKFLOW_ID", "w"),
+            ("WRRS_TRIGGER_EVENTS", "A40"),
+        ])
+        .unwrap();
+        let wrrs = generic(&config).wrrs.clone().unwrap();
+        assert_eq!(wrrs.egress, Egress::Topic("wrrs-topic".into()));
+        assert_eq!(
+            (wrrs.session_id.as_str(), wrrs.workflow_id.as_str()),
+            ("s", "w")
+        );
+        assert_eq!(generic(&config).wrrs_trigger_events, ["A40"]);
+    }
+
+    #[test]
+    fn a_wrrs_queue_and_topic_together_are_refused() {
+        let error = with(&[("WRRS_QUEUE_NAME", "q"), ("WRRS_TOPIC_NAME", "t")])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("Cannot specify both WRRS_QUEUE_NAME"),
+            "{error}"
+        );
     }
 
     fn without(name: &str) -> Result<Config, ConfigErrors> {

@@ -406,11 +406,26 @@ where an absent trigger reads `unknown`. Nothing is stored or sent. The LIMS
 deployment sets `A28,A31,A40`, so a message the downstream subscriptions would
 never route is refused at the door.
 
-**Not ported from `#455`:** the secondary WRRS destination (`WRRS_TOPIC_NAME`
-and `WRRS_QUEUE_NAME` for non-`risp` flows, with `WRRS_TRIGGER_EVENTS`),
-which no deployed environment here configures (LIMS reaches WRRS through the
-topic's subscription filter instead), and the `hl7apy` validator's
-trigger-to-structure tolerance.
+**Not ported from `#455`:** the `hl7apy` validator's trigger-to-structure
+tolerance (no deployed use here; `hl7apy` mode here is already the lenient
+one, §9.5.3).
+
+§9.7 **The secondary WRRS destination** (upstream `#455`; `generic`
+pipeline). Optional: with neither `WRRS_QUEUE_NAME` nor `WRRS_TOPIC_NAME`
+set, nothing changes. Naming one (not both) requires `WRRS_EGRESS_SESSION_ID`
+and `WRRS_WORKFLOW_ID`, every missing one reported together at startup.
+`WRRS_TRIGGER_EVENTS` (csv, default `A31,A40`) lists the triggers sent
+there too. After the primary send (step 9) and before the success events, a
+message whose trigger is listed is sent again with the same body (the output
+of step 6), the **WRRS session**, `MessageId` = the control id, and the usual
+tracking properties with the **WRRS workflow id**, the same correlation id and
+receipt time, and `MessageType`. The send is blocking and **fatal**: a failure
+is a `500` (`Server`, the generic text), since a `200` acknowledges delivery.
+Upstream does the same, so a retry after a WRRS failure repeats the primary
+send; consumers de-duplicate on the message id. No deployed environment here
+sets it (LIMS reaches WRRS through the topic's subscription filter), so this
+is covered by unit tests only, not a Compose run. The `hl7` pipeline ignores
+these variables beyond its own `risp` rules.
 
 §9.6 `OUTPUT_FORMAT=er7` failure is `Client.Validation` / 400 `Unable to
 convert XML payload to ER7 format.`.
