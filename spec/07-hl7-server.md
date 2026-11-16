@@ -50,9 +50,28 @@ their own reply. This differs from the Python, which read until its buffer
 *ended* with `<FS><CR>` and so answered two frames once. See
 [`plan.md` §9.1](../plan.md#9-deliberate-deviations-from-the-python).
 
-§2.6 The socket read timeout is 10 seconds
-(`size_limited_mllp_server.py`, `timeout=10`). A timeout closes the
-connection.
+§2.6 The socket read timeout is `MLLP_TIMEOUT_SECONDS`, **30 seconds** by
+default (`size_limited_mllp_server.py`; it was `timeout=10` until upstream
+`f7f9c5b`, 6 Nov 2026, which made it configurable because connections are now
+persistent and a sender may idle between messages). Absent, unparseable or
+non-positive resolves to 30. An idle timeout between frames, and a timeout
+in the middle of a frame, both close the connection; the second also logs a
+`MESSAGE_FAILED` event carrying the first 1000 bytes
+(`"Socket timeout while receiving message body"`, validation result
+`"MLLP Timeout"`).
+
+§2.6.1 **Persistent connections.** Upstream now keeps a connection open
+across messages (`f7f9c5b`); before, it closed after each reply. This server
+already did (§2.5), so nothing changes here beyond the timeout. Line
+terminators between frames are skipped.
+
+§2.6.2 **A frame that is not an HL7 message is answered, not dropped**
+(upstream `47b66ae`, #436). Where the frame parses as no message (empty
+segments, a leading `<CR>`, no `MSH`), the sender receives an `AE` NACK
+whose `MSA-2` echoes the sender's own `MSH-10` when one can be read from the
+first segment (at most 199 characters), and a fresh control id otherwise.
+Previously the NACK always carried a fresh id, so a sender could not match
+it to what it sent.
 
 §2.7 An empty read (peer closed) ends the connection cleanly.
 
@@ -121,6 +140,17 @@ the same three triggers as MPI outbound, and the dedicated Paris sender topic
 
 The rule has no `PID` requirement, unlike §3.3.2: Paris's `PID-2` is not a
 routing key.
+
+#### §3.3.3a `wds` — message type
+
+`custom_validation/wds_validation.py`. The WDS flow carries `A28`, `A31` and,
+since upstream `2060a7f` (#445), `A40`. This rule existed upstream before the
+sync and was missed here (§3.3.4 said `wds` had none).
+
+| Condition | Message |
+| --- | --- |
+| `MSH-9.2` blank | `MSH.9.2 MessageType is missing from the WDS message` |
+| `MSH-9.2` not in `{A28, A31, A40}` | `Unsupported message type '{value}' for WDS flow` |
 
 §3.3.4 Any other flow value performs no field-level rules here; its
 validation is the schema validation of §3.4.

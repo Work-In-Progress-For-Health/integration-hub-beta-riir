@@ -215,6 +215,26 @@ pub fn build_generic_nack(reason: &str, control_id: Option<&str>, now: &str) -> 
     )
 }
 
+/// Best-effort `MSH-10` from text that did not parse as a message
+/// (`spec/07-hl7-server.md` §2.6.2; upstream `_extract_control_id`).
+///
+/// Looks only at the first segment, after any leading `<CR>`; the field
+/// separator is the character after `MSH`. Capped at 199 characters.
+/// `None` when there is no `MSH` or the field is blank.
+#[must_use]
+pub fn sniff_control_id(raw: &str) -> Option<String> {
+    let first = raw.trim_start_matches('\r').split('\r').next()?;
+    let mut chars = first.chars();
+    if !first.starts_with("MSH") {
+        return None;
+    }
+    let separator = first.chars().nth(3)?;
+    let _ = chars.next();
+    let id = first.split(separator).nth(9)?.trim();
+    let id: String = id.chars().take(199).collect();
+    (!id.is_empty()).then_some(id)
+}
+
 /// A fresh `MSH-10`: the first 20 hex characters of a UUID.
 #[must_use]
 pub fn generate_control_id() -> String {
@@ -450,5 +470,21 @@ mod tests {
         let nack = build_generic_nack(&"x".repeat(1000), Some("C"), "20260820091500");
 
         assert_eq!(nack.rsplit('|').next().unwrap().len(), 199);
+    }
+
+    #[test]
+    fn a_control_id_is_read_from_text_that_does_not_parse() {
+        // spec/07-hl7-server.md §2.6.2.
+        let framed = "MSH|^~\\&|252|252|100|100|20250505232332||ADT^A31|CTRL42|P|2.5\r\rPID|1";
+        assert_eq!(sniff_control_id(framed).as_deref(), Some("CTRL42"));
+        assert_eq!(
+            sniff_control_id("\rMSH|^~\\&|a|b|c|d|e||f|ID7").as_deref(),
+            Some("ID7")
+        );
+        assert_eq!(sniff_control_id("PID|1"), None, "no MSH");
+        assert_eq!(sniff_control_id("MSH|^~\\&|a|b"), None, "too short");
+        assert_eq!(sniff_control_id("MSH|^~\\&|a|b|c|d|e||f||P"), None, "blank");
+        let long = format!("MSH|^~\\&|a|b|c|d|e||f|{}|P", "9".repeat(300));
+        assert_eq!(sniff_control_id(&long).unwrap().len(), 199);
     }
 }

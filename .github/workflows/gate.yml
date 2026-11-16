@@ -165,7 +165,12 @@ jobs:
 
       # spec/18-deployment.md §5.0 — Podman, not Docker.
       - name: Start the local stack
-        run: podman compose -f local/docker-compose.yml up -d
+        # Only the broker and the database. A bare `up -d` also starts the
+        # default-profile `message-store-service`, which consumes
+        # `local-inthub-messagestore` and so steals the event the in-process
+        # chain waits for (the run that reached that step timed out on
+        # "the store event" after 361s).
+        run: podman compose -f local/docker-compose.yml up -d sb-emulator sqledge
 
       # The emulator prints this line when it is ready to accept AMQP.
       # Polling the log is more reliable than polling the port: the port

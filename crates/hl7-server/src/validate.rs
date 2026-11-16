@@ -49,6 +49,10 @@ pub const MPI_TRIGGERS: &[&str] = &["A28", "A31", "A40"];
 /// rules and upstream edits them separately.
 pub const PARIS_TRIGGERS: &[&str] = &["A28", "A31", "A40"];
 
+/// The triggers the WDS flow carries (`spec/07-hl7-server.md` §3.3.3a;
+/// `A40` added upstream in `2060a7f`).
+pub const WDS_TRIGGERS: &[&str] = &["A28", "A31", "A40"];
+
 /// The earliest year a date of birth may name
 /// (`spec/07-hl7-server.md` §3.3.1).
 pub const EARLIEST_BIRTH_YEAR: i32 = 1800;
@@ -236,6 +240,27 @@ pub fn check_phw(message: &Message) -> Result<(), Rejection> {
     Ok(())
 }
 
+/// §3.3.3a — the WDS message-type rule.
+///
+/// # Errors
+///
+/// [`Rejection`] with one of the two messages in §3.3.3a's table.
+pub fn check_wds(message: &Message) -> Result<(), Rejection> {
+    let trigger = read(message, "MSH-9.2");
+
+    if trigger.is_empty() {
+        return Err(Rejection::validation(
+            "MSH.9.2 MessageType is missing from the WDS message",
+        ));
+    }
+    if !WDS_TRIGGERS.contains(&trigger.as_str()) {
+        return Err(Rejection::validation(format!(
+            "Unsupported message type '{trigger}' for WDS flow"
+        )));
+    }
+    Ok(())
+}
+
 /// §3.3.2 — the MPI outbound rules.
 ///
 /// # Errors
@@ -339,6 +364,7 @@ pub fn check_fields(
         Some("phw") => check_phw(message),
         Some("mpi") => check_mpi(message),
         Some("paris") => check_paris(message),
+        Some("wds") => check_wds(message),
         _ => Ok(()),
     }
 }
@@ -557,15 +583,41 @@ mod tests {
 
     #[test]
     fn a_flow_with_no_field_rules_passes_the_third_layer() {
-        // spec/07-hl7-server.md §3.3.4 — chemo, pims, wds and mosaiq have no
+        // spec/07-hl7-server.md §3.3.4 — chemo, pims and mosaiq have no
         // field-level rules; their checking is the schema. (Paris has its
         // own, §3.3.3, tested below.)
         let message = phw("");
-        for flow in [Some("chemo"), Some("pims"), Some("wds"), None] {
+        for flow in [Some("chemo"), Some("pims"), None] {
             assert!(
                 check_fields(&message, None, &[], flow).is_ok(),
                 "{flow:?} should have no field rules of its own"
             );
         }
+    }
+
+    #[test]
+    fn the_wds_flow_takes_a28_a31_and_a40_only() {
+        // spec/07-hl7-server.md §3.3.3a.
+        let with_trigger = |trigger: &str| {
+            parse(&format!(
+                "MSH|^~\\&|129|129|100|100|20250505232332||ADT^{trigger}|M1|P|2.5\rPID|||1"
+            ))
+        };
+        for ok in ["A28", "A31", "A40"] {
+            assert!(check_wds(&with_trigger(ok)).is_ok(), "{ok}");
+        }
+        let error = check_wds(&with_trigger("A08")).unwrap_err();
+        assert_eq!(error.reason, "Unsupported message type 'A08' for WDS flow");
+
+        let blank = parse("MSH|^~\\&|129|129|100|100|20250505232332||ADT|M1|P|2.5\rPID|||1");
+        let error = check_wds(&blank).unwrap_err();
+        assert_eq!(
+            error.reason,
+            "MSH.9.2 MessageType is missing from the WDS message"
+        );
+        assert!(
+            check_fields(&blank, None, &[], Some("wds")).is_err(),
+            "wired in"
+        );
     }
 }

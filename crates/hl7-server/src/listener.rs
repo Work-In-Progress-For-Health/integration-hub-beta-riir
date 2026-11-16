@@ -14,7 +14,6 @@
 
 use std::io;
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use hl7_2_mllp::{Error as FramingError, Framer};
 use ihb_bus::sink::MessageSink;
@@ -24,11 +23,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::pipeline::{Mint, Pipeline};
-
-/// How long a connection may be silent before it is closed
-/// (`spec/07-hl7-server.md` §2.6, `size_limited_mllp_server.py`,
-/// `timeout=10`).
-pub const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How much of an oversized message goes into the `MESSAGE_FAILED` event.
 ///
@@ -124,6 +118,8 @@ where
     M: Mint,
 {
     let limit = pipeline.config().max_message_size;
+    // §2.6 — `MLLP_TIMEOUT_SECONDS`, 30 by default.
+    let read_timeout = pipeline.config().mllp_timeout;
     let events = EventLogger::new(
         &pipeline.config().workflow_id,
         &pipeline.config().microservice_id,
@@ -139,7 +135,7 @@ where
     let mut chunk = vec![0_u8; 8192];
 
     loop {
-        let read = match tokio::time::timeout(READ_TIMEOUT, stream.read(&mut chunk)).await {
+        let read = match tokio::time::timeout(read_timeout, stream.read(&mut chunk)).await {
             Ok(Ok(0)) => {
                 // §2.7 — the peer closed. If a frame was half-arrived, say
                 // so: that message is lost and nobody else will report it.
@@ -155,7 +151,19 @@ where
             Ok(Err(error)) => return Err(error),
             Err(_) => {
                 // §2.6 — a silent connection is closed.
-                tracing::debug!(seconds = READ_TIMEOUT.as_secs(), "read timed out; closing");
+                // Mid-frame, upstream also logs a MESSAGE_FAILED event
+                // (§2.6): the partial message would otherwise vanish.
+                if accumulated.is_empty() {
+                    tracing::debug!(seconds = read_timeout.as_secs(), "read timed out; closing");
+                } else {
+                    tracing::warn!("socket timeout while receiving message body; closing");
+                    events.log_message_failed(
+                        &partial_for_log(&accumulated),
+                        "Socket timeout while receiving message body",
+                        Some("MLLP Timeout"),
+                        None,
+                    );
+                }
                 return Ok(());
             }
         };
@@ -420,7 +428,7 @@ mod tests {
 
     #[test]
     fn the_read_timeout_is_the_pythons() {
-        // spec/07-hl7-server.md §2.6 — `timeout=10`.
-        assert_eq!(READ_TIMEOUT, Duration::from_secs(10));
+        // spec/07-hl7-server.md §2.6 — 30 since upstream `f7f9c5b`.
+        assert_eq!(crate::config::DEFAULT_MLLP_TIMEOUT.as_secs(), 30);
     }
 }

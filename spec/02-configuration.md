@@ -131,6 +131,7 @@ trail is the failure this default makes possible.
 | `HL7_VALIDATION_FLOW` | string | *(unset)* | Flow schema group; see [`06-validation.md`](06-validation.md) §3. |
 | `HL7_VALIDATION_STANDARD` | string | *(unset)* | If set, validate against this HL7 release. One of `2.4`, `2.5`, `2.5.1`, `2.6`. |
 | `MAX_MESSAGE_SIZE_BYTES` | usize | `1048576` | Largest frame accepted. |
+| `MLLP_TIMEOUT_SECONDS` | u64 | `30` | Socket idle timeout. Absent, unparseable or non-positive defaults, as §3.2 does for the size. |
 | `LOG_LEVEL` | level | `INFO` | |
 
 §3.1 Exactly one of `EGRESS_QUEUE_NAME` and `EGRESS_TOPIC_NAME` MUST be

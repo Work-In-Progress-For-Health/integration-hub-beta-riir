@@ -472,6 +472,11 @@ fn nack_for(raw: &str, rejection: &Rejection, now: &str) -> String {
         Ok(message) if !read(&message, "MSH-10").is_empty() => {
             ack::build_nack(&message, rejection.ack_code, &rejection.reason, now)
         }
-        _ => ack::build_generic_nack(&rejection.reason, None, now),
+        // §2.6.2 — echo the sender's own MSH-10 when it can still be read.
+        _ => ack::build_generic_nack(
+            &rejection.reason,
+            ack::sniff_control_id(raw).as_deref(),
+            now,
+        ),
     }
 }

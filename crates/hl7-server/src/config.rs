@@ -17,6 +17,10 @@ use ihb_validation::Flow;
 /// usable (`spec/02-configuration.md` §3.2).
 pub const DEFAULT_MAX_MESSAGE_SIZE: usize = 1_048_576;
 
+/// The socket idle timeout when `MLLP_TIMEOUT_SECONDS` says nothing
+/// (`spec/07-hl7-server.md` §2.6; upstream `f7f9c5b`, previously 10).
+pub const DEFAULT_MLLP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The largest value `MAX_MESSAGE_SIZE_BYTES` may be set to.
 ///
 /// 100 MiB, the Azure Service Bus Premium message limit. Above this a
@@ -145,6 +149,8 @@ pub struct Config {
     pub validation_standard: Option<String>,
     /// `MAX_MESSAGE_SIZE_BYTES`.
     pub max_message_size: usize,
+    /// `MLLP_TIMEOUT_SECONDS` (`spec/07-hl7-server.md` §2.6).
+    pub mllp_timeout: std::time::Duration,
     /// `HL7_LOG_REDACTION_ENABLED`.
     pub redaction_enabled: bool,
 }
@@ -210,6 +216,7 @@ impl Config {
             validation_standard: reader
                 .optional_one_of("HL7_VALIDATION_STANDARD", SUPPORTED_STANDARDS),
             max_message_size: read_max_message_size(&mut reader),
+            mllp_timeout: read_mllp_timeout(&reader),
             redaction_enabled: reader.lenient_bool_or("HL7_LOG_REDACTION_ENABLED", true),
         };
 
@@ -304,6 +311,20 @@ fn read_flow(reader: &mut Reader, name: Option<&str>) -> Option<Flow> {
     Some(flow)
 }
 
+/// `MLLP_TIMEOUT_SECONDS` (`spec/02-configuration.md` §3, `spec/07` §2.6).
+///
+/// Absent, unparseable and non-positive all resolve to
+/// [`DEFAULT_MLLP_TIMEOUT`], as upstream `_read_mllp_timeout` does. Read
+/// raw for the same reason as the size: §1.6's strictness is not wanted here.
+fn read_mllp_timeout(reader: &Reader) -> std::time::Duration {
+    reader
+        .raw("MLLP_TIMEOUT_SECONDS")
+        .and_then(|raw| raw.parse::<i64>().ok())
+        .and_then(|seconds| u64::try_from(seconds).ok())
+        .filter(|seconds| *seconds > 0)
+        .map_or(DEFAULT_MLLP_TIMEOUT, std::time::Duration::from_secs)
+}
+
 /// `MAX_MESSAGE_SIZE_BYTES`, with the asymmetry of §3.2.
 ///
 /// Absent, unparseable, zero or negative resolves to the default; a value
@@ -379,6 +400,19 @@ mod tests {
             pairs.push(((*k).to_string(), (*v).to_string()));
         }
         Config::from_pairs(pairs)
+    }
+
+    #[test]
+    fn the_mllp_timeout_defaults_and_reads() {
+        // spec/07-hl7-server.md §2.6.
+        assert_eq!(DEFAULT_MLLP_TIMEOUT.as_secs(), 30);
+        for bad in ["", "0", "-5", "soon"] {
+            let config = with(&[("MLLP_TIMEOUT_SECONDS", bad)]).unwrap();
+            assert_eq!(config.mllp_timeout, DEFAULT_MLLP_TIMEOUT, "{bad:?}");
+        }
+        assert_eq!(with(&[]).unwrap().mllp_timeout, DEFAULT_MLLP_TIMEOUT);
+        let config = with(&[("MLLP_TIMEOUT_SECONDS", "45")]).unwrap();
+        assert_eq!(config.mllp_timeout.as_secs(), 45);
     }
 
     #[test]
