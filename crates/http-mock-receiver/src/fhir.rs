@@ -32,6 +32,18 @@ pub const STATUS_PATH: &str = "/fhir/r4/status";
 /// The path of the operation.
 pub const PROCESS_MESSAGE_PATH: &str = "/fhir/r4/$process-message";
 
+/// Whether `path` names the operation, with `$` written either way.
+///
+/// A client may send `$` as `%24`, and the local env files must: Compose
+/// reads a bare `$process` as a variable (`local/fhir-sender.env`). Upstream's
+/// `FastAPI` decodes the path before routing, so the same URL works there; found
+/// by the `wpas-to-proms` end-to-end run, where the sender's request fell
+/// through to the SOAP endpoint.
+#[must_use]
+pub fn is_process_message_path(path: &str) -> bool {
+    path == PROCESS_MESSAGE_PATH || path.eq_ignore_ascii_case("/fhir/r4/%24process-message")
+}
+
 /// Prefix that selects a scenario.
 pub const SCENARIO_PREFIX: &str = "mock-";
 
@@ -432,6 +444,17 @@ mod tests {
         ] {
             assert_eq!(mock.submit(body, BASE).status, 400, "{body}");
         }
+    }
+
+    #[test]
+    fn the_operation_path_matches_with_the_dollar_literal_or_encoded() {
+        assert!(is_process_message_path("/fhir/r4/$process-message"));
+        assert!(is_process_message_path("/fhir/r4/%24process-message"));
+        assert!(is_process_message_path(
+            "/fhir/r4/%24Process-Message".to_lowercase().as_str()
+        ));
+        assert!(!is_process_message_path("/fhir/r4/process-message"));
+        assert!(!is_process_message_path("/soap"));
     }
 
     #[test]

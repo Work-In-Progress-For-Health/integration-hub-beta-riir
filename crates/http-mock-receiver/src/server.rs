@@ -101,7 +101,7 @@ async fn handle<S: MessageSink>(
     // §3.10 — the Promptly mock lives beside the SOAP endpoint.
     let path = request.uri().path().to_string();
     let is_process_message =
-        request.method() == hyper::Method::POST && path == crate::fhir::PROCESS_MESSAGE_PATH;
+        request.method() == hyper::Method::POST && crate::fhir::is_process_message_path(&path);
     let status_id = (request.method() == hyper::Method::GET)
         .then(|| path.strip_prefix(&format!("{}/", crate::fhir::STATUS_PATH)))
         .flatten()

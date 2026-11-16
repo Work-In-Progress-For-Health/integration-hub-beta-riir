@@ -47,6 +47,13 @@ SQL first. Poll a real connection, never the port
 reaches outside this workspace; `xtask` also fails when its member list has
 drifted from the manifest, which is how a newly added crate gets noticed.
 
+**`compose up` reuses an existing image.** A service whose image is already
+built (`ihb-rs/<bin>:dev`) is not rebuilt when its code changes, so a compose
+test can fail on a bug you have already fixed. Rebuild the one image
+(`podman build -f docker/Dockerfile --build-arg BIN=<bin> -t ihb-rs/<bin>:dev .`)
+or run `docker/build-all.sh`. It cost a 7-minute run when the `wpas-to-proms`
+test was added.
+
 **Podman, not Docker** (`spec/18-deployment.md` §5.0). On macOS the Podman
 VM only shares `$HOME`, so a bind mount from `/tmp` fails with
 `statfs: no such file or directory`.

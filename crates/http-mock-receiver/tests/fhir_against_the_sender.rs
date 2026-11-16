@@ -161,3 +161,26 @@ async fn a_failure_that_clears_on_retry_is_delivered_and_forwarded_once() {
     assert_eq!(mock.bus.receive(QUEUE, 10).len(), 1);
     mock.stop().await;
 }
+
+#[tokio::test]
+async fn the_percent_encoded_operation_url_reaches_the_fhir_mock_not_the_soap_endpoint() {
+    // The local env files write `$` as `%24` for Compose; the real sender
+    // sends it that way (found by the wpas-to-proms compose run).
+    let mock = mock().await;
+    let mut client = FhirClient::new(
+        &format!("{}/fhir/r4/%24process-message", mock.base),
+        Auth::api_key(Secret::new("k")).unwrap(),
+        Settings {
+            allow_insecure_http: true,
+            ..Settings::default()
+        },
+        HyperTransport::new().unwrap(),
+        TokioClock::new(),
+    )
+    .unwrap();
+
+    client.send_bundle(&bundle("b-enc")).await.unwrap();
+
+    assert_eq!(mock.bus.receive(QUEUE, 10).len(), 1);
+    mock.stop().await;
+}

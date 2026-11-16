@@ -860,9 +860,9 @@ and gate-checked except where noted.
   for a malformed frame, the WDS trigger check —
   [`spec/07`](spec/07-hl7-server.md) §2.6, §3.3.3a
 - [x] FHIR sender (`fhir-sender`) — [`spec/10`](spec/10-senders.md) §8.
-  Compose: `fhir-sender` and `promptly-mock-receiver` (profile
-  `wpas-to-proms`); the PROMs transformer has no Compose service or WPAS
-  topic yet, so nothing feeds it locally.
+  Compose profile `wpas-to-proms`: `wpas-rest-server`,
+  `proms-fhir-transformer`, `fhir-sender`, `promptly-mock-receiver`; the
+  compose test `the_wpas_flow_reaches_the_promptly_mock` passes (run, 188 s).
 - [x] Promptly mock in `http-mock-receiver` —
   [`spec/11`](spec/11-mock-receivers.md) §3.10
 - [ ] **Upstream, 3–13 Nov, not yet ported:**

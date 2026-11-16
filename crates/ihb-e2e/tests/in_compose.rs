@@ -269,6 +269,7 @@ const ALL_PROFILES: &[&str] = &[
     "lims-to-wrrs",
     "lims-to-trrr",
     "mpi-to-topic",
+    "wpas-to-proms",
     "dashboard",
     "replay",
 ];
@@ -579,6 +580,119 @@ async fn the_lims_soap_flow_reaches_its_topic() {
     let _ = receiver.close().await;
     let _ = bus.close().await;
     tear_down();
+}
+
+/// The WPAS → PROMS flow, through the containers to the Promptly mock.
+///
+/// `wpas-rest-server` → topic → `proms-fhir-transformer` → queue →
+/// `fhir-sender` → `promptly-mock-receiver`, which forwards what it accepted
+/// to a plain queue (`spec/11-mock-receivers.md` §3.10.1). The assertion is
+/// taken **there**, so it proves the Bundle was delivered through the whole
+/// `$process-message` exchange (the sender completes a message only after the
+/// poll ends in a non-error outcome), not merely that something was queued.
+///
+/// What this reaches that nothing else does: the PROMs transformer on a
+/// **topic** ingress, `fhir-sender`'s session receiver against the emulator,
+/// and the `%24process-message` URL surviving Compose.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_wpas_flow_reaches_the_promptly_mock() {
+    /// `local/docker-compose.yml`: `wpas-rest-server`'s published port.
+    const WPAS_PORT: u16 = 8084;
+    /// `ENDPOINT_PATH` in `local/wpas-rest-server.env`.
+    const WPAS_PATH: &str = "/ingest";
+    /// `EGRESS_QUEUE_NAME` in `local/promptly-mock-receiver.env`.
+    const MOCK_QUEUE: &str = "local-inthub-promptly-mock-receiver";
+    /// `EGRESS_SESSION_ID` in `local/promptly-mock-receiver.env`.
+    const MOCK_SESSION: &str = "wpas-to-proms";
+    /// The patient reference in the sample, replaced per run.
+    const SAMPLE_CRN: &str = "PROMSTEST1";
+
+    tear_down();
+    bring_up("wpas-to-proms");
+
+    let endpoint = Endpoint::from_config(Some(EMULATOR), None).expect("the endpoint parses");
+    let bus = connect_when_ready(&endpoint).await;
+
+    let marker = marker("wpas");
+    let body = include_str!("../../../local/sample_messages/wpas-to-proms.sample.xml")
+        .replace(SAMPLE_CRN, &marker);
+
+    let response = post_xml(WPAS_PORT, WPAS_PATH, &body).await;
+    assert!(
+        response.starts_with("HTTP/1.1 2"),
+        "the WPAS ingress did not accept the message:\n{response}"
+    );
+
+    // Each hop waits out its own receive window on a cold queue, so this
+    // takes minutes (CLAUDE.md), not seconds.
+    // A session queue (`spec/01-architecture.md` §4.1 allows two that are
+    // not), and the session may not exist until the first message does.
+    let mut opened = None;
+    for _ in 0..120 {
+        if let Ok(receiver) = bus.session_receiver(MOCK_QUEUE, MOCK_SESSION).await {
+            opened = Some(receiver);
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    let receiver = opened.expect("the mock's queue session became available");
+    let mut arrived = false;
+    for _ in 0..6 {
+        let batch = receiver.receive(50).await.expect("receiving works");
+        for message in &batch {
+            let text = String::from_utf8_lossy(&message.body);
+            if text.contains(&marker) {
+                assert!(
+                    text.contains("\"resourceType\":\"Bundle\"")
+                        || text.contains("\"resourceType\": \"Bundle\""),
+                    "what reached the mock is not a FHIR Bundle:\n{text}"
+                );
+                arrived = true;
+            }
+            receiver
+                .settle(message, Outcome::Accepted)
+                .await
+                .expect("settling works");
+        }
+        if arrived {
+            break;
+        }
+    }
+
+    assert!(
+        arrived,
+        "the WPAS ingress accepted the message but {marker} never reached the Promptly mock's queue {MOCK_QUEUE}"
+    );
+
+    let _ = receiver.close().await;
+    let _ = bus.close().await;
+    tear_down();
+}
+
+/// `POST` XML and return the whole response, status line included.
+async fn post_xml(port: u16, path: &str, body: &str) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap_or_else(|error| panic!("connecting to the WPAS ingress on {port}: {error}"));
+    let request = format!(
+        "POST {path} HTTP/1.1\r\n\
+         Host: 127.0.0.1:{port}\r\n\
+         Content-Type: application/xml\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("the request is written");
+
+    let mut reply = Vec::new();
+    tokio::time::timeout(Duration::from_secs(30), stream.read_to_end(&mut reply))
+        .await
+        .expect("the WPAS ingress replies within thirty seconds")
+        .expect("the reply is readable");
+    String::from_utf8_lossy(&reply).into_owned()
 }
 
 /// `POST` a SOAP envelope and return the body.

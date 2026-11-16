@@ -199,6 +199,15 @@ State is in memory. A finished job keeps answering the same way for five
 minutes (so a repeated `GET` after a dropped connection is consistent), then
 is forgotten.
 
+§3.10.0 **The operation path is matched with `$` literal or as `%24`.** The
+local env files must write it `%24process-message` (Compose reads a bare
+`$process` as a variable), and `fhir-sender` sends the URL as configured.
+Upstream's FastAPI decodes the path before routing; matching only the literal
+`$` made the request fall through to the SOAP endpoint, which answered
+`500` "No HL7 payload found". Found by the `wpas-to-proms` compose run
+(`ihb-e2e` `the_wpas_flow_reaches_the_promptly_mock`); pinned by
+`is_process_message_path`'s test and by `fhir_against_the_sender.rs`.
+
 §3.10.1 **Forwarding.** An accepted (`202`) Bundle is forwarded, raw, to
 `EGRESS_QUEUE_NAME` when one is configured, with `EGRESS_SESSION_ID`. A
 rejected `POST` is **not**, so a `*-once` scenario puts one message on the
@@ -237,7 +246,12 @@ an explicit clock, and the status URL built on the given origin.
 socket: a success is polled to the end and forwarded once; a rejected `POST` is
 `Permanent` and not forwarded; an error `OperationOutcome` after a `202` is
 `Permanent`; a `403` is an authorization failure; `mock-500-once` is delivered
-and forwarded once.
+and forwarded once; the percent-encoded operation URL reaches the FHIR mock.
+
+§4.10 Compose: `ihb-e2e` `the_wpas_flow_reaches_the_promptly_mock` posts the
+WPAS sample XML to `wpas-rest-server` and reads the Bundle from the mock's
+queue, through `proms-fhir-transformer` and `fhir-sender` (profile
+`wpas-to-proms`, about three minutes cold).
 
 ---
 

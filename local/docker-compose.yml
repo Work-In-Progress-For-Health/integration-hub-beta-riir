@@ -432,6 +432,64 @@ services:
         aliases:
           - "wrrs-stmsg-dbsender"
 
+  # WPAS -> PROMS ingress (spec/19-rest-servers.md section 9): the generic REST
+  # pipeline taking the WPAS XML as it is and writing the WPAS topic.
+  wpas-rest-server:
+    container_name: "ihb-rs-wpas-rest-server"
+    image: "ihb-rs/rest-server:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: rest-server
+    env_file:
+      - ./wpas-rest-server.env
+    ports:
+      - "127.0.0.1:8084:8080"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - wpas-to-proms
+    networks:
+      integration-hub:
+        aliases:
+          - "wpas-rest-server"
+
+  # Consumes the WPAS topic subscription, builds the FHIR message Bundle and
+  # queues it for fhir-sender (spec/16-proms-transformer.md).
+  proms-fhir-transformer:
+    container_name: "ihb-rs-proms-fhir-transformer"
+    image: "ihb-rs/xml-fhir-proms-transformer:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: xml-fhir-proms-transformer
+    env_file:
+      - ./proms-fhir-transformer.env
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - wpas-to-proms
+    networks:
+      integration-hub:
+        aliases:
+          - "proms-fhir-transformer"
+
   # WPAS -> PROMS egress (spec/10-senders.md section 8): consumes the session-enabled
   # queue the PROMs transformer writes and delivers Bundles to the Promptly mock.
   fhir-sender:
@@ -476,6 +534,8 @@ services:
     ports:
       - "127.0.0.1:8085:8080"
     restart: on-failure
+    depends_on:
+      - sb-emulator
     profiles:
       - wpas-to-proms
     networks:
