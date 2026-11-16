@@ -89,6 +89,10 @@ async fn apply_script() {
 }
 
 fn runner(procedure: &str, procedure_type: &str) -> SqlRunner {
+    runner_with_timeout(procedure, procedure_type, "60")
+}
+
+fn runner_with_timeout(procedure: &str, procedure_type: &str, command_timeout: &str) -> SqlRunner {
     let password = password();
     let config = AppConfig::from_pairs([
         ("INGRESS_TOPIC_NAME", "t"),
@@ -100,6 +104,7 @@ fn runner(procedure: &str, procedure_type: &str) -> SqlRunner {
         ("DB_USERNAME", "sa"),
         ("DB_PASSWORD", password.as_str()),
         ("DB_ENCRYPT", "No"),
+        ("DB_COMMAND_TIMEOUT", command_timeout),
     ])
     .unwrap();
     SqlRunner::new(config.db)
@@ -248,4 +253,50 @@ async fn the_server_truncates_a_too_long_identifier_silently() {
         Some(&long[..20]),
         "cut to the column's width"
     );
+}
+
+/// `spec/10-senders.md` §7.3a: `RETURN 55555` with no SQL error is a
+/// failure, and nothing is stored.
+#[tokio::test]
+async fn a_return_code_of_55555_is_fatal_and_stores_nothing() {
+    apply_script().await;
+    let marker = unique("REJ");
+    let body = format!("<A><M>{marker}</M><S>SCENARIO-REJECT</S></A>");
+    let mut runner = runner("dbo.prQueueMessage", "queue_message");
+    let error = runner.execute(&body, false).await.unwrap_err();
+    assert_eq!(error.kind, FailureKind::Fatal, "{error}");
+    assert_eq!(error.code, 55555, "{error}");
+    assert!(!error.description().contains(&marker), "{error}");
+    let stored = scalar(&format!(
+        "SELECT CAST(COUNT(*) AS varchar(10)) FROM dbo.QueueMessage WHERE [Message] LIKE '%{marker}%'"
+    ))
+    .await;
+    assert_eq!(stored.as_deref(), Some("0"));
+
+    // The runner recovers: the next good message is stored.
+    runner.execute("<A><M>ok</M></A>", false).await.unwrap();
+}
+
+/// `spec/10-senders.md` §7.3: a procedure that raises is fatal.
+#[tokio::test]
+async fn a_raised_error_is_fatal() {
+    apply_script().await;
+    let error = runner("dbo.prQueueMessage", "queue_message")
+        .execute("<A>SCENARIO-ERROR</A>", false)
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, FailureKind::Fatal, "{error}");
+    assert_eq!(error.code, 50001, "{error}");
+}
+
+/// `spec/10-senders.md` §7.3: a call that outlasts `DB_COMMAND_TIMEOUT` is
+/// transient, so the message is retried rather than dead-lettered.
+#[tokio::test]
+async fn a_command_timeout_is_transient() {
+    apply_script().await;
+    let error = runner_with_timeout("dbo.prQueueMessage", "queue_message", "2")
+        .execute("<A>SCENARIO-TIMEOUT</A>", false)
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, FailureKind::Transient, "{error}");
 }

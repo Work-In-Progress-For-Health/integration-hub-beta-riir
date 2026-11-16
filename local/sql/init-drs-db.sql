@@ -1,6 +1,7 @@
 -- The DRS database for the RISP -> WRRS flow (`db-sender`, spec/10-senders.md section 7).
 --
--- Verbatim from upstream `local/sql-scripts/init-drs-db.sql` (#422). Azure SQL
+-- From upstream `local/sql-scripts/init-drs-db.sql` (#422), plus the SCENARIO-*
+-- tokens in `prQueueMessage` (from #446). Azure SQL
 -- Edge ships no `sqlcmd` (spec/18-deployment.md 5.3.5), so nothing runs this
 -- on start-up: apply it by hand or from a test, as `schema.sql`. Idempotent.
 
@@ -60,6 +61,13 @@ BEGIN
     BEGIN TRY 
         DECLARE 
              @doc XML
+
+        -- Local scenarios (upstream #446 mock_db_receiver): a token in the body
+        -- picks the outcome, so the tests can reach the paths the real WRRS
+        -- procedure takes. REJECT is `RETURN 55555` with no SQL error.
+        IF @Message LIKE '%SCENARIO-REJECT%' RETURN 55555;
+        IF @Message LIKE '%SCENARIO-ERROR%' THROW 50001, 'scenario error', 1;
+        IF @Message LIKE '%SCENARIO-TIMEOUT%' WAITFOR DELAY '00:00:30';
 
         -- Insert statements for procedure here
 	    SET @Message = REPLACE(@Message, ' encoding="UTF-8"', '')

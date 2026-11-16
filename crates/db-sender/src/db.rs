@@ -144,6 +144,40 @@ pub fn from_tiberius(error: &tiberius::error::Error) -> DatabaseError {
     }
 }
 
+/// Refuse a stored procedure that reported failure by return code
+/// (`spec/10-senders.md` §7.3a).
+///
+/// WRRS's `dbo.prQueueMessage` signals a rejected message with
+/// `RETURN 55555` and **no SQL error** (upstream #446's README), so a call
+/// that raised nothing is not proof the message was stored. Any non-zero
+/// code is a failure: a rejection is a property of the content, so it is
+/// [`FailureKind::Fatal`] (a retry would be refused again). Only the code is
+/// reported; the procedure has no message text and none is invented, so no
+/// patient data can reach the dead-letter queue by this route.
+///
+/// The code is the last row of the last result set (the `SELECT @rc` the
+/// statement ends with); a missing one is treated as a failure too, since
+/// acknowledging on no evidence is the one thing this service must not do.
+fn check_return_code(results: &[Vec<tiberius::Row>]) -> Result<(), DatabaseError> {
+    let code = results
+        .last()
+        .and_then(|rows| rows.first())
+        .and_then(|row| row.try_get::<i32, _>(0).ok().flatten());
+    match code {
+        Some(0) => Ok(()),
+        Some(code) => Err(DatabaseError::new(
+            FailureKind::Fatal,
+            code.unsigned_abs(),
+            &format!("the stored procedure returned code {code}; nothing was stored"),
+        )),
+        None => Err(DatabaseError::new(
+            FailureKind::Fatal,
+            0,
+            "the stored procedure returned no return code",
+        )),
+    }
+}
+
 /// Something that can run the configured stored procedure.
 ///
 /// A trait so the processor is tested without SQL Server
@@ -191,7 +225,7 @@ type Connected = Client<Compat<TcpStream>>;
 pub struct SqlRunner {
     /// Where and how to connect.
     config: DbConfig,
-    /// `EXEC dbo.proc @P1, @P2`, built once from the validated name.
+    /// `EXEC @rc = dbo.proc @P1, @P2` and `SELECT @rc`, built once from the validated name.
     statement: String,
     /// `EXEC dbo.proc @P1 .. @P6`, for the Queue ID Update.
     id_update_statement: String,
@@ -220,9 +254,12 @@ impl SqlRunner {
         // The name was validated at startup (`config::validate_procedure`),
         // which is what makes splicing it into SQL acceptable. Positional
         // parameters, as the Python's `{CALL proc (?, ?)}`.
-        let statement = format!("EXEC {} @P1, @P2", config.stored_procedure);
+        let statement = format!(
+            "DECLARE @rc INT; EXEC @rc = {} @P1, @P2; SELECT @rc;",
+            config.stored_procedure
+        );
         let id_update_statement = format!(
-            "EXEC {} @P1, @P2, @P3, @P4, @P5, @P6",
+            "DECLARE @rc INT; EXEC @rc = {} @P1, @P2, @P3, @P4, @P5, @P6; SELECT @rc;",
             config.stored_procedure
         );
         Self {
@@ -301,10 +338,17 @@ impl SqlRunner {
             .into_results()
             .await
             .map_err(|e| from_tiberius(&e))?;
-        client
-            .execute(statement, parameters)
+        // `query`, not `execute`: `execute` returns only row counts, and the
+        // procedure's return code arrives as the final one-row result set
+        // (`spec/10-senders.md` §7.3a).
+        let results = client
+            .query(statement, parameters)
+            .await
+            .map_err(|e| from_tiberius(&e))?
+            .into_results()
             .await
             .map_err(|e| from_tiberius(&e))?;
+        check_return_code(&results)?;
         client
             .simple_query("COMMIT TRANSACTION")
             .await
@@ -474,7 +518,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             SqlRunner::new(config.db).id_update_statement,
-            "EXEC dbo.prQueueIdUpdate @P1, @P2, @P3, @P4, @P5, @P6"
+            "DECLARE @rc INT; EXEC @rc = dbo.prQueueIdUpdate @P1, @P2, @P3, @P4, @P5, @P6; SELECT @rc;"
         );
     }
 
@@ -490,7 +534,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             SqlRunner::new(config.db).statement,
-            "EXEC dbo.prQueueMessage @P1, @P2"
+            "DECLARE @rc INT; EXEC @rc = dbo.prQueueMessage @P1, @P2; SELECT @rc;"
         );
     }
 }

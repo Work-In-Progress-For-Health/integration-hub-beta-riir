@@ -330,6 +330,32 @@ TDS does not carry a SQLSTATE, so `{state}` is `UNKNOWN`, which is the
 Python's own default. The connection is discarded after **any** failure
 (`12-message-store.md` §5.2).
 
+§7.3a **A non-zero return code is a failure** (deviation from upstream,
+recorded in `docs/upstream-sync-2026-10.md`). Upstream's `db_sender` ignores
+the procedure's return code; its own `mock_db_receiver` (#446) documents that
+the real WRRS `dbo.prQueueMessage` rejects a message with `RETURN 55555` and
+raises **no SQL error**, so upstream completes a message that was never
+stored. Here the statement is `DECLARE @rc INT; EXEC @rc = {procedure} …;
+SELECT @rc;` and the call fails unless the final result set carries `0`:
+
+- a non-zero code rolls the transaction back and is **Fatal** (the content
+  was refused; a retry is refused again): dead-letter, reason
+  `StoredProcedureExecutionFailed`, description
+  `SQLState: UNKNOWN, Code: {abs(code)}: the stored procedure returned code
+  {code}; nothing was stored`;
+- a missing return code is Fatal too: no evidence of storage is never
+  evidence of success;
+- the description carries the **code only**. The procedure has no message
+  text, and none is taken from the message, so no patient data can reach the
+  dead-letter queue by this route (§7.4).
+
+*Assumption, unverified against production:* every non-zero code means "not
+stored". If the production procedure returns non-zero for a harmless case,
+those messages are dead-lettered rather than lost and can be replayed; narrow
+this clause to the codes that mean rejection. Tested on SQL Edge with the
+`SCENARIO-REJECT`, `SCENARIO-ERROR` and `SCENARIO-TIMEOUT` tokens in
+`local/sql/init-drs-db.sql` (`crates/db-sender/tests/against_sql_server.rs`).
+
 §7.4 **Server messages are sanitised before they are logged, evented or
 dead-lettered.** SQL Server echoes parameter values into some messages;
 those would carry a patient identifier into a dead-letter description.
