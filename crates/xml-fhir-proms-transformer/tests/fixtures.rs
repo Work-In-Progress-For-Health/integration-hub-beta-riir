@@ -307,16 +307,27 @@ fn practitioner_names_are_the_raw_field_as_free_text() {
                 continue;
             };
 
-            // The raw field this came from, per §6.9.
+            // The raw field this came from, per §6.9. A Referral has two
+            // practitioners since #435 (the referrer and the consultant), so
+            // the name must be one of its two raw fields.
             let xml = &fixtures()[name];
-            let raw = if name.contains("REFERRAL") {
-                between(xml, "referrer_name")
+            let candidates: Vec<String> = if name.contains("REFERRAL") {
+                ["referrer_name", "clinicianName"]
+                    .iter()
+                    .filter_map(|tag| between(xml, tag))
+                    .collect()
             } else {
-                between(xml, "clinicianName")
+                between(xml, "clinicianName").into_iter().collect()
             };
-            let Some(raw) = raw else { continue };
+            if candidates.is_empty() {
+                continue;
+            }
 
-            assert_eq!(emitted["text"].as_str(), Some(raw.as_str()), "{name}");
+            let text = emitted["text"].as_str().unwrap_or_default();
+            assert!(
+                candidates.iter().any(|raw| raw == text),
+                "{name}: {text:?} is none of {candidates:?}"
+            );
             assert!(emitted.get("family").is_none(), "{name}: name was parsed");
             checked += 1;
         }

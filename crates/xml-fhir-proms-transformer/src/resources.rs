@@ -26,7 +26,7 @@ use crate::mapping::{join_display, to_fhir_date, to_fhir_datetime};
 use crate::message_type::{Clinical, MessageType};
 use crate::parse::PromsMessage;
 use crate::reference_data::{ReferenceDataResolver, dha_code_name, nhs_certification_display};
-use crate::source_system::{endpoint_for, lookup, pas_identifier_system};
+use crate::source_system::{SourceSystem, endpoint_for, lookup, pas_identifier_system};
 
 /// A resource's `meta.profile`: the single FHIR profile URL it claims
 /// conformance to (the constants live in [`crate::fhir`]).
@@ -52,14 +52,20 @@ fn reference(identities: &Identities, slot: Slot, resource_type: &str) -> Option
     }))
 }
 
+/// The sending health board (§5): the board named by `system_id`, falling back
+/// to `hbCode`, the same lookup the header's `source` and the patient's PAS
+/// identifier use, so every resource agrees on the board.
+fn board_of(message: &PromsMessage) -> Option<SourceSystem> {
+    lookup(&system_id_of(message))
+}
+
 /// The sending health board's name (§6.10, §6.2 `sender.display`).
 ///
-/// Mirrors upstream `health_board_name` (#423): no `hb_code` means no name;
-/// otherwise the board named by `system_id` — **only** `system_id`, not the
-/// `hbCode` fallback `system_id_of` uses for `source` — and failing that
-/// the ODS-code lookup. [`dha_code_name`] echoes an unknown code back
-/// (§7.1.2), so a result equal to the code is discarded rather than
-/// published as a name (§9.10).
+/// The board (by `system_id`, else `hbCode`) if it is one of the seven;
+/// otherwise the ODS-code lookup on `hb_code`. [`dha_code_name`] echoes an
+/// unknown code back (§7.1.2), so a result equal to the code is discarded
+/// rather than published as a name (§9.10). Upstream `#435` dropped the
+/// requirement that `hb_code` be present: a known board is enough.
 ///
 /// # Examples
 ///
@@ -75,20 +81,24 @@ fn reference(identities: &Identities, slot: Slot, resource_type: &str) -> Option
 ///     Some("Hywel Dda University Health Board")
 /// );
 ///
-/// // No hbCode, no name.
+/// // The board is enough without an hbCode.
 /// let bare = parse("<R><system_id>149</system_id></R>").unwrap();
-/// assert_eq!(health_board_name(&bare), None);
+/// assert_eq!(
+///     health_board_name(&bare).as_deref(),
+///     Some("Hywel Dda University Health Board")
+/// );
+///
+/// // An unknown board and an unknown code is no name at all.
+/// let unknown = parse("<R><system_id>999</system_id><hbCode>X98</hbCode></R>").unwrap();
+/// assert_eq!(health_board_name(&unknown), None);
 /// ```
 #[must_use]
 pub fn health_board_name(message: &PromsMessage) -> Option<String> {
+    if let Some(board) = board_of(message) {
+        return Some(board.name.to_string());
+    }
     let hb_code = message.get(&["hb_code", "hbCode", "HB_CODE"])?;
-
-    let name = match lookup(message.get_or_empty(&["system_id", "SYSTEM_ID", "systemId"])) {
-        Some(board) => Some(board.name.to_string()),
-        None => dha_code_name(hb_code),
-    };
-
-    name.filter(|n| !n.is_empty() && n != hb_code)
+    dha_code_name(hb_code).filter(|n| !n.is_empty() && n != hb_code)
 }
 
 /// §6.2's `MessageHeader`.
@@ -134,10 +144,15 @@ pub fn message_header(
         focus[0].as_object_mut().map(|o| o.remove("display"));
     }
 
-    for (slot, resource_type) in [
-        (Slot::Clinical, message_type.clinical.resource_type()),
-        (Slot::PractitionerRole, "PractitionerRole"),
-    ] {
+    // The Referral's practitioners follow the ServiceRequest (upstream `#435`).
+    let is_referral = message_type.has_practitioner_role;
+    let mut linked: Vec<(Slot, &str)> =
+        vec![(Slot::Clinical, message_type.clinical.resource_type())];
+    if is_referral {
+        linked.push((Slot::Referrer, "Practitioner"));
+        linked.push((Slot::ConsultantRole, "PractitionerRole"));
+    }
+    for (slot, resource_type) in linked {
         if present.contains(&slot)
             && let Some(entry) = reference(identities, slot, resource_type)
         {
@@ -151,23 +166,39 @@ pub fn message_header(
         "id".to_string(),
         json!(identities.get(Slot::MessageHeader).unwrap_or_default()),
     );
+    // A Referral claims the WPAS IG's profile and event system, and its event
+    // codes are lowercase; every other bundle is unchanged (upstream `#435`).
     header.insert(
         "meta".to_string(),
-        profile_meta(fhir::MESSAGE_HEADER_PROFILE),
+        profile_meta(if is_referral {
+            fhir::WPAS_IG_MESSAGE_HEADER_PROFILE
+        } else {
+            fhir::MESSAGE_HEADER_PROFILE
+        }),
     );
     header.insert(
         "eventCoding".to_string(),
         json!({
-            "system": crate::message_type::EVENT_SYSTEM,
+            "system": if is_referral {
+                fhir::WPAS_IG_EVENT_SYSTEM
+            } else {
+                crate::message_type::EVENT_SYSTEM
+            },
             // Upstream #346: the raw routing field, aliases included, so a
             // legacy bare `SURGERY` stays `SURGERY` rather than becoming
-            // the canonical `SURGERY-PROC` (§10.2).
-            "code": message
-                .get(&[
-                    "eventCode", "event_code", "EVENT_CODE",
-                    "MESSAGE_TYPE", "messageType", "MSG_TYPE", "msgType",
-                ])
-                .unwrap_or(message_type.event_code),
+            // the canonical `SURGERY-PROC` (§10.2). A Referral's is the
+            // canonical code, lowercased.
+            "code": if is_referral {
+                message_type.event_code.to_ascii_lowercase()
+            } else {
+                message
+                    .get(&[
+                        "eventCode", "event_code", "EVENT_CODE",
+                        "MESSAGE_TYPE", "messageType", "MSG_TYPE", "msgType",
+                    ])
+                    .unwrap_or(message_type.event_code)
+                    .to_string()
+            },
             "display": message_type.event_display,
         }),
     );
@@ -179,14 +210,17 @@ pub fn message_header(
             "endpoint": destination_endpoint.unwrap_or(fhir::PROMPTLY_ENDPOINT),
         }]),
     );
-    header.insert(
-        "definition".to_string(),
-        json!(format!(
-            "{}{}",
-            crate::message_type::DEFINITION_BASE,
-            message_type.definition_suffix
-        )),
-    );
+    // The WPAS IG has no MessageDefinition.
+    if !is_referral {
+        header.insert(
+            "definition".to_string(),
+            json!(format!(
+                "{}{}",
+                crate::message_type::DEFINITION_BASE,
+                message_type.definition_suffix
+            )),
+        );
+    }
 
     // §6.2 — the sender names the Organization entry, when there is one.
     if present.contains(&Slot::Organization) {
@@ -219,6 +253,7 @@ pub fn patient(
     message: &PromsMessage,
     identities: &Identities,
     resolver: &dyn ReferenceDataResolver,
+    is_referral: bool,
 ) -> Value {
     let system_id = system_id_of(message);
 
@@ -229,7 +264,11 @@ pub fn patient(
         identifier.insert("system".to_string(), json!(fhir::NHS_NUMBER_SYSTEM));
         identifier.insert("value".to_string(), json!(nhs_number));
 
-        if let Some(certification) = message.get(&["NHS_CERTIFICATION", "nhsCertification"]) {
+        // The WPAS IG Patient profile omits the verification status
+        // (upstream `#440`, story 621936); every other bundle keeps it.
+        if !is_referral
+            && let Some(certification) = message.get(&["NHS_CERTIFICATION", "nhsCertification"])
+        {
             let mut coding = Map::new();
             coding.insert(
                 "system".to_string(),
@@ -269,7 +308,14 @@ pub fn patient(
         "id".to_string(),
         json!(identities.get(Slot::Patient).unwrap_or_default()),
     );
-    patient.insert("meta".to_string(), profile_meta(fhir::PATIENT_PROFILE));
+    patient.insert(
+        "meta".to_string(),
+        profile_meta(if is_referral {
+            fhir::WPAS_IG_PATIENT_PROFILE
+        } else {
+            fhir::PATIENT_PROFILE
+        }),
+    );
     patient.insert("active".to_string(), json!(true));
 
     if !identifiers.is_empty() {
@@ -344,11 +390,15 @@ fn patient_name(message: &PromsMessage) -> Option<Value> {
     let given: Vec<&str> = [first, middle].into_iter().flatten().collect();
     let given = given.join(" ");
 
+    // No `use`: upstream `#439` dropped `official`. The title is a prefix
+    // again (it had been dropped by `#423`).
     let mut name = Map::new();
-    name.insert("use".to_string(), json!("official"));
     put(&mut name, "family", family.map(|f| json!(f)));
     if !given.is_empty() {
         name.insert("given".to_string(), json!([given]));
+    }
+    if let Some(title) = message.get(&["patientTitle"]) {
+        name.insert("prefix".to_string(), json!([title]));
     }
 
     Some(Value::Object(name))
@@ -484,6 +534,10 @@ fn communication(message: &PromsMessage) -> Option<Value> {
     if code.is_none() && display.is_none() {
         return None;
     }
+    // WPAS code `9` means Unknown: say nothing rather than file it.
+    if code.is_some_and(|c| c.trim() == fhir::SPOKEN_LANGUAGE_UNKNOWN_CODE) {
+        return None;
+    }
 
     let mut coding = Map::new();
     coding.insert("system".to_string(), json!(fhir::SPOKEN_LANGUAGE_SYSTEM));
@@ -495,8 +549,15 @@ fn communication(message: &PromsMessage) -> Option<Value> {
 
 /// §6.4's `ServiceRequest`: the clinical resource of a Referral bundle.
 ///
-/// `present` lists the slots actually filled, so a `requester`/`performer`
+/// `present` lists the slots actually filled, so a `requester` or `performer`
 /// reference is emitted only when its target resource is in the bundle.
+///
+/// Revised by upstream `#435`: the WPAS IG profile and identifier system;
+/// `code` is the **pathway** under the WPAS pathway system (the event type is
+/// already `MessageHeader.eventCoding`); no `reasonCode`; `occurrenceDateTime`
+/// is a plain date, because a midnight-UTC time shifts an hour in BST; the
+/// `requester` is the referrer `Practitioner` and the `performer` the
+/// consultant `Practitioner`.
 #[must_use]
 pub fn service_request(message: &PromsMessage, identities: &Identities, present: &[Slot]) -> Value {
     let mut request = Map::new();
@@ -507,7 +568,7 @@ pub fn service_request(message: &PromsMessage, identities: &Identities, present:
     );
     request.insert(
         "meta".to_string(),
-        profile_meta(fhir::SERVICE_REQUEST_PROFILE),
+        profile_meta(fhir::WPAS_IG_SERVICE_REQUEST_PROFILE),
     );
     request.insert("status".to_string(), json!(fhir::SERVICE_REQUEST_STATUS));
     request.insert("intent".to_string(), json!(fhir::SERVICE_REQUEST_INTENT));
@@ -524,61 +585,40 @@ pub fn service_request(message: &PromsMessage, identities: &Identities, present:
         request.insert(
             "identifier".to_string(),
             json!([{
-                "system": fhir::SERVICE_REQUEST_IDENTIFIER_SYSTEM,
+                "system": fhir::WPAS_IG_SERVICE_REQUEST_IDENTIFIER_SYSTEM,
                 "value": identifier,
             }]),
         );
     }
 
-    // §6.4 `code` — the WPAS event code, no longer the pathway (#423).
-    // The aliases are `get_message_type()`'s routing ones. This mapper runs
-    // only for a Referral, so when the type was routed from the root tag
-    // alone there is no field to read and `REFERRAL` is the answer.
-    let event_code = message
-        .get(&[
-            "eventCode",
-            "event_code",
-            "EVENT_CODE",
-            "MESSAGE_TYPE",
-            "messageType",
-            "MSG_TYPE",
-            "msgType",
-        ])
-        .map(|c| c.trim().to_ascii_uppercase())
-        .filter(|c| !c.is_empty())
-        .unwrap_or_else(|| "REFERRAL".to_string());
-    request.insert(
-        "code".to_string(),
-        json!({ "coding": [{
-            "system": fhir::SERVICE_REQUEST_CODE_SYSTEM,
-            "code": event_code,
-            "display": fhir::SERVICE_REQUEST_CODE_DISPLAY,
-        }] }),
-    );
-
-    // §6.4 `reasonCode` — the pathway, deliberately without a display
-    // until WPAS ServicePoint can supply one.
     if let Some(pathway) = message.get(&["eventPathway", "event_pathway"]) {
         request.insert(
-            "reasonCode".to_string(),
-            json!([{ "coding": [{
-                "system": fhir::SERVICE_REQUEST_REASON_SYSTEM,
+            "code".to_string(),
+            json!({ "coding": [{
+                "system": fhir::WPAS_IG_PATHWAY_SYSTEM,
                 "code": pathway,
-            }] }]),
+            }] }),
         );
     }
 
     put(
         &mut request,
         "occurrenceDateTime",
-        to_fhir_datetime(message.get_or_empty(&["eventDate", "event_date"])).map(|d| json!(d)),
+        to_fhir_date(message.get_or_empty(&["eventDate", "event_date"])).map(|d| json!(d)),
     );
 
-    if present.contains(&Slot::PractitionerRole) {
+    if present.contains(&Slot::Referrer) {
         put(
             &mut request,
             "requester",
-            reference(identities, Slot::PractitionerRole, "PractitionerRole"),
+            reference(identities, Slot::Referrer, "Practitioner"),
+        );
+    }
+    if present.contains(&Slot::Consultant) {
+        put(
+            &mut request,
+            "performer",
+            reference(identities, Slot::Consultant, "Practitioner").map(|r| json!([r])),
         );
     }
 
@@ -745,56 +785,41 @@ pub fn encounter(
     Value::Object(encounter)
 }
 
-/// §6.8's `PractitionerRole`.
+/// §6.8's `PractitionerRole`: the consultant's, in a Referral bundle only.
 ///
-/// `is_referral` selects the identifier: the referrer's code under the GMC
-/// system for a Referral, `consultant_code` under the WPAS
-/// practitioner-role system otherwise. Upstream's only caller never passes
-/// it (default `True`), so [`crate::transform`] always passes `true`; the
-/// other arm exists because the mapper has it and upstream tests it.
+/// Its identifier is the `consultant_code`. The specialty is sent only when
+/// the three characters at the start of `consultant_specialty` are in the
+/// national practice-setting list ([`fhir::PRACTICE_SETTING_CODES`]); an
+/// unlisted code is dropped rather than filed under a system it is not in.
+/// Characters, not bytes, as Python slices.
 #[must_use]
-pub fn practitioner_role(
-    message: &PromsMessage,
-    identities: &Identities,
-    present: &[Slot],
-    is_referral: bool,
-) -> Value {
+pub fn consultant_role(message: &PromsMessage, identities: &Identities, present: &[Slot]) -> Value {
     let mut role = Map::new();
     role.insert("resourceType".to_string(), json!("PractitionerRole"));
     role.insert(
         "id".to_string(),
-        json!(identities.get(Slot::PractitionerRole).unwrap_or_default()),
+        json!(identities.get(Slot::ConsultantRole).unwrap_or_default()),
     );
     role.insert(
         "meta".to_string(),
-        profile_meta(fhir::PRACTITIONER_ROLE_PROFILE),
+        profile_meta(fhir::WPAS_IG_PRACTITIONER_ROLE_PROFILE),
     );
 
-    let (system, identifier) = if is_referral {
-        (
-            fhir::PRACTITIONER_ROLE_REFERRAL_IDENTIFIER_SYSTEM,
-            message.get(&["referrer_code", "referrerCode"]),
-        )
-    } else {
-        (
-            fhir::PRACTITIONER_ROLE_IDENTIFIER_SYSTEM,
-            message.get(&["consultant_code", "consultantCode"]),
-        )
-    };
-    if let Some(identifier) = identifier {
+    if let Some(code) = message.get(&["consultant_code", "consultantCode"]) {
         role.insert(
             "identifier".to_string(),
-            json!([{ "system": system, "value": identifier }]),
+            json!([{
+                "system": fhir::WPAS_IG_PRACTITIONER_ROLE_IDENTIFIER_SYSTEM,
+                "value": code,
+            }]),
         );
     }
 
-    if present.contains(&Slot::Practitioner) {
-        put(
-            &mut role,
-            "practitioner",
-            reference(identities, Slot::Practitioner, "Practitioner"),
-        );
-    }
+    put(
+        &mut role,
+        "practitioner",
+        reference(identities, Slot::Consultant, "Practitioner"),
+    );
     if present.contains(&Slot::Organization) {
         put(
             &mut role,
@@ -803,70 +828,114 @@ pub fn practitioner_role(
         );
     }
 
-    // §6.8: only the first three characters of `consultant_specialty` are
-    // the specialty code (#423). Characters, not bytes, as Python slices.
     let specialty_code: String = message
         .get_or_empty(&["consultant_specialty", "consultantSpecialty"])
+        .trim()
         .chars()
         .take(3)
         .collect();
-    let specialty_name = message.get(&["specialty_name", "specialtyName", "main_specialty_name"]);
-
-    if !specialty_code.is_empty() || specialty_name.is_some() {
+    if fhir::PRACTICE_SETTING_CODES.contains(&specialty_code.as_str()) {
         let mut coding = Map::new();
-        if !specialty_code.is_empty() {
-            coding.insert("code".to_string(), json!(specialty_code));
-        }
-        put(&mut coding, "display", specialty_name.map(|d| json!(d)));
+        coding.insert("system".to_string(), json!(fhir::PRACTICE_SETTING_SYSTEM));
+        coding.insert("code".to_string(), json!(specialty_code));
+        put(
+            &mut coding,
+            "display",
+            message
+                .get(&["specialty_name", "specialtyName", "main_specialty_name"])
+                .map(|d| json!(d)),
+        );
         role.insert(
             "specialty".to_string(),
             json!([{ "coding": [Value::Object(coding)] }]),
         );
     }
 
-    if present.contains(&Slot::Location) {
-        role.insert(
-            "location".to_string(),
-            json!([reference(identities, Slot::Location, "Location")]),
-        );
-    }
-
     Value::Object(role)
 }
 
-/// §6.9's `Practitioner`.
+/// A Referral's `Practitioner`: an optional identifier under the board's own
+/// system, and a free-text name. `None` when there is neither (§6.9.1).
 ///
-/// `None` when there is neither an identifier nor a name (§6.9.1).
-///
-/// Upstream #423: `consultant_code` is always the base identifier (WPAS
-/// practitioner system); a Referral adds the referrer's code as a second,
-/// GMC-system identifier. The name is **free text** (`name.text`), no
-/// longer split into family and given (§6.9.2).
-#[must_use]
-pub fn practitioner(
+/// The identifier needs a **known board**: there is no valid system for an
+/// unknown one, so it is omitted rather than filed under a guess. WPAS sends
+/// no GMC or GMP numbers, so the referrer's code goes under the board's own
+/// `wpas-referrer-code` (DHCW's decision, upstream `#435`).
+fn referral_practitioner(
     message: &PromsMessage,
-    message_type: &MessageType,
     identities: &Identities,
+    slot: Slot,
+    code: Option<&str>,
+    name: Option<&str>,
+    system_of: fn(&SourceSystem) -> &'static str,
 ) -> Option<Value> {
-    let is_referral = message_type.code == "REFERRAL";
+    let board = board_of(message);
+    let identifier = code
+        .zip(board)
+        .map(|(code, board)| json!([{ "system": system_of(&board), "value": code }]));
+    if identifier.is_none() && name.is_none() {
+        return None;
+    }
 
+    let mut practitioner = Map::new();
+    practitioner.insert("resourceType".to_string(), json!("Practitioner"));
+    practitioner.insert(
+        "id".to_string(),
+        json!(identities.get(slot).unwrap_or_default()),
+    );
+    practitioner.insert(
+        "meta".to_string(),
+        profile_meta(fhir::WPAS_IG_PRACTITIONER_PROFILE),
+    );
+    put(&mut practitioner, "identifier", identifier);
+    put(
+        &mut practitioner,
+        "name",
+        name.map(|text| json!([{ "text": text }])),
+    );
+    Some(Value::Object(practitioner))
+}
+
+/// §6.9's referring GP, for a Referral bundle (`referrer_code`,
+/// `referrer_name`).
+#[must_use]
+pub fn referrer(message: &PromsMessage, identities: &Identities) -> Option<Value> {
+    referral_practitioner(
+        message,
+        identities,
+        Slot::Referrer,
+        message.get(&["referrer_code", "referrerCode"]),
+        message.get(&["referrer_name", "referrerName"]),
+        |board| board.referrer_code_system,
+    )
+}
+
+/// §6.9's consultant, for a Referral bundle (`consultant_code`,
+/// `clinicianName`).
+#[must_use]
+pub fn consultant(message: &PromsMessage, identities: &Identities) -> Option<Value> {
+    referral_practitioner(
+        message,
+        identities,
+        Slot::Consultant,
+        message.get(&["consultant_code", "consultantCode"]),
+        message.get(&["clinicianName", "clinician_name", "CONS_NAME"]),
+        |board| board.consultant_code_system,
+    )
+}
+
+/// §6.9's `Practitioner` for every bundle but a Referral.
+///
+/// `None` when there is neither an identifier nor a name (§6.9.1). The
+/// identifier is `consultant_code` under the WPAS practitioner system; the
+/// name is `clinicianName` as **free text** (`name.text`), not split into
+/// family and given (§6.9.2).
+#[must_use]
+pub fn practitioner(message: &PromsMessage, identities: &Identities) -> Option<Value> {
     let consultant_code = message.get(&["consultant_code", "consultantCode"]);
-    let name_source = if is_referral {
-        message.get(&["referrer_name", "referrerName"])
-    } else {
-        message.get(&["clinicianName", "clinician_name", "CONS_NAME"])
-    };
+    let name_source = message.get(&["clinicianName", "clinician_name", "CONS_NAME"]);
 
-    let mut identifiers = Vec::new();
-    if let Some(code) = consultant_code {
-        identifiers.push(json!({ "system": fhir::WPAS_PRACTITIONER_SYSTEM, "value": code }));
-    }
-    if is_referral && let Some(code) = message.get(&["referrer_code", "referrerCode"]) {
-        // §9.6 — still the GMC system, for the referrer only.
-        identifiers.push(json!({ "system": fhir::GMC_NUMBER_SYSTEM, "value": code }));
-    }
-
-    if identifiers.is_empty() && name_source.is_none() {
+    if consultant_code.is_none() && name_source.is_none() {
         return None;
     }
 
@@ -877,10 +946,12 @@ pub fn practitioner(
         json!(identities.get(Slot::Practitioner).unwrap_or_default()),
     );
     practitioner.insert("meta".to_string(), profile_meta(fhir::PRACTITIONER_PROFILE));
-
-    if !identifiers.is_empty() {
-        practitioner.insert("identifier".to_string(), json!(identifiers));
-    }
+    put(
+        &mut practitioner,
+        "identifier",
+        consultant_code
+            .map(|code| json!([{ "system": fhir::WPAS_PRACTITIONER_SYSTEM, "value": code }])),
+    );
     put(
         &mut practitioner,
         "name",
@@ -892,11 +963,23 @@ pub fn practitioner(
 
 /// §6.10's `Organization`: the sending health board.
 ///
-/// `None` when there is no `hb_code` (§6.10.1). `referrer_org` and
-/// `dhaCode` are no longer read; the name is [`health_board_name`].
+/// The identifier is the **board's ODS code** where the board is known
+/// (`hbCode` carries placeholders such as `X98`), else `hb_code`; `None` when
+/// neither gives one (§6.10.1). `profile` is the WPAS IG's for a Referral
+/// (upstream `#435`). The name is [`health_board_name`].
 #[must_use]
-pub fn organization(message: &PromsMessage, identities: &Identities) -> Option<Value> {
-    let hb_code = message.get(&["hb_code", "hbCode", "HB_CODE"])?;
+pub fn organization(
+    message: &PromsMessage,
+    identities: &Identities,
+    is_referral: bool,
+) -> Option<Value> {
+    let ods_code = board_of(message)
+        .map(|board| board.ods_code.to_string())
+        .or_else(|| {
+            message
+                .get(&["hb_code", "hbCode", "HB_CODE"])
+                .map(str::to_string)
+        })?;
 
     let mut organization = Map::new();
     organization.insert("resourceType".to_string(), json!("Organization"));
@@ -904,11 +987,18 @@ pub fn organization(message: &PromsMessage, identities: &Identities) -> Option<V
         "id".to_string(),
         json!(identities.get(Slot::Organization).unwrap_or_default()),
     );
-    organization.insert("meta".to_string(), profile_meta(fhir::ORGANIZATION_PROFILE));
+    organization.insert(
+        "meta".to_string(),
+        profile_meta(if is_referral {
+            fhir::WPAS_IG_ORGANIZATION_PROFILE
+        } else {
+            fhir::ORGANIZATION_PROFILE
+        }),
+    );
     organization.insert("active".to_string(), json!(true));
     organization.insert(
         "identifier".to_string(),
-        json!([{ "system": fhir::ODS_ORGANISATION_CODE_SYSTEM, "value": hb_code }]),
+        json!([{ "system": fhir::ODS_ORGANISATION_CODE_SYSTEM, "value": ods_code }]),
     );
     put(
         &mut organization,

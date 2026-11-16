@@ -10,7 +10,8 @@
 //! say. The bundle's *entry* order is unaffected: `bundle::Builder` emits
 //! in slot order whatever order it was filled in.
 
-use crate::bundle::{Builder, Slot, slots_for};
+use crate::bundle::{Builder, Slot};
+use crate::fhir;
 use crate::identity::UuidFactory;
 use crate::message_type::{RoutingError, resolve};
 use crate::parse::{ParseError, event_code, parse};
@@ -51,58 +52,101 @@ pub fn transform(
     let message = parse(payload)?;
     let message_type = resolve(event_code(&message).as_deref(), &message.root_tag)?;
 
+    // The Referral shape is its own (upstream `#435`): a referrer Practitioner,
+    // the consultant's PractitionerRole and Practitioner, the Organization,
+    // and no Location. Every other shape keeps one Practitioner and a Location.
+    let is_referral = message_type.has_practitioner_role;
     let mut builder = Builder::new(message_type, uuids);
-
-    // The optional resources first, so the MessageHeader knows what exists.
-    let practitioner = resources::practitioner(&message, message_type, builder.identities());
-    let organization = resources::organization(&message, builder.identities());
-    // §6.11 — always present, unlike the two above (§9.13).
-    let location = resources::location(&message, builder.identities());
-
-    let mut present = vec![Slot::MessageHeader, Slot::Patient, Slot::Clinical];
-    if slots_for(message_type).contains(&Slot::PractitionerRole) {
-        present.push(Slot::PractitionerRole);
+    if is_referral {
+        builder = builder.with_profile(fhir::WPAS_IG_MESSAGE_BUNDLE_PROFILE);
     }
-    if practitioner.is_some() {
-        present.push(Slot::Practitioner);
-    }
-    if organization.is_some() {
-        present.push(Slot::Organization);
-    }
-    present.push(Slot::Location);
-
     let identities = builder.identities().clone();
 
-    builder.put(
-        Slot::MessageHeader,
-        resources::message_header(
-            &message,
-            message_type,
-            &identities,
-            &present,
-            endpoint_override,
-            destination_endpoint,
-        ),
-    );
-    builder.put(
-        Slot::Patient,
-        resources::patient(&message, &identities, resolver),
-    );
-    builder.put(
-        Slot::Clinical,
-        resources::clinical(&message, message_type, &identities, &present),
-    );
+    // The optional resources first, so the MessageHeader knows what exists.
+    let organization = resources::organization(&message, &identities, is_referral);
+    let mut present = vec![Slot::MessageHeader, Slot::Patient, Slot::Clinical];
 
-    if present.contains(&Slot::PractitionerRole) {
+    if is_referral {
+        let referrer = resources::referrer(&message, &identities);
+        let consultant = resources::consultant(&message, &identities);
+
+        if referrer.is_some() {
+            present.push(Slot::Referrer);
+        }
+        // The role exists only to carry the consultant's code and specialty
+        // to the consultant Practitioner, so it stands or falls with it.
+        if consultant.is_some() {
+            present.push(Slot::ConsultantRole);
+            present.push(Slot::Consultant);
+        }
+        if organization.is_some() {
+            present.push(Slot::Organization);
+        }
+
         builder.put(
-            Slot::PractitionerRole,
-            resources::practitioner_role(&message, &identities, &present, true),
+            Slot::MessageHeader,
+            resources::message_header(
+                &message,
+                message_type,
+                &identities,
+                &present,
+                endpoint_override,
+                destination_endpoint,
+            ),
         );
-    }
+        builder.put(
+            Slot::Patient,
+            resources::patient(&message, &identities, resolver, true),
+        );
+        builder.put(
+            Slot::Clinical,
+            resources::clinical(&message, message_type, &identities, &present),
+        );
+        builder.put_maybe(Slot::Referrer, referrer);
+        if consultant.is_some() {
+            builder.put(
+                Slot::ConsultantRole,
+                resources::consultant_role(&message, &identities, &present),
+            );
+        }
+        builder.put_maybe(Slot::Consultant, consultant);
+        builder.put_maybe(Slot::Organization, organization);
+    } else {
+        let practitioner = resources::practitioner(&message, &identities);
+        // §6.11 — always present, unlike the two above (§9.13).
+        let location = resources::location(&message, &identities);
 
-    builder.put_maybe(Slot::Practitioner, practitioner);
-    builder.put_maybe(Slot::Organization, organization);
-    builder.put(Slot::Location, location);
+        if practitioner.is_some() {
+            present.push(Slot::Practitioner);
+        }
+        if organization.is_some() {
+            present.push(Slot::Organization);
+        }
+        present.push(Slot::Location);
+
+        builder.put(
+            Slot::MessageHeader,
+            resources::message_header(
+                &message,
+                message_type,
+                &identities,
+                &present,
+                endpoint_override,
+                destination_endpoint,
+            ),
+        );
+        builder.put(
+            Slot::Patient,
+            resources::patient(&message, &identities, resolver, false),
+        );
+        builder.put(
+            Slot::Clinical,
+            resources::clinical(&message, message_type, &identities, &present),
+        );
+        builder.put_maybe(Slot::Practitioner, practitioner);
+        builder.put_maybe(Slot::Organization, organization);
+        builder.put(Slot::Location, location);
+    }
 
     Ok(builder.finish())
 }
@@ -157,39 +201,95 @@ mod tests {
         assert!(matches!(unroutable, Err(TransformError::Routing(_))));
     }
 
-    #[test]
-    fn an_absent_resource_shortens_the_bundle() {
-        // §3.2 — the minimal payload has no referrer and no organisation,
-        // so those two slots go unfilled.
-        //
-        // The `Location` is still here, and that is not an oversight:
-        // §6.11.0 and §9.13 — `map_location` has no guard where the two
-        // mappers beside it do, so an empty `Location` is emitted for
-        // every bundle. This assertion is what the golden comparison
-        // corrected; it read as the obvious symmetry and was wrong.
-        let bundle = run(MINIMAL).unwrap();
-        let types: Vec<&str> = bundle["entry"]
+    fn types_of(bundle: &serde_json::Value) -> Vec<&str> {
+        bundle["entry"]
             .as_array()
             .unwrap()
             .iter()
             .map(|e| e["resource"]["resourceType"].as_str().unwrap())
-            .collect();
+            .collect()
+    }
+
+    #[test]
+    fn an_absent_resource_shortens_a_referral() {
+        // §3.2 — the minimal payload has no referrer, no consultant and no
+        // organisation, so those slots go unfilled and a Referral is three
+        // entries. Since upstream #435 it has no `Location` either.
+        let bundle = run(MINIMAL).unwrap();
 
         assert_eq!(
-            types,
+            types_of(&bundle),
+            vec!["MessageHeader", "Patient", "ServiceRequest"]
+        );
+        // A Referral claims a bundle profile; nothing else does.
+        assert!(
+            bundle["meta"]["profile"][0]
+                .as_str()
+                .unwrap()
+                .ends_with("wpas-messagebundle")
+        );
+    }
+
+    #[test]
+    fn a_referral_carries_its_practitioners_in_the_order_of_section_three() {
+        // §3, as revised by #435: referrer, then the consultant's role and
+        // practitioner, then the organisation.
+        let bundle = run(r"<PromsEventRequest>
+            <eventCode>REFERRAL</eventCode><system_id>149</system_id><nhsNumber>9434765994</nhsNumber>
+            <referrer_code>G1</referrer_code><referrer_name>DR A</referrer_name>
+            <consultant_code>C1</consultant_code><clinicianName>Jones, B</clinicianName>
+            <consultant_specialty>650100</consultant_specialty><hbCode>X98</hbCode>
+          </PromsEventRequest>")
+        .unwrap();
+
+        assert_eq!(
+            types_of(&bundle),
             vec![
                 "MessageHeader",
                 "Patient",
                 "ServiceRequest",
+                "Practitioner",
                 "PractitionerRole",
-                "Location",
+                "Practitioner",
+                "Organization",
             ]
         );
+        let request = &bundle["entry"][2]["resource"];
+        assert_eq!(
+            request["requester"]["reference"],
+            bundle["entry"][3]["fullUrl"]
+        );
+        assert_eq!(
+            request["performer"][0]["reference"],
+            bundle["entry"][5]["fullUrl"]
+        );
+        // 650 is not on the national specialty list, so none is sent.
+        assert!(bundle["entry"][4]["resource"].get("specialty").is_none());
+    }
 
-        // And it carries nothing but its identity and the fixed `status`
-        // (§6.11.0, upstream #423).
-        let location = &bundle["entry"][4]["resource"];
-        let keys: Vec<&String> = location.as_object().unwrap().keys().collect();
+    #[test]
+    fn every_other_bundle_keeps_one_practitioner_and_an_always_present_location() {
+        // §6.11.0 and §9.13: `map_location` has no guard, so an empty Location
+        // is emitted for every non-Referral bundle, carrying only its identity
+        // and the fixed `status` (upstream #423).
+        let bundle = run(r"<PromsEventRequest>
+            <eventCode>SURGERY-PROC</eventCode><nhsNumber>9434765994</nhsNumber>
+          </PromsEventRequest>")
+        .unwrap();
+
+        assert_eq!(
+            types_of(&bundle),
+            vec!["MessageHeader", "Patient", "Procedure", "Location"]
+        );
+        assert!(
+            bundle.get("meta").is_none(),
+            "only a Referral claims a bundle profile"
+        );
+        let keys: Vec<&String> = bundle["entry"][3]["resource"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
         assert_eq!(keys, vec!["id", "meta", "resourceType", "status"]);
     }
 

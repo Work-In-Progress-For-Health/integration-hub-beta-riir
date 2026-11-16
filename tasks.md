@@ -865,9 +865,13 @@ and gate-checked except where noted.
   compose test `the_wpas_flow_reaches_the_promptly_mock` passes (run, 188 s).
 - [x] Promptly mock in `http-mock-receiver` —
   [`spec/11`](spec/11-mock-receivers.md) §3.10
-- [ ] **Upstream, 3–13 Nov, not yet ported:**
-  `mock_db_receiver` (`#446`), the PROMS referral
-  mapping (`#423`, `#435`, `#437`–`#440`); `#455` partly (the `db-sender` handler is ported; the LIMS routing is not); `#457` not yet read.
+- [x] PROMS referral rework (`#423` second half, `#435`, `#437`–`#440`,
+  `#447`) — [`spec/16`](spec/16-proms-transformer.md) §10.6, verified against
+  a golden regenerated from the Python.
+- [x] `#452` (no Rust counterpart), `#457` (release pipeline only, none here).
+- [ ] **Upstream, 3–13 Nov, not yet ported:** `mock_db_receiver` (`#446`), a
+  Python-only SQL mock for the WRRS database; the tester's four `TEMP` PROMs
+  samples.
 - [x] Lookup service auth and trial switch —
   [`spec/20`](spec/20-lookup-service.md) §2.7–§2.9, §12
 - [x] PIMS reference-data enrichment and topic flow —

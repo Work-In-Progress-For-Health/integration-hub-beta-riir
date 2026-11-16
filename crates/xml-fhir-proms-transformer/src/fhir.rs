@@ -27,10 +27,6 @@ pub const PATIENT_PROFILE: &str = "https://fhir.nhs.wales/StructureDefinition/wp
 pub const PRACTITIONER_PROFILE: &str =
     "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Practitioner";
 
-/// `PractitionerRole.meta.profile` (§6.8; Referral bundles only, §3).
-pub const PRACTITIONER_ROLE_PROFILE: &str =
-    "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-PractitionerRole";
-
 /// `Organization.meta.profile` (the sending health board).
 pub const ORGANIZATION_PROFILE: &str =
     "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Organization";
@@ -39,10 +35,70 @@ pub const ORGANIZATION_PROFILE: &str =
 pub const LOCATION_PROFILE: &str =
     "https://fhir.nhs.wales/StructureDefinition/DataStandardsWales-Location";
 
-/// `ServiceRequest.meta.profile` (§6.4); a UK Core profile, unlike the
-/// Wales-specific ones above.
-pub const SERVICE_REQUEST_PROFILE: &str =
-    "https://fhir.hl7.org.uk/StructureDefinition/UKCore-ServiceRequest";
+/// The Promptly WPAS Integration IG (upstream `#435`): the profiles and code
+/// systems the **Referral** bundle claims. Other bundles keep the Wales and UK
+/// Core profiles above.
+pub const WPAS_IG_BASE: &str = "https://wpas-integration-ig.tools.labs.promptly.health";
+
+/// `Bundle.meta.profile` of a Referral (§3.1).
+pub const WPAS_IG_MESSAGE_BUNDLE_PROFILE: &str =
+    "https://wpas-integration-ig.tools.labs.promptly.health/StructureDefinition/wpas-messagebundle";
+
+/// `MessageHeader.meta.profile` of a Referral (§6.2).
+pub const WPAS_IG_MESSAGE_HEADER_PROFILE: &str =
+    "https://wpas-integration-ig.tools.labs.promptly.health/StructureDefinition/wpas-messageheader";
+
+/// `Patient.meta.profile` of a Referral (§6.3); it omits the NHS-number
+/// verification status (upstream `#440`, story 621936).
+pub const WPAS_IG_PATIENT_PROFILE: &str =
+    "https://wpas-integration-ig.tools.labs.promptly.health/StructureDefinition/wpas-patient";
+
+/// `ServiceRequest.meta.profile` (§6.4).
+pub const WPAS_IG_SERVICE_REQUEST_PROFILE: &str = "https://wpas-integration-ig.tools.labs.promptly.health/StructureDefinition/wpas-servicerequest";
+
+/// `PractitionerRole.meta.profile` (§6.8).
+pub const WPAS_IG_PRACTITIONER_ROLE_PROFILE: &str = "https://wpas-integration-ig.tools.labs.promptly.health/StructureDefinition/wpas-practitionerrole";
+
+/// `Practitioner.meta.profile` of a Referral's two practitioners (§6.9).
+pub const WPAS_IG_PRACTITIONER_PROFILE: &str =
+    "https://wpas-integration-ig.tools.labs.promptly.health/StructureDefinition/wpas-practitioner";
+
+/// `Organization.meta.profile` of a Referral (§6.10).
+pub const WPAS_IG_ORGANIZATION_PROFILE: &str =
+    "https://wpas-integration-ig.tools.labs.promptly.health/StructureDefinition/wpas-organization";
+
+/// `MessageHeader.eventCoding.system` of a Referral (§6.2).
+pub const WPAS_IG_EVENT_SYSTEM: &str =
+    "https://wpas-integration-ig.tools.labs.promptly.health/CodeSystem/wpas-event-codes";
+
+/// `ServiceRequest.code.coding.system`: the pathway, a national map value such
+/// as `GENERIC` (§6.4; confirmed by Promptly, 28 Oct 2026).
+pub const WPAS_IG_PATHWAY_SYSTEM: &str =
+    "https://wpas-integration-ig.tools.labs.promptly.health/CodeSystem/wpas-proms-pathway";
+
+/// `ServiceRequest.identifier.system` (§6.4).
+pub const WPAS_IG_SERVICE_REQUEST_IDENTIFIER_SYSTEM: &str =
+    "https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-servicerequest";
+
+/// `PractitionerRole.identifier.system` (§6.8): the consultant's code.
+pub const WPAS_IG_PRACTITIONER_ROLE_IDENTIFIER_SYSTEM: &str =
+    "https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-practitionerrole";
+
+/// `PractitionerRole.specialty.coding.system` (§6.8).
+pub const PRACTICE_SETTING_SYSTEM: &str =
+    "https://fhir.hl7.org.uk/CodeSystem/UKCore-PracticeSettingCode";
+
+/// The national specialty list: `PractitionerRole.specialty` is sent only for
+/// a code in it (§6.8).
+pub const PRACTICE_SETTING_CODES: &[&str] = &[
+    "100", "101", "107", "110", "120", "130", "140", "141", "142", "143", "145", "146", "147",
+    "148", "149", "150", "160", "170", "171", "180", "190", "192", "200", "300", "301", "302",
+    "303", "304", "305", "310", "311", "313", "314", "315", "317", "320", "321", "325", "326",
+    "330", "340", "350", "352", "360", "361", "370", "371", "400", "401", "410", "420", "421",
+    "430", "450", "451", "460", "500", "501", "502", "504", "560", "600", "601", "700", "710",
+    "711", "712", "713", "715", "800", "810", "820", "821", "822", "823", "824", "830", "831",
+    "833", "834", "900", "901", "902", "903", "904", "950", "960",
+];
 
 /// `Encounter.meta.profile` (§6.7); UK Core.
 pub const ENCOUNTER_PROFILE: &str = "https://fhir.hl7.org.uk/StructureDefinition/UKCore-Encounter";
@@ -114,7 +170,12 @@ pub const LOCATION_IDENTIFIER_SYSTEM: &str = "https://fhir.nhs.wales/Id/wrts-loc
 /// Replaces the UK Core `HumanLanguage` system: the spoken-language code is
 /// now emitted as WPAS sent it, so it is filed under a WPAS code system
 /// rather than one whose codes it may not belong to (upstream #423).
-pub const SPOKEN_LANGUAGE_SYSTEM: &str = "https://fhir.nhs.wales/CodeSystem/wpas-spoken-language";
+pub const SPOKEN_LANGUAGE_SYSTEM: &str =
+    "https://wpas-integration-ig.tools.labs.promptly.health/CodeSystem/wpas-spoken-language";
+
+/// The WPAS spoken-language code meaning *Unknown*: the communication entry
+/// is omitted for it (§6.3.2; upstream `#435`).
+pub const SPOKEN_LANGUAGE_UNKNOWN_CODE: &str = "9";
 
 /// The `Patient` ethnic-category extension URL (§6.3); UK Core's, with the
 /// WPAS coding system in [`ETHNICITY_SYSTEM`].
@@ -122,29 +183,12 @@ pub const ETHNIC_CATEGORY_EXTENSION: &str =
     "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-EthnicCategory";
 
 /// The coding system of the ethnic-category extension (§6.3).
-pub const ETHNICITY_SYSTEM: &str = "https://fhir.nhs.wales/CodeSystem/wpas-ethnicity";
+pub const ETHNICITY_SYSTEM: &str =
+    "https://wpas-integration-ig.tools.labs.promptly.health/CodeSystem/wpas-ethnicity";
 
 /// `Encounter.class.system` (§6.7): HL7 v3 ActCode, from which
 /// [`ENCOUNTER_CLASSES`] draws its codes.
 pub const ENCOUNTER_CLASS_SYSTEM: &str = "http://terminology.hl7.org/CodeSystem/v3-ActCode";
-
-/// `ServiceRequest.identifier.system` (§6.4).
-///
-/// Moved off the `tools.labs.promptly.health` host to `fhir.nhs.wales` by
-/// upstream #423, which retires `spec/16-proms-transformer.md` §9.11.
-pub const SERVICE_REQUEST_IDENTIFIER_SYSTEM: &str = "https://fhir.nhs.wales/Id/wpas-servicerequest";
-
-/// `PractitionerRole.identifier.system` for a **non-referral** role (§6.8).
-///
-/// No bundle builds a non-referral role today (the Python's
-/// `map_practitioner_role` is called only from the Referral bundle), but the
-/// constant is part of the mapping and is checked against the Python.
-pub const PRACTITIONER_ROLE_IDENTIFIER_SYSTEM: &str =
-    "https://fhir.nhs.wales/Id/wpas-practitioner-role";
-
-/// `PractitionerRole.identifier.system` for a Referral: the GMC number
-/// URI, since the identifier is the referrer's code (§6.8).
-pub const PRACTITIONER_ROLE_REFERRAL_IDENTIFIER_SYSTEM: &str = GMC_NUMBER_SYSTEM;
 
 /// `Encounter.identifier.system` (§6.7, upstream #346).
 ///
@@ -165,19 +209,6 @@ pub const SERVICE_REQUEST_STATUS: &str = "active";
 
 /// `ServiceRequest.intent` (§6.4). `order` since upstream #423 (was `plan`).
 pub const SERVICE_REQUEST_INTENT: &str = "order";
-
-/// `ServiceRequest.code.coding.system` (§6.4): the WPAS event code.
-pub const SERVICE_REQUEST_CODE_SYSTEM: &str = "https://fhir.nhs.wales/CodeSystem/proms-event";
-
-/// `ServiceRequest.code.coding.display` (§6.4): fixed `Referral`, matching
-/// the only message type that builds a `ServiceRequest`.
-pub const SERVICE_REQUEST_CODE_DISPLAY: &str = "Referral";
-
-/// `ServiceRequest.reasonCode.coding.system` (§6.4): the clinical pathway
-/// (`eventPathway`). It carries no display until a WPAS ServicePoint lookup
-/// exists.
-pub const SERVICE_REQUEST_REASON_SYSTEM: &str =
-    "https://fhir.nhs.wales/CodeSystem/wpas-event-pathway";
 
 /// `Procedure.status` (§6.5).
 ///

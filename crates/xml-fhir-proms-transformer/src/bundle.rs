@@ -34,9 +34,13 @@ pub enum Slot {
     Patient,
     /// The bundle's clinical resource, whichever §2.2 selects.
     Clinical,
-    /// Present in the Referral bundle only.
-    PractitionerRole,
-    /// The referring clinician or consultant.
+    /// A Referral's referring GP: a bare `Practitioner`, with no role.
+    Referrer,
+    /// A Referral's consultant `PractitionerRole`.
+    ConsultantRole,
+    /// A Referral's consultant `Practitioner`.
+    Consultant,
+    /// Every other bundle's one `Practitioner` (the consultant).
     Practitioner,
     /// The sending health board.
     Organization,
@@ -52,8 +56,8 @@ impl Slot {
             Self::MessageHeader => "MessageHeader",
             Self::Patient => "Patient",
             Self::Clinical => clinical.resource_type(),
-            Self::PractitionerRole => "PractitionerRole",
-            Self::Practitioner => "Practitioner",
+            Self::ConsultantRole => "PractitionerRole",
+            Self::Referrer | Self::Consultant | Self::Practitioner => "Practitioner",
             Self::Organization => "Organization",
             Self::Location => "Location",
         }
@@ -62,7 +66,9 @@ impl Slot {
 
 /// The slots of a bundle, in §3's order.
 ///
-/// The Referral shape is the only one carrying a `PractitionerRole`.
+/// The Referral shape (upstream `#435`) is its own: no `Location`, a referrer
+/// `Practitioner`, then the consultant's `PractitionerRole` and `Practitioner`.
+/// Every other shape keeps one `Practitioner` and a `Location`.
 ///
 /// # Examples
 ///
@@ -74,20 +80,27 @@ impl Slot {
 /// assert_eq!(slots_for(referral).len(), 7);
 /// assert_eq!(slots_for(referral)[0], Slot::MessageHeader);
 ///
-/// // Every other shape is the same without the PractitionerRole.
+/// // Every other shape has one Practitioner and a Location instead.
 /// let surgery = resolve(Some("SURGERY"), "").unwrap();
 /// assert_eq!(slots_for(surgery).len(), 6);
-/// assert!(!slots_for(surgery).contains(&Slot::PractitionerRole));
+/// assert!(slots_for(surgery).contains(&Slot::Location));
+/// assert!(!slots_for(referral).contains(&Slot::Location));
 /// ```
 #[must_use]
 pub fn slots_for(message_type: &MessageType) -> Vec<Slot> {
     let mut slots = vec![Slot::MessageHeader, Slot::Patient, Slot::Clinical];
 
     if message_type.has_practitioner_role {
-        slots.push(Slot::PractitionerRole);
+        // The Referral shape. `has_practitioner_role` is the §2.2 flag for it.
+        slots.extend([
+            Slot::Referrer,
+            Slot::ConsultantRole,
+            Slot::Consultant,
+            Slot::Organization,
+        ]);
+    } else {
+        slots.extend([Slot::Practitioner, Slot::Organization, Slot::Location]);
     }
-
-    slots.extend([Slot::Practitioner, Slot::Organization, Slot::Location]);
     slots
 }
 
@@ -153,6 +166,8 @@ pub struct Builder {
     identities: Identities,
     /// The resources built so far, by slot.
     resources: Vec<(Slot, serde_json::Value)>,
+    /// `Bundle.meta.profile`, for the shapes that claim one (a Referral).
+    profile: Option<&'static str>,
 }
 
 impl Builder {
@@ -163,7 +178,15 @@ impl Builder {
         Self {
             identities: Identities::allocate(message_type, uuids),
             resources: Vec::new(),
+            profile: None,
         }
+    }
+
+    /// Claim a `Bundle.meta.profile` (§3.1).
+    #[must_use]
+    pub const fn with_profile(mut self, profile: &'static str) -> Self {
+        self.profile = Some(profile);
+        self
     }
 
     /// The identities, for a mapper that needs to reference another slot.
@@ -216,11 +239,15 @@ impl Builder {
             })
             .collect();
 
-        json!({
+        let mut bundle = json!({
             "resourceType": "Bundle",
             "type": "message",
             "entry": entries,
-        })
+        });
+        if let Some(profile) = self.profile {
+            bundle["meta"] = json!({ "profile": [profile] });
+        }
+        bundle
     }
 }
 
@@ -239,25 +266,35 @@ mod tests {
     }
 
     #[test]
-    fn the_referral_shape_is_the_only_one_with_a_practitioner_role() {
-        // spec/16-proms-transformer.md §3 and §8.3.
+    fn the_referral_shape_is_its_own_and_every_other_keeps_one_practitioner_and_a_location() {
+        // spec/16-proms-transformer.md §3 and §8.3, as revised by upstream #435.
         assert_eq!(
             slots_for(referral()),
             vec![
                 Slot::MessageHeader,
                 Slot::Patient,
                 Slot::Clinical,
-                Slot::PractitionerRole,
-                Slot::Practitioner,
+                Slot::Referrer,
+                Slot::ConsultantRole,
+                Slot::Consultant,
                 Slot::Organization,
-                Slot::Location,
             ]
         );
 
         for code in ["SURGERY", "PREOP", "INPATIENT", "CANCELLED", "PREREAD"] {
             let slots = slots_for(resolve(Some(code), "").unwrap());
-            assert_eq!(slots.len(), 6, "{code}");
-            assert!(!slots.contains(&Slot::PractitionerRole), "{code}");
+            assert_eq!(
+                slots,
+                vec![
+                    Slot::MessageHeader,
+                    Slot::Patient,
+                    Slot::Clinical,
+                    Slot::Practitioner,
+                    Slot::Organization,
+                    Slot::Location,
+                ],
+                "{code}"
+            );
         }
     }
 
@@ -290,7 +327,7 @@ mod tests {
             Some("00000000-0000-4000-8000-000000000001")
         );
         assert_eq!(
-            identities.get(Slot::Location),
+            identities.get(Slot::Organization),
             Some("00000000-0000-4000-8000-000000000007")
         );
     }
@@ -298,8 +335,9 @@ mod tests {
     #[test]
     fn an_absent_resource_shortens_the_entries_without_moving_any_uuid() {
         // §3.2 and §3.3 — THE behaviour of this module, and the measured
-        // shape of the Python's `MINIMAL_REFERRAL_MESSAGE`: the `Location`
-        // carries the **seventh** UUID and sits at the **fifth** entry.
+        // shape of the Python's `MINIMAL_REFERRAL_MESSAGE`: the `Organization`
+        // carries the **seventh** UUID and sits at the **fourth** entry, the
+        // referrer and the consultant pair being absent.
         let uuids = SequentialUuids::new();
         let mut builder = Builder::new(referral(), &uuids);
 
@@ -309,23 +347,20 @@ mod tests {
         );
         builder.put(Slot::Patient, json!({"resourceType": "Patient"}));
         builder.put(Slot::Clinical, json!({"resourceType": "ServiceRequest"}));
-        builder.put(
-            Slot::PractitionerRole,
-            json!({"resourceType": "PractitionerRole"}),
-        );
-        // No Practitioner and no Organization — the minimal referral.
-        builder.put_maybe(Slot::Practitioner, None);
-        builder.put_maybe(Slot::Organization, None);
-        builder.put(Slot::Location, json!({"resourceType": "Location"}));
+        // No referrer, no consultant pair: only the Organization follows.
+        builder.put_maybe(Slot::Referrer, None);
+        builder.put_maybe(Slot::ConsultantRole, None);
+        builder.put_maybe(Slot::Consultant, None);
+        builder.put(Slot::Organization, json!({"resourceType": "Organization"}));
 
         let bundle = builder.finish();
         let entries = bundle["entry"].as_array().unwrap();
 
-        assert_eq!(entries.len(), 5);
-        assert_eq!(entries[4]["resource"]["resourceType"], "Location");
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[3]["resource"]["resourceType"], "Organization");
         assert_eq!(
-            entries[4]["fullUrl"], "urn:uuid:00000000-0000-4000-8000-000000000007",
-            "the Location keeps the seventh UUID despite being the fifth entry"
+            entries[3]["fullUrl"], "urn:uuid:00000000-0000-4000-8000-000000000007",
+            "the Organization keeps the seventh UUID despite being the fourth entry"
         );
     }
 
@@ -369,7 +404,7 @@ mod tests {
         let uuids = SequentialUuids::new();
         let mut builder = Builder::new(referral(), &uuids);
 
-        builder.put(Slot::Location, json!({"resourceType": "Location"}));
+        builder.put(Slot::Organization, json!({"resourceType": "Organization"}));
         builder.put(Slot::Patient, json!({"resourceType": "Patient"}));
         builder.put(
             Slot::MessageHeader,
@@ -387,7 +422,22 @@ mod tests {
 
         assert_eq!(
             types,
-            vec!["MessageHeader", "Patient", "ServiceRequest", "Location"]
+            vec!["MessageHeader", "Patient", "ServiceRequest", "Organization"]
+        );
+    }
+
+    #[test]
+    fn a_bundle_claims_a_profile_only_when_asked() {
+        // Upstream #435: a Referral's `Bundle.meta.profile`.
+        let plain = Builder::new(referral(), &SequentialUuids::new()).finish();
+        assert!(plain.get("meta").is_none());
+
+        let claimed = Builder::new(referral(), &SequentialUuids::new())
+            .with_profile("https://example.test/profile")
+            .finish();
+        assert_eq!(
+            claimed["meta"]["profile"][0],
+            "https://example.test/profile"
         );
     }
 

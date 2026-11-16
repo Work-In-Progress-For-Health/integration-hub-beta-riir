@@ -29,6 +29,17 @@ pub struct SourceSystem {
     pub name: &'static str,
     /// `Patient.identifier[PAS].system` — the board's local PAS identifier.
     pub pas_identifier_system: &'static str,
+    /// The board's ODS code: `Organization.identifier.value` (§6.10). Taken
+    /// from here, not from `hbCode`, which carries placeholders such as `X98`.
+    pub ods_code: &'static str,
+    /// The identifier system of the WPAS `consultant_code` (§6.8, §6.9):
+    /// the board's own, never a national one. Betsi Cadwaladr files it under
+    /// `central-pas-identifier` (upstream `#438`).
+    pub consultant_code_system: &'static str,
+    /// The identifier system of the WPAS `referrer_code` (§6.9). WPAS sends
+    /// no GMC or GMP number, so upstream's decision (DHCW) is the board's own
+    /// `wpas-referrer-code` system.
+    pub referrer_code_system: &'static str,
 }
 
 /// What §5.2.2 uses when there is no `SYSTEM_ID` at all; builds the
@@ -41,38 +52,59 @@ pub const UNKNOWN_SYSTEM_ID: &str = "unknown";
 pub const SOURCE_SYSTEMS: [SourceSystem; 7] = [
     SourceSystem {
         system_id: "108",
-        name: "Swansea Bay Health Board",
+        name: "Swansea Bay University Health Board",
         pas_identifier_system: "https://fhir.sbuhb.nhs.wales/Id/pas-identifier",
+        ods_code: "7A3",
+        consultant_code_system: "https://fhir.sbuhb.nhs.wales/Id/wpas-consultant-code",
+        referrer_code_system: "https://fhir.sbuhb.nhs.wales/Id/wpas-referrer-code",
     },
     SourceSystem {
         system_id: "109",
         name: "Betsi Cadwaladr University Health Board",
         pas_identifier_system: "https://fhir.bcuhb.nhs.wales/Id/central-pas-identifier",
+        ods_code: "7A1",
+        consultant_code_system: "https://fhir.bcuhb.nhs.wales/Id/central-pas-identifier",
+        referrer_code_system: "https://fhir.bcuhb.nhs.wales/Id/central-pas-identifier",
     },
     SourceSystem {
         system_id: "139",
         name: "Aneurin Bevan University Health Board",
         pas_identifier_system: "https://fhir.abuhb.nhs.wales/Id/pas-identifier",
+        ods_code: "7A6",
+        consultant_code_system: "https://fhir.abuhb.nhs.wales/Id/wpas-consultant-code",
+        referrer_code_system: "https://fhir.abuhb.nhs.wales/Id/wpas-referrer-code",
     },
     SourceSystem {
         system_id: "149",
         name: "Hywel Dda University Health Board",
         pas_identifier_system: "https://fhir.hduhb.nhs.wales/Id/pas-identifier",
+        ods_code: "7A2",
+        consultant_code_system: "https://fhir.hduhb.nhs.wales/Id/wpas-consultant-code",
+        referrer_code_system: "https://fhir.hduhb.nhs.wales/Id/wpas-referrer-code",
     },
     SourceSystem {
         system_id: "170",
         name: "Powys Teaching Health Board",
         pas_identifier_system: "https://fhir.pthb.nhs.wales/Id/pas-identifier",
+        ods_code: "7A7",
+        consultant_code_system: "https://fhir.pthb.nhs.wales/Id/wpas-consultant-code",
+        referrer_code_system: "https://fhir.pthb.nhs.wales/Id/wpas-referrer-code",
     },
     SourceSystem {
         system_id: "126",
         name: "Cwm Taf Morgannwg University Health Board",
         pas_identifier_system: "https://fhir.ctmuhb.nhs.wales/Id/pas-identifier",
+        ods_code: "7A5",
+        consultant_code_system: "https://fhir.ctmuhb.nhs.wales/Id/wpas-consultant-code",
+        referrer_code_system: "https://fhir.ctmuhb.nhs.wales/Id/wpas-referrer-code",
     },
     SourceSystem {
         system_id: "310",
         name: "Velindre University NHS Trust",
         pas_identifier_system: "https://fhir.vunhst.nhs.wales/Id/pas-identifier",
+        ods_code: "RQF",
+        consultant_code_system: "https://fhir.vunhst.nhs.wales/Id/wpas-consultant-code",
+        referrer_code_system: "https://fhir.vunhst.nhs.wales/Id/wpas-referrer-code",
     },
 ];
 
@@ -189,7 +221,7 @@ mod tests {
     fn every_board_has_a_name() {
         // §5.2 — the names of upstream's `test_source_name_and_endpoint_per_health_board`.
         let expected = [
-            ("108", "Swansea Bay Health Board"),
+            ("108", "Swansea Bay University Health Board"),
             ("109", "Betsi Cadwaladr University Health Board"),
             ("126", "Cwm Taf Morgannwg University Health Board"),
             ("139", "Aneurin Bevan University Health Board"),

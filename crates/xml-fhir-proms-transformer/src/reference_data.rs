@@ -113,12 +113,13 @@ pub trait ReferenceDataResolver {
 
 /// §7.3's gender table: WPAS sends either a letter or a digit, and both map
 /// to the same FHIR code. Unlisted codes are unresolved, not defaulted.
-const GENDER_CODES: [(&str, &str); 9] = [
+const GENDER_CODES: [(&str, &str); 10] = [
     ("M", "male"),
     ("1", "male"),
     ("F", "female"),
     ("2", "female"),
     ("O", "other"),
+    ("I", "other"),
     ("9", "other"),
     ("U", "unknown"),
     ("0", "unknown"),
@@ -248,6 +249,7 @@ mod tests {
             ("F", "female"),
             ("2", "female"),
             ("O", "other"),
+            ("I", "other"),
             ("9", "other"),
             ("U", "unknown"),
             ("0", "unknown"),

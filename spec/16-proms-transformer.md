@@ -150,7 +150,7 @@ Entry order is **positional and normative** — Promptly reads by position.
 
 | Bundle | Entries, in order |
 | --- | --- |
-| Referral | `MessageHeader`, `Patient`, `ServiceRequest`, `PractitionerRole`, `Practitioner`, `Organization`, `Location` |
+| Referral | `MessageHeader`, `Patient`, `ServiceRequest`, `Practitioner` (referrer), `PractitionerRole` (consultant), `Practitioner` (consultant), `Organization` (§10.6; no `Location`) |
 | Procedure | `MessageHeader`, `Patient`, `Procedure`, `Practitioner`, `Organization`, `Location` |
 | Appointment | `MessageHeader`, `Patient`, `Appointment`, `Practitioner`, `Organization`, `Location` |
 | Encounter | `MessageHeader`, `Patient`, `Encounter`, `Practitioner`, `Organization`, `Location` |
@@ -167,12 +167,12 @@ list is a maximum rather than a fixed shape. Measured against the Python:
 
 | Fixture | Entries |
 | --- | --- |
-| `REFERRAL_MESSAGE` | `MessageHeader`, `Patient`, `ServiceRequest`, `PractitionerRole`, `Practitioner`, `Organization`, `Location` |
-| `MINIMAL_REFERRAL_MESSAGE` | `MessageHeader`, `Patient`, `ServiceRequest`, `PractitionerRole`, `Location` |
+| `REFERRAL_MESSAGE` | `MessageHeader`, `Patient`, `ServiceRequest`, `Practitioner`, `PractitionerRole`, `Practitioner`, `Organization` |
+| `MINIMAL_REFERRAL_MESSAGE` | `MessageHeader`, `Patient`, `ServiceRequest` |
 
 §3.3 That makes "positional" in §3 mean **relative** order, not absolute
-index. In a full referral index 4 is `Practitioner`; in a minimal one it is
-`Location`. A consumer reading by absolute index would take one for the
+index. In a full referral index 3 is the referrer `Practitioner`; in a
+minimal one there is no index 3 at all. A consumer reading by absolute index would take one for the
 other. See §9.1 — whether Promptly does that is a question for the Hub team,
 and it is not answerable from this repository.
 
@@ -205,7 +205,7 @@ this reason and the Rust does the same.
 
 | `SYSTEM_ID` | `source.name` |
 | --- | --- |
-| `108` | Swansea Bay Health Board |
+| `108` | Swansea Bay University Health Board |
 | `109` | Betsi Cadwaladr University Health Board |
 | `126` | Cwm Taf Morgannwg University Health Board |
 | `139` | Aneurin Bevan University Health Board |
@@ -216,6 +216,14 @@ this reason and the Rust does the same.
 `103` (Princess of Wales, PIMS) and `140` (Cardiff and Vale) do not use
 WPAS, and `131` was a spreadsheet error for Velindre. None of the three is a
 source: `140`, which was previously configured, is **removed**.
+
+§5.2.0 Each board also carries (upstream #435, #437, #438; §10.6) its **ODS
+code**, used for `Organization.identifier`: `108` 7A3, `109` 7A1, `126` 7A5,
+`139` 7A6, `149` 7A2, `170` 7A7, `310` RQF; and the identifier systems of the
+WPAS `consultant_code` and `referrer_code`, `https://fhir.{domain}.nhs.wales/Id/wpas-consultant-code`
+and `…/wpas-referrer-code` with `{domain}` `sbuhb`, `bcuhb`, `ctmuhb`, `abuhb`,
+`hduhb`, `pthb`, `vunhst`. **Betsi Cadwaladr (`109`) is the exception:** both
+codes go under `https://fhir.bcuhb.nhs.wales/Id/central-pas-identifier`.
 
 §5.2.1 `source.name` is the board's name for a known board and **omitted**
 for an unknown one.
@@ -237,6 +245,9 @@ registry has issued, so §9.2 stands in a reduced form (§10.4).
 ## §6 Resource mappings
 
 Derived from the eleven mappers in `xml_fhir_proms_transformer/mappers/`.
+
+**Read §10.6 with this section.** It records the Referral rework of upstream
+`#435` and its follow-ups, which supersedes the Referral rows below.
 
 §6.0 **Field lookup is by normalised key, then by alias order.** Two things
 happen, and conflating them leads to the wrong conclusion about what the
@@ -759,3 +770,32 @@ The remaining rows stand.
 `work_phone`, `mobile_phone`, `email`, `ethnic_origin_code`,
 `ethnic_origin` and `referrer_prac`, and `hbCode` became `7A2`
 (`integration-hub-tester`, `spec/integration-hub-tester-component-preview.md`).
+
+§10.6 **#423 (second half), #435, #437 to #440 and #447: the Referral
+rework** (upstream `c074825`, `2ab0b66`, `ef9ca9d`, `662b60b`, `58a7809`,
+`e15fc89`, `bb13f36`). The Referral bundle moved to the Promptly **WPAS
+Integration IG** (`https://wpas-integration-ig.tools.labs.promptly.health`).
+Every other bundle is unchanged except where stated. **This section
+supersedes any contrary row in §3, §5 and §6; the older rows describe the
+mapping up to #346/#370/#423's first half.** Verified, as §8.1 requires, by
+regenerating the corpus from the Python at HEAD (`fed0803`, 13 Nov 2026)
+and comparing all 18 bundles whole: they are equal.
+
+| Clause | Revision |
+| --- | --- |
+| §3, §4 | A Referral is `MessageHeader`, `Patient`, `ServiceRequest`, **referrer `Practitioner`**, **consultant `PractitionerRole`**, **consultant `Practitioner`**, `Organization`. **No `Location`.** UUIDs are allocated in that order (seven), so an absent referrer or consultant still leaves the gap. The consultant `PractitionerRole` and `Practitioner` stand or fall together. `Bundle.meta.profile` is `…/StructureDefinition/wpas-messagebundle`. |
+| §6.2 | Referral header: profile `wpas-messageheader` (IG), `eventCoding.system` `…/CodeSystem/wpas-event-codes`, `code` the **lowercase** canonical code (`referral`), **no `definition`**. `focus` is the patient, the `ServiceRequest`, the referrer `Practitioner`, then the consultant `PractitionerRole`. |
+| §6.3 | Referral `Patient` profile is the IG's `wpas-patient` and carries **no NHS-number verification status** (#440); other bundles keep both. `Patient.name` has **no `use`** (#439) and the **title is a `prefix` again**. `gender` `I` is `other` (#439). Spoken language is under the IG's `wpas-spoken-language` system and WPAS code `9` (Unknown) **omits `communication`** entirely; ethnicity is under the IG's `wpas-ethnicity` system. |
+| §6.4 | IG profile and identifier system. `code` is the **pathway** (`eventPathway`, e.g. `GENERIC`) under `…/CodeSystem/wpas-proms-pathway`, no display; **no `reasonCode`**. `occurrenceDateTime` is a **plain date** (a midnight-UTC time shifts an hour in BST). `requester` is the referrer `Practitioner`; `performer` is the consultant `Practitioner`. |
+| §6.8 | Only the **consultant's** role. Identifier `consultant_code` under `…/id/wpas-practitionerrole`; refers to the consultant `Practitioner` and the `Organization`. `specialty` is sent only when the first three characters of `consultant_specialty` are on the national practice-setting list (`UKCore-PracticeSettingCode`, 87 codes), as that system; otherwise **omitted**. No `location`. |
+| §6.9 | Referral practitioners are `wpas-practitioner` (IG): the **referrer** (`referrer_code`, `referrer_name`) and the **consultant** (`consultant_code`, `clinicianName`), each with a free-text name and an identifier under the sending board's **own** system (§5.2.0). An **unknown board has no valid system, so the identifier is omitted** rather than filed under a guess; the name is kept. Neither identifier nor name: no entry. Other bundles keep one `Practitioner` (`consultant_code`, WPAS practitioner system). |
+| §6.10 | `Organization.identifier` is the **board's ODS code** (`hbCode` carries placeholders such as `X98`), falling back to `hb_code` for an unknown board. A known board is enough: `hb_code` is no longer required. Referral profile is the IG's `wpas-organization`. `sender.display` and the name use the same board lookup. |
+| §6.11 | Unchanged for the bundles that have one. |
+
+Deviations from the Python: none in the mapping (the golden proves it). The
+unroutable-fixture error text still differs in wording, as before (§8.1).
+**Not ported:** `integration-hub-tester`'s four `TEMP` PROMs samples, which
+need the `SURGERY-PERF`, `SURGERY-DN`, `PREOP-VIS` and `PREOP-AR` routing
+upstream added in `8a7f6f3`; the tester's `proms_samples` is otherwise as
+before. §9.5's `ServiceRequest` and `PractitionerRole` rows and §9.6 (the
+referrer's code under the GMC system) are **retired** by this section.

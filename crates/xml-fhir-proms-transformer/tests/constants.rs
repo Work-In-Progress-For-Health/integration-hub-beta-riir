@@ -26,14 +26,12 @@ fn python_constants() -> BTreeMap<String, String> {
 fn every_ported_constant_matches_the_python() {
     let python = python_constants();
 
-    let ours: [(&str, &str); 33] = [
+    let ours: [(&str, &str); 39] = [
         ("MESSAGE_HEADER_PROFILE", fhir::MESSAGE_HEADER_PROFILE),
         ("PATIENT_PROFILE", fhir::PATIENT_PROFILE),
         ("PRACTITIONER_PROFILE", fhir::PRACTITIONER_PROFILE),
-        ("PRACTITIONER_ROLE_PROFILE", fhir::PRACTITIONER_ROLE_PROFILE),
         ("ORGANIZATION_PROFILE", fhir::ORGANIZATION_PROFILE),
         ("LOCATION_PROFILE", fhir::LOCATION_PROFILE),
-        ("SERVICE_REQUEST_PROFILE", fhir::SERVICE_REQUEST_PROFILE),
         ("ENCOUNTER_PROFILE", fhir::ENCOUNTER_PROFILE),
         ("PROCEDURE_PROFILE", fhir::PROCEDURE_PROFILE),
         ("APPOINTMENT_PROFILE", fhir::APPOINTMENT_PROFILE),
@@ -77,30 +75,47 @@ fn every_ported_constant_matches_the_python() {
             "APPOINTMENT_IDENTIFIER_SYSTEM",
             fhir::APPOINTMENT_IDENTIFIER_SYSTEM,
         ),
-        (
-            "PRACTITIONER_ROLE_REFERRAL_IDENTIFIER_SYSTEM",
-            fhir::PRACTITIONER_ROLE_REFERRAL_IDENTIFIER_SYSTEM,
-        ),
-        (
-            "SERVICE_REQUEST_CODE_SYSTEM",
-            fhir::SERVICE_REQUEST_CODE_SYSTEM,
-        ),
-        (
-            "SERVICE_REQUEST_CODE_DISPLAY",
-            fhir::SERVICE_REQUEST_CODE_DISPLAY,
-        ),
-        (
-            "SERVICE_REQUEST_REASON_SYSTEM",
-            fhir::SERVICE_REQUEST_REASON_SYSTEM,
-        ),
         ("ENCOUNTER_CLASS_SYSTEM", fhir::ENCOUNTER_CLASS_SYSTEM),
+        ("WPAS_IG_BASE", fhir::WPAS_IG_BASE),
         (
-            "SERVICE_REQUEST_IDENTIFIER_SYSTEM",
-            fhir::SERVICE_REQUEST_IDENTIFIER_SYSTEM,
+            "WPAS_IG_MESSAGE_BUNDLE_PROFILE",
+            fhir::WPAS_IG_MESSAGE_BUNDLE_PROFILE,
         ),
         (
-            "PRACTITIONER_ROLE_IDENTIFIER_SYSTEM",
-            fhir::PRACTITIONER_ROLE_IDENTIFIER_SYSTEM,
+            "WPAS_IG_MESSAGE_HEADER_PROFILE",
+            fhir::WPAS_IG_MESSAGE_HEADER_PROFILE,
+        ),
+        ("WPAS_IG_PATIENT_PROFILE", fhir::WPAS_IG_PATIENT_PROFILE),
+        (
+            "WPAS_IG_SERVICE_REQUEST_PROFILE",
+            fhir::WPAS_IG_SERVICE_REQUEST_PROFILE,
+        ),
+        (
+            "WPAS_IG_PRACTITIONER_ROLE_PROFILE",
+            fhir::WPAS_IG_PRACTITIONER_ROLE_PROFILE,
+        ),
+        (
+            "WPAS_IG_PRACTITIONER_PROFILE",
+            fhir::WPAS_IG_PRACTITIONER_PROFILE,
+        ),
+        (
+            "WPAS_IG_ORGANIZATION_PROFILE",
+            fhir::WPAS_IG_ORGANIZATION_PROFILE,
+        ),
+        ("WPAS_IG_EVENT_SYSTEM", fhir::WPAS_IG_EVENT_SYSTEM),
+        ("WPAS_IG_PATHWAY_SYSTEM", fhir::WPAS_IG_PATHWAY_SYSTEM),
+        (
+            "WPAS_IG_SERVICE_REQUEST_IDENTIFIER_SYSTEM",
+            fhir::WPAS_IG_SERVICE_REQUEST_IDENTIFIER_SYSTEM,
+        ),
+        (
+            "WPAS_IG_PRACTITIONER_ROLE_IDENTIFIER_SYSTEM",
+            fhir::WPAS_IG_PRACTITIONER_ROLE_IDENTIFIER_SYSTEM,
+        ),
+        ("PRACTICE_SETTING_SYSTEM", fhir::PRACTICE_SETTING_SYSTEM),
+        (
+            "SPOKEN_LANGUAGE_UNKNOWN_CODE",
+            fhir::SPOKEN_LANGUAGE_UNKNOWN_CODE,
         ),
     ];
 
@@ -144,24 +159,45 @@ fn the_verification_system_and_its_extension_differ_by_more_than_a_path() {
 }
 
 #[test]
-fn only_the_encounter_and_appointment_systems_still_name_the_labs_host() {
-    // spec/16 §9.11 and §10.3 — upstream #423 moved the ServiceRequest and
-    // PractitionerRole systems to `fhir.nhs.wales`; #346's two new
-    // identifier systems still name the labs host. Asserted so the day
-    // somebody changes either side the change is deliberate.
-    for system in [
-        fhir::SERVICE_REQUEST_IDENTIFIER_SYSTEM,
-        fhir::PRACTITIONER_ROLE_IDENTIFIER_SYSTEM,
-    ] {
-        assert!(system.starts_with("https://fhir.nhs.wales/Id/"), "{system}");
-    }
-
-    for system in [
+fn the_referral_ig_constants_are_all_under_the_published_ig_base() {
+    // spec/16 §10.5 — upstream #435 moved a Referral's profiles and its code
+    // and identifier systems under the WPAS Integration IG. The Encounter and
+    // Appointment identifier systems were already there (§9.11).
+    for url in [
+        fhir::WPAS_IG_MESSAGE_BUNDLE_PROFILE,
+        fhir::WPAS_IG_MESSAGE_HEADER_PROFILE,
+        fhir::WPAS_IG_PATIENT_PROFILE,
+        fhir::WPAS_IG_SERVICE_REQUEST_PROFILE,
+        fhir::WPAS_IG_PRACTITIONER_ROLE_PROFILE,
+        fhir::WPAS_IG_PRACTITIONER_PROFILE,
+        fhir::WPAS_IG_ORGANIZATION_PROFILE,
+        fhir::WPAS_IG_EVENT_SYSTEM,
+        fhir::WPAS_IG_PATHWAY_SYSTEM,
+        fhir::WPAS_IG_SERVICE_REQUEST_IDENTIFIER_SYSTEM,
+        fhir::WPAS_IG_PRACTITIONER_ROLE_IDENTIFIER_SYSTEM,
+        fhir::SPOKEN_LANGUAGE_SYSTEM,
+        fhir::ETHNICITY_SYSTEM,
         fhir::ENCOUNTER_IDENTIFIER_SYSTEM,
         fhir::APPOINTMENT_IDENTIFIER_SYSTEM,
     ] {
-        assert!(system.contains("tools.labs.promptly.health"), "{system}");
+        assert!(url.starts_with(fhir::WPAS_IG_BASE), "{url}");
     }
+}
+
+#[test]
+fn the_practice_setting_list_is_the_pythons() {
+    // 87 national specialty codes; PractitionerRole.specialty is sent only
+    // for one of them (spec/16 §6.8).
+    assert_eq!(fhir::PRACTICE_SETTING_CODES.len(), 87);
+    assert!(fhir::PRACTICE_SETTING_CODES.iter().all(|c| c.len() == 3));
+    let mut sorted = fhir::PRACTICE_SETTING_CODES.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), 87, "no duplicates");
+    assert!(
+        !fhir::PRACTICE_SETTING_CODES.contains(&"650"),
+        "650 (physiotherapy) is not on it"
+    );
 }
 
 #[test]
@@ -180,10 +216,15 @@ fn every_profile_is_a_profile_url() {
         fhir::MESSAGE_HEADER_PROFILE,
         fhir::PATIENT_PROFILE,
         fhir::PRACTITIONER_PROFILE,
-        fhir::PRACTITIONER_ROLE_PROFILE,
         fhir::ORGANIZATION_PROFILE,
         fhir::LOCATION_PROFILE,
-        fhir::SERVICE_REQUEST_PROFILE,
+        fhir::WPAS_IG_MESSAGE_BUNDLE_PROFILE,
+        fhir::WPAS_IG_MESSAGE_HEADER_PROFILE,
+        fhir::WPAS_IG_PATIENT_PROFILE,
+        fhir::WPAS_IG_SERVICE_REQUEST_PROFILE,
+        fhir::WPAS_IG_PRACTITIONER_ROLE_PROFILE,
+        fhir::WPAS_IG_PRACTITIONER_PROFILE,
+        fhir::WPAS_IG_ORGANIZATION_PROFILE,
         fhir::ENCOUNTER_PROFILE,
         fhir::PROCEDURE_PROFILE,
         fhir::APPOINTMENT_PROFILE,
