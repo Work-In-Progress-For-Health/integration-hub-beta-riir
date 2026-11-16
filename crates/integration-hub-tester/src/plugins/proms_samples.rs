@@ -187,6 +187,7 @@ pub(super) const PREREAD: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 // field values are dummy, copied from upstream's tester until WPAS supplies
 // real ones.
 
+/// `SURGERY-PERF`, a surgery performed (`TEMP` placeholder).
 pub(super) const SURGERY_PERF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <PromsEventRequest>
   <system_id>149</system_id>
@@ -211,6 +212,7 @@ pub(super) const SURGERY_PERF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
   <appointmentTime>10:00</appointmentTime>
 </PromsEventRequest>"#;
 
+/// `SURGERY-DN`, a discharge note (`TEMP` placeholder).
 pub(super) const SURGERY_DN: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <PromsEventRequest>
   <system_id>149</system_id>
@@ -233,6 +235,7 @@ pub(super) const SURGERY_DN: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
   <clinicianName>Morgan, James</clinicianName>
 </PromsEventRequest>"#;
 
+/// `PREOP-VIS`, an outpatient visit (`TEMP` placeholder).
 pub(super) const PREOP_VIS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <PromsEventRequest>
   <system_id>149</system_id>
@@ -255,6 +258,7 @@ pub(super) const PREOP_VIS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
   <clinicianName>Price, David</clinicianName>
 </PromsEventRequest>"#;
 
+/// `PREOP-AR`, an appointment reschedule (`TEMP` placeholder).
 pub(super) const PREOP_AR: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <PromsEventRequest>
   <system_id>149</system_id>

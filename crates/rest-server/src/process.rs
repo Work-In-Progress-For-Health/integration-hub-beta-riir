@@ -791,7 +791,7 @@ mod tests {
         let reply = processor.process(&soap(ADT)).await;
         assert_eq!(reply.status, 200, "{}", reply.body);
         assert_eq!(bus.all_sent("egress-queue").len(), 1);
-        assert!(wrrs_bus.all_sent("wrrs-queue").is_empty());
+        assert_eq!(wrrs_bus.all_sent("wrrs-queue").len(), 0);
     }
 
     #[tokio::test]

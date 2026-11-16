@@ -232,6 +232,11 @@ jobs:
           podman logs ihb-rs-sb-emulator 2>&1 | tail -60
           podman logs ihb-rs-sqledge 2>&1 | tail -60
 
+      # Best effort. The runner is a throwaway VM, so teardown frees nothing
+      # that matters, and rootless Podman cannot always kill its own network
+      # process when stopping `sqledge` ("rootless netns: kill network
+      # process: permission denied", run 43978474780, after every test had
+      # passed). A teardown error must not turn a green test run red.
       - name: Stop the local stack
         if: always()
-        run: podman compose -f local/docker-compose.yml down --volumes
+        run: podman compose -f local/docker-compose.yml down --volumes || echo "::warning::teardown failed; the runner is discarded anyway"
