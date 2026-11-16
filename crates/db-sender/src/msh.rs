@@ -16,6 +16,12 @@ pub struct MshInfo {
     pub control_id: String,
     /// `MSH-9` as `ADT^A40^ADT_A39`, or `UNKNOWN`.
     pub message_type: String,
+    /// The trigger event (`MSH-9.2`, else `MSH-9.1`), or `UNKNOWN`. Not
+    /// patient data, and needed to choose the Queue ID Update path
+    /// (`spec/10-senders.md` §7.8).
+    pub trigger_event: String,
+    /// `MSH-3.1`, or empty. The fallback source system of §7.8.
+    pub sending_app: String,
 }
 
 /// The value used where nothing could be read.
@@ -28,8 +34,24 @@ impl MshInfo {
             msh_text: text.to_string(),
             control_id: UNKNOWN.to_string(),
             message_type: UNKNOWN.to_string(),
+            trigger_event: UNKNOWN.to_string(),
+            sending_app: String::new(),
         }
     }
+}
+
+/// The trigger event of a `MSH-9` value (`_extract_trigger_from_msg_type`):
+/// the second component, else the first.
+fn trigger_from_message_type(message_type: &str) -> String {
+    if message_type.is_empty() || message_type == UNKNOWN {
+        return UNKNOWN.to_string();
+    }
+    let parts: Vec<&str> = message_type.split('^').collect();
+    parts
+        .get(1)
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .map_or_else(|| parts[0].trim().to_string(), str::to_string)
 }
 
 /// Extract the MSH of `body` (`§7.5`).
@@ -76,10 +98,18 @@ pub fn extract_msh_for_logging(body: &str) -> MshInfo {
                     .map_or(UNKNOWN, |f| *f)
                     .to_string()
             };
+            let message_type = pick(8);
             return MshInfo {
                 msh_text: line.to_string(),
                 control_id: pick(9),
-                message_type: pick(8),
+                trigger_event: trigger_from_message_type(&message_type),
+                // MSH-3.1: the first component of the field.
+                sending_app: fields
+                    .get(2)
+                    .and_then(|f| f.split('^').next())
+                    .unwrap_or_default()
+                    .to_string(),
+                message_type,
             };
         }
     }
@@ -100,7 +130,12 @@ fn extract_xml(cleaned: &str) -> MshInfo {
             let control_id =
                 text_of(msh, &["MSH.10.1", "MSH.10"]).unwrap_or_else(|| UNKNOWN.into());
             let message_type = message_type(msh).unwrap_or_else(|| UNKNOWN.into());
+            let trigger_event = text_of(msh, &["MSG.2", "MSH.9.2"])
+                .unwrap_or_else(|| trigger_from_message_type(&message_type));
+            let sending_app = text_of(msh, &["HD.1", "MSH.3.1", "MSH.3"]).unwrap_or_default();
             return MshInfo {
+                trigger_event,
+                sending_app,
                 // The source slice rather than a re-serialisation: it is
                 // exactly the MSH element and cannot include a sibling.
                 msh_text: cleaned[msh.range()].trim().to_string(),
@@ -156,24 +191,30 @@ fn salvage_partial_xml(cleaned: &str) -> Option<MshInfo> {
     let end = start + lower[start..].find("</msh>")? + "</msh>".len();
     let raw = cleaned[start..end].trim();
 
-    // `<MSH.10 ...>` then any nested tags, then the text.
-    let control_id = raw
-        .find("<MSH.10")
-        .and_then(|at| raw[at..].find('>').map(|gt| at + gt + 1))
-        .and_then(|mut cursor| {
-            while raw[cursor..].starts_with('<') {
-                cursor += raw[cursor..].find('>')? + 1;
-            }
-            let text = raw[cursor..].split('<').next()?.trim();
-            (!text.is_empty()).then(|| text.to_string())
-        })
+    let control_id = salvage_text(raw, "<MSH.10").unwrap_or_else(|| UNKNOWN.into());
+    let trigger_event = salvage_text(raw, "<MSG.2")
+        .or_else(|| salvage_text(raw, "<MSH.9.2"))
         .unwrap_or_else(|| UNKNOWN.into());
 
     Some(MshInfo {
         msh_text: raw.to_string(),
         control_id,
         message_type: UNKNOWN.into(),
+        trigger_event,
+        sending_app: salvage_text(raw, "<MSH.3").unwrap_or_default(),
     })
+}
+
+/// The text after `<tag ...>` and any nested opening tags, in a fragment
+/// that does not parse (upstream's regex `<tag[^>]*>(?:<[^>]+>)*([^<]+)`).
+fn salvage_text(raw: &str, tag: &str) -> Option<String> {
+    let mut cursor = raw.find(tag)?;
+    cursor += raw[cursor..].find('>')? + 1;
+    while raw[cursor..].starts_with('<') {
+        cursor += raw[cursor..].find('>')? + 1;
+    }
+    let text = raw[cursor..].split('<').next()?.trim();
+    (!text.is_empty()).then(|| text.to_string())
 }
 
 #[cfg(test)]
@@ -250,6 +291,37 @@ mod tests {
         for leaked in ["SURNAME", "9999999999", "HIGH STREET"] {
             assert!(!info.msh_text.contains(leaked));
         }
+    }
+
+    #[test]
+    fn the_trigger_and_sending_application_are_read_for_er7_and_xml() {
+        // spec/10-senders.md §7.8.
+        let er7 =
+            extract_msh_for_logging("MSH|^~\\&|328^LIMS|a|b|c|d||ADT^A31^ADT_A05|M1|P|2.5\rPID|1");
+        assert_eq!(
+            (er7.trigger_event.as_str(), er7.sending_app.as_str()),
+            ("A31", "328")
+        );
+
+        let xml = extract_msh_for_logging(
+            "<ADT_A39><MSH><MSH.3><HD.1>349</HD.1></MSH.3><MSH.9><MSG.1>ADT</MSG.1><MSG.2>A40</MSG.2></MSH.9>\
+             <MSH.10><MSH.10.1>X</MSH.10.1></MSH.10></MSH></ADT_A39>",
+        );
+        assert_eq!(
+            (xml.trigger_event.as_str(), xml.sending_app.as_str()),
+            ("A40", "349")
+        );
+
+        let partial = extract_msh_for_logging(
+            "<ADT><MSH><MSH.3><HD.1>349</HD.1></MSH.3><MSH.9><MSG.2>A31</MSG.2></MSH.9></MSH><PID><oops>SECRET",
+        );
+        assert_eq!(partial.trigger_event, "A31");
+        assert_eq!(partial.sending_app, "349");
+
+        // A bare message code with no trigger falls back to its first component.
+        let bare = extract_msh_for_logging("MSH|^~\\&|a|b|c|d|e||ACK|M|P|2.5");
+        assert_eq!(bare.trigger_event, "ACK");
+        assert_eq!(extract_msh_for_logging("").trigger_event, "UNKNOWN");
     }
 
     #[test]

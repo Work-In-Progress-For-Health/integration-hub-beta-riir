@@ -19,6 +19,7 @@ use tokio::net::TcpStream;
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
 use crate::config::{DbAuth, DbConfig};
+use crate::idupdate::IdUpdate;
 use crate::sanitize::sanitize_error_message;
 
 /// SQL Server native error codes that are worth a retry (`§7.3`).
@@ -158,6 +159,29 @@ pub trait ProcedureRunner: Send {
         message: &str,
         is_priority: bool,
     ) -> impl Future<Output = Result<(), DatabaseError>> + Send;
+
+    /// Execute `dbo.prQueueIdUpdate` with the six parameters of `update` and
+    /// commit (`spec/10-senders.md` §7.8).
+    ///
+    /// Defaults to a fatal "not supported" so a runner that only knows the
+    /// message procedure need not implement it; [`SqlRunner`] does.
+    ///
+    /// # Errors
+    ///
+    /// A [`DatabaseError`], already classified and sanitised.
+    fn execute_id_update(
+        &mut self,
+        update: &IdUpdate,
+    ) -> impl Future<Output = Result<(), DatabaseError>> + Send {
+        let _ = update;
+        async {
+            Err(DatabaseError::new(
+                FailureKind::Fatal,
+                0,
+                "this runner cannot execute the Queue ID Update",
+            ))
+        }
+    }
 }
 
 /// A `tiberius` client over a Tokio socket.
@@ -169,6 +193,8 @@ pub struct SqlRunner {
     config: DbConfig,
     /// `EXEC dbo.proc @P1, @P2`, built once from the validated name.
     statement: String,
+    /// `EXEC dbo.proc @P1 .. @P6`, for the Queue ID Update.
+    id_update_statement: String,
     /// The connection, once opened.
     client: Option<Connected>,
 }
@@ -195,9 +221,14 @@ impl SqlRunner {
         // which is what makes splicing it into SQL acceptable. Positional
         // parameters, as the Python's `{CALL proc (?, ?)}`.
         let statement = format!("EXEC {} @P1, @P2", config.stored_procedure);
+        let id_update_statement = format!(
+            "EXEC {} @P1, @P2, @P3, @P4, @P5, @P6",
+            config.stored_procedure
+        );
         Self {
             config,
             statement,
+            id_update_statement,
             client: None,
         }
     }
@@ -260,8 +291,8 @@ impl SqlRunner {
     async fn run(
         &self,
         client: &mut Connected,
-        message: &str,
-        is_priority: bool,
+        statement: &str,
+        parameters: &[&dyn tiberius::ToSql],
     ) -> Result<(), DatabaseError> {
         client
             .simple_query("BEGIN TRANSACTION")
@@ -271,7 +302,7 @@ impl SqlRunner {
             .await
             .map_err(|e| from_tiberius(&e))?;
         client
-            .execute(self.statement.as_str(), &[&message, &is_priority])
+            .execute(statement, parameters)
             .await
             .map_err(|e| from_tiberius(&e))?;
         client
@@ -285,24 +316,32 @@ impl SqlRunner {
     }
 }
 
-impl ProcedureRunner for SqlRunner {
-    async fn execute(&mut self, message: &str, is_priority: bool) -> Result<(), DatabaseError> {
+impl SqlRunner {
+    /// Open or reuse the connection, run `statement` with `parameters` in a
+    /// transaction, and keep the connection only if it succeeded.
+    async fn call(
+        &mut self,
+        statement: &str,
+        parameters: &[&dyn tiberius::ToSql],
+    ) -> Result<(), DatabaseError> {
         let mut client = match self.client.take() {
             Some(client) => client,
             None => self.open().await?,
         };
 
         let command_timeout = Duration::from_secs(self.config.command_timeout_secs);
-        let outcome =
-            tokio::time::timeout(command_timeout, self.run(&mut client, message, is_priority))
-                .await
-                .unwrap_or_else(|_| {
-                    Err(DatabaseError::new(
-                        FailureKind::Transient,
-                        0,
-                        "command timeout expired",
-                    ))
-                });
+        let outcome = tokio::time::timeout(
+            command_timeout,
+            self.run(&mut client, statement, parameters),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(DatabaseError::new(
+                FailureKind::Transient,
+                0,
+                "command timeout expired",
+            ))
+        });
 
         match outcome {
             Ok(()) => {
@@ -319,6 +358,29 @@ impl ProcedureRunner for SqlRunner {
                 Err(error)
             }
         }
+    }
+}
+
+impl ProcedureRunner for SqlRunner {
+    async fn execute(&mut self, message: &str, is_priority: bool) -> Result<(), DatabaseError> {
+        let statement = self.statement.clone();
+        self.call(&statement, &[&message, &is_priority]).await
+    }
+
+    async fn execute_id_update(&mut self, update: &IdUpdate) -> Result<(), DatabaseError> {
+        let statement = self.id_update_statement.clone();
+        self.call(
+            &statement,
+            &[
+                &update.provider_identifier.as_deref(),
+                &update.provider_authority.as_deref(),
+                &update.old_identifier.as_deref(),
+                &update.old_authority.as_deref(),
+                &update.new_identifier.as_str(),
+                &update.new_authority.as_str(),
+            ],
+        )
+        .await
     }
 }
 
@@ -397,6 +459,23 @@ mod tests {
         .unwrap();
         let rendered = format!("{:?}", SqlRunner::new(config.db));
         assert!(!rendered.contains("hunter2"), "{rendered}");
+    }
+
+    #[test]
+    fn the_id_update_statement_has_six_positional_parameters() {
+        let config = crate::AppConfig::from_pairs([
+            ("INGRESS_TOPIC_NAME", "t"),
+            ("INGRESS_SUBSCRIPTION_NAME", "s"),
+            ("DB_PROCEDURE_TYPE", "queue_id_update"),
+            ("DB_USERNAME", "sa"),
+            ("DB_PASSWORD", "p"),
+            ("DB_ENCRYPT", "No"),
+        ])
+        .unwrap();
+        assert_eq!(
+            SqlRunner::new(config.db).id_update_statement,
+            "EXEC dbo.prQueueIdUpdate @P1, @P2, @P3, @P4, @P5, @P6"
+        );
     }
 
     #[test]

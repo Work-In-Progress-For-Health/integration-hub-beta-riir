@@ -6,6 +6,37 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use ihb_config::{ConfigErrors, Reader, Secret};
 
+/// What the service does with a message (`§7.6`, `§7.8`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcedureType {
+    /// `dbo.prQueueMessage(@Message, @IsPriority)`: the whole message goes
+    /// to the procedure. The default.
+    QueueMessage,
+    /// `dbo.prQueueIdUpdate`: identifiers are read from an `A31` or `A40`
+    /// and passed as six parameters (`§7.8`).
+    QueueIdUpdate,
+}
+
+impl ProcedureType {
+    /// The default procedure for this type.
+    #[must_use]
+    pub const fn default_procedure(self) -> &'static str {
+        match self {
+            Self::QueueMessage => "dbo.prQueueMessage",
+            Self::QueueIdUpdate => "dbo.prQueueIdUpdate",
+        }
+    }
+
+    /// The value of `DB_PROCEDURE_TYPE`, also used as a metric attribute.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::QueueMessage => "queue_message",
+            Self::QueueIdUpdate => "queue_id_update",
+        }
+    }
+}
+
 /// How the service authenticates to SQL Server (`§7.6`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DbAuth {
@@ -88,6 +119,12 @@ pub struct AppConfig {
     pub ingress_session_id: Option<String>,
     /// The database.
     pub db: DbConfig,
+    /// `DB_PROCEDURE_TYPE`, default `queue_message`.
+    pub procedure_type: ProcedureType,
+    /// `SOURCE_SYSTEM`, default `328`: the assigning authority an `A31` is
+    /// taken to come from when neither the message's `SourceSystem` property
+    /// nor `MSH-3.1` says (`§7.8`).
+    pub source_system: String,
     /// `WORKFLOW_ID`.
     pub workflow_id: String,
     /// `MICROSERVICE_ID`.
@@ -180,7 +217,9 @@ impl AppConfig {
         let ingress_topic = reader.required_string("INGRESS_TOPIC_NAME");
         let ingress_subscription = reader.required_string("INGRESS_SUBSCRIPTION_NAME");
 
-        let stored_procedure = reader.string_or("DB_STORED_PROCEDURE", "dbo.prQueueMessage");
+        let procedure_type = read_procedure_type(&mut reader);
+        let stored_procedure =
+            reader.string_or("DB_STORED_PROCEDURE", procedure_type.default_procedure());
         if let Err(reason) = validate_procedure(&stored_procedure) {
             reader.conflict(reason);
         }
@@ -254,6 +293,8 @@ impl AppConfig {
             ingress_subscription,
             ingress_session_id: reader.optional_string("INGRESS_SESSION_ID"),
             db,
+            procedure_type,
+            source_system: reader.string_or("SOURCE_SYSTEM", "328"),
             workflow_id: reader.string_or("WORKFLOW_ID", "risp-to-wrrs"),
             microservice_id: reader.string_or("MICROSERVICE_ID", "wrrs_stmsg_dbsender"),
             health_board: reader.string_or("HEALTH_BOARD", "SHARED"),
@@ -272,6 +313,26 @@ impl AppConfig {
         };
 
         reader.finish_with(config)
+    }
+}
+
+/// `DB_PROCEDURE_TYPE`, case-insensitive; absent or blank is `queue_message`.
+///
+/// Upstream treats **anything** that is not `queue_id_update` as
+/// `queue_message`, so a typo silently runs the wrong procedure with the
+/// wrong parameters and fails at the first message. Here it is a startup
+/// failure (`spec/10-senders.md` §7.8).
+fn read_procedure_type(reader: &mut Reader) -> ProcedureType {
+    let Some(raw) = reader.raw("DB_PROCEDURE_TYPE").map(str::to_string) else {
+        return ProcedureType::QueueMessage;
+    };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "" | "queue_message" => ProcedureType::QueueMessage,
+        "queue_id_update" => ProcedureType::QueueIdUpdate,
+        _ => {
+            reader.invalid("DB_PROCEDURE_TYPE", "queue_message or queue_id_update", raw);
+            ProcedureType::QueueMessage
+        }
     }
 }
 
@@ -316,6 +377,47 @@ mod tests {
         let mut pairs = valid();
         pairs.extend_from_slice(extra);
         AppConfig::from_pairs(pairs)
+    }
+
+    #[test]
+    fn the_procedure_type_picks_the_default_procedure() {
+        // spec/10-senders.md §7.8 (upstream test_app_config).
+        let message = with(&[]).unwrap();
+        assert_eq!(message.procedure_type, ProcedureType::QueueMessage);
+        assert_eq!(message.db.stored_procedure, "dbo.prQueueMessage");
+        assert_eq!(message.source_system, "328");
+
+        // `valid()` names a procedure explicitly, which would win; leave it out.
+        let mut pairs: Vec<_> = valid()
+            .into_iter()
+            .filter(|(name, _)| *name != "DB_STORED_PROCEDURE")
+            .collect();
+        pairs.extend([
+            ("DB_PROCEDURE_TYPE", " Queue_Id_Update "),
+            ("SOURCE_SYSTEM", "349"),
+        ]);
+        let update = AppConfig::from_pairs(pairs).unwrap();
+        assert_eq!(update.procedure_type, ProcedureType::QueueIdUpdate);
+        assert_eq!(update.db.stored_procedure, "dbo.prQueueIdUpdate");
+        assert_eq!(update.source_system, "349");
+
+        // An explicit procedure still wins.
+        let named = with(&[
+            ("DB_PROCEDURE_TYPE", "queue_id_update"),
+            ("DB_STORED_PROCEDURE", "dbo.other"),
+        ])
+        .unwrap();
+        assert_eq!(named.db.stored_procedure, "dbo.other");
+    }
+
+    #[test]
+    fn an_unknown_procedure_type_is_a_startup_failure_not_the_default() {
+        let error = with(&[("DB_PROCEDURE_TYPE", "queue_id_updat")]).unwrap_err();
+        assert!(error.to_string().contains("DB_PROCEDURE_TYPE"), "{error}");
+        assert_eq!(
+            with(&[("DB_PROCEDURE_TYPE", "  ")]).unwrap().procedure_type,
+            ProcedureType::QueueMessage
+        );
     }
 
     #[test]

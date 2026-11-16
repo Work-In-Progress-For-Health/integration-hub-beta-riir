@@ -17,6 +17,10 @@ path = "src/lib.rs"
 name = "db-sender"
 path = "src/main.rs"
 
+[features]
+# Tests that need a SQL Server (`podman compose -f local/docker-compose.yml up -d sqledge`).
+sqlserver = []
+
 [dependencies]
 ihb-bus.workspace = true
 ihb-config.workspace = true

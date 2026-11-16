@@ -22,16 +22,20 @@
 //! | [`msh`] | MSH-only extraction for logging (`§7.5`) |
 //! | [`sanitize`] | redacting echoed values (`§7.4`) |
 //! | [`db`] | the connection, the call and failure classes (`§7.3`) |
+//! | [`ids`] | reading `PID-3` and `MRG-1` identifiers (`§7.8`) |
+//! | [`idupdate`] | choosing the parameters of `dbo.prQueueIdUpdate` (`§7.8`) |
 //! | [`processor`] | one message, start to disposition (`§7.2`) |
 //! | [`main_loop`] | assembling and running the service |
 
 pub mod config;
 pub mod db;
+pub mod ids;
+pub mod idupdate;
 pub mod main_loop;
 pub mod msh;
 pub mod processor;
 pub mod sanitize;
 
-pub use config::AppConfig;
+pub use config::{AppConfig, ProcedureType};
 pub use db::{DatabaseError, FailureKind, ProcedureRunner};
 pub use processor::{Disposition, process_batch, process_one};

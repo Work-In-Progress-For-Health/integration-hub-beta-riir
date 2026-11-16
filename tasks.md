@@ -867,7 +867,7 @@ and gate-checked except where noted.
   [`spec/11`](spec/11-mock-receivers.md) §3.10
 - [ ] **Upstream, 3–13 Nov, not yet ported:**
   `mock_db_receiver` (`#446`), the PROMS referral
-  mapping (`#423`, `#435`, `#437`–`#440`); `#455` and `#457` not yet read.
+  mapping (`#423`, `#435`, `#437`–`#440`); `#455` partly (the `db-sender` handler is ported; the LIMS routing is not); `#457` not yet read.
 - [x] Lookup service auth and trial switch —
   [`spec/20`](spec/20-lookup-service.md) §2.7–§2.9, §12
 - [x] PIMS reference-data enrichment and topic flow —

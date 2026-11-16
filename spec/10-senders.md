@@ -357,11 +357,13 @@ message type, never the MSH text.**
 | `INGRESS_TOPIC_NAME`, `INGRESS_SUBSCRIPTION_NAME` | — | **Required** |
 | `INGRESS_SESSION_ID` | *(unset)* | Session; unset is a plain subscription receiver |
 | `DB_SERVER`, `DB_PORT`, `DB_NAME` | `localhost`, `1433`, `DRS` | |
-| `DB_STORED_PROCEDURE` | `dbo.prQueueMessage` | One to three `.`-separated identifiers (`[A-Za-z0-9_@#$]`). Anything else is a startup failure: the name is spliced into `EXEC` |
+| `DB_STORED_PROCEDURE` | `dbo.prQueueMessage`, or `dbo.prQueueIdUpdate` when `DB_PROCEDURE_TYPE=queue_id_update` | One to three `.`-separated identifiers (`[A-Za-z0-9_@#$]`). Anything else is a startup failure: the name is spliced into `EXEC` |
 | `DB_USERNAME`, `DB_PASSWORD` | `sa`/`MSSQL_SA_PASSWORD` fallback | Both or neither |
 | `DB_ENCRYPT`, `DB_TRUST_SERVER_CERTIFICATE` | `Yes`, `No` | `Yes`/`No` only |
 | `DB_CONNECTION_TIMEOUT`, `DB_COMMAND_TIMEOUT` | `30`, `60` | Seconds, positive |
 | `MANAGED_IDENTITY_CLIENT_ID` | *(unset)* | |
+| `DB_PROCEDURE_TYPE` | `queue_message` | `queue_message` or `queue_id_update` (§7.8), case-insensitive. **Anything else is a startup failure**; upstream treats it as `queue_message`, so a typo runs the wrong procedure and fails at the first message |
+| `SOURCE_SYSTEM` | `328` | The authority an `A31` is taken to come from when neither the `SourceSystem` property nor `MSH-3.1` says (§7.8) |
 | `DEFAULT_IS_PRIORITY` | `0` | Non-zero sets `@IsPriority` |
 | `MAX_BATCH_SIZE` | `10` | |
 | `WORKFLOW_ID`, `MICROSERVICE_ID` | `risp-to-wrrs`, `wrrs_stmsg_dbsender` | |
@@ -373,6 +375,63 @@ to SQL, so `DB_ENCRYPT=Yes` (the default) is a **startup failure** naming
 username and password) is likewise a startup failure until it is
 implemented. The connection is lazy and long-lived (§5.1).
 
+§7.8 **Queue ID Update** (`DB_PROCEDURE_TYPE=queue_id_update`; upstream
+`#455`, `handlers/queue_idupd_handler.py`). The same service, a second
+procedure: instead of passing the message whole, it reads patient identifiers
+out of an `A31` or `A40` and calls `dbo.prQueueIdUpdate` with six
+parameters. The first deployment is LIMS → WRRS (`wrrs_idupd_dbsender`).
+Implemented by `ids.rs` (reading), `idupdate.rs` (choosing the parameters) and
+`SqlRunner::execute_id_update`.
+
+| Trigger | `@Provider…` | `@Old…` | `@New…` |
+| --- | --- | --- | --- |
+| `A31` | the `PID-3` identifier whose authority is the **source system**, and that authority | `NULL`, `NULL` | the `PID-3` identifier with authority `NHS`, and `NHS` |
+| `A40` | `NULL`, and the old authority | `MRG-1`'s identifier and authority | the `PID-3` identifier of the **same authority as `MRG-1`**, and that authority |
+| any other | dead-letter `UnsupportedTriggerEvent` | | |
+
+The **source system** of an `A31` is, in order: the Service Bus
+`source_system` or `SourceSystem` property (trimmed, non-blank), `MSH-3.1`,
+`SOURCE_SYSTEM`. The trigger is `MSH-9.2` (else `MSH-9.1`), read from ER7 or
+HL7 v2 XML.
+
+A `CX` is read in two layouts, because the estate produces both: standard
+`ID^^^AUTH^TYPE` (authority is component 4) and compacted `ID^AUTH` or
+`ID^AUTH^TYPE` (component 2). Only the first sub-component of an authority is
+used (`NHS&x&y` is `NHS`); authorities compare case-insensitively; `PID-3` and
+`MRG-1` are searched repetition by repetition, in order.
+
+Dead letters, decided **before any database call**, each logged as
+`MESSAGE_FAILED` (`Message rejected for {proc}: {reason} - {description}`):
+
+| Reason | When | Description |
+| --- | --- | --- |
+| `UnsupportedTriggerEvent` | not `A31`/`A40` | `Trigger event {t} is not supported for Queue ID Update` |
+| `MissingOldIdentifier` | `A40`, no `MRG-1` id | `Missing old identifier` |
+| `MissingOldAssigningAuthority` | `A40`, no `MRG-1` authority | `Missing old assigning authority` |
+| `MissingNewIdentifier` | `A40`, no `PID-3` id of that authority | `Missing new identifier` |
+| `MissingLimsIdentifier` | `A31`, no id of the source system | `Missing identifier with authority {source}` |
+| `MissingNhsIdentifier` | `A31`, no `NHS` id | `Missing NHS identifier` |
+| `IdentifierTooLong` | §7.8.1 | `The {field} is longer than {n} characters` |
+
+**No description contains an identifier**: it names the authority or the
+field, never the value (§7.5). A database failure is classified as §7.3 says,
+unchanged.
+
+§7.8.1 **A value wider than its column is refused.** The procedure's
+parameters are `varchar(20)` (identifiers) and `varchar(10)` (authorities),
+and **SQL Server does not reject a longer string: it truncates it silently
+and the `INSERT` succeeds.** For a patient identifier that stores a different
+identifier. Found by `tests/against_sql_server.rs` (which pins the server
+behaviour); upstream has the same hole, since `pyodbc` binds the same way.
+`plan` therefore returns `IdentifierTooLong` for any value over its column,
+and the runner is never given one.
+
+§7.8.2 **Deviations from upstream.** (a) An unknown `DB_PROCEDURE_TYPE` is a
+startup failure (§7.6). (b) XML that does not parse yields no identifiers, so
+the message dead-letters as missing one; upstream falls back to regular
+expressions over the broken text. The producers here (`rest-server`,
+`hl7-soap-server`) emit ER7. (c) §7.8.1.
+
 §7.7 Tests: the Python's configuration, MSH-extractor and sanitiser cases;
 the application cases against a fake procedure runner (success calls once
 with the exact body; fatal dead-letters with the sanitised description and a
@@ -381,7 +440,10 @@ abandons; a body that is not UTF-8 dead-letters without a call; patient
 data absent from every dead-letter description). The Python's "a failing
 `MESSAGE_PROCESSED` still completes" case has no counterpart: the event
 logger cannot fail here, and step 7 follows the commit; and §7.3's classification table.
-**Not run here:** a test against a real SQL Server, for want of one.
+**Run against SQL Edge**, behind the `sqlserver` feature
+(`tests/against_sql_server.rs`): both procedures, the `NULL`s of §7.8, a fatal
+refusal followed by a reconnect, and §7.8.1's truncation. The first of these
+was the first time either path had met a real server.
 
 ---
 
