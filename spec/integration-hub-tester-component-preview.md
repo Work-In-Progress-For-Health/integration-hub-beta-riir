@@ -126,10 +126,11 @@ Rust implements `Rows` directly).
 
 `Proms::transform_payload`, pretty-printed (two-space indent, UTF-8 not
 escaped). Summary: `ok: N entries: Type, Type, ...` from each entry's
-`resourceType`. **Not ported:** the Python's four `TEMP` samples
-(`SURGERY-PERF`, `SURGERY-DN`, `PREOP-VIS`, `PREOP-AR`). The Rust
-transformer routes only the six codes of `16` §2.4.1, so those samples would
-fail; they come with `8a7f6f3` in `docs/upstream-sync-2026-10.md`.
+`resourceType`. The four `TEMP` samples are ported (`SURGERY-PERF`, `SURGERY-DN`,
+`PREOP-VIS`, `PREOP-AR`; upstream `8a7f6f3`), named as upstream names them,
+with a `TEMP` suffix. Like upstream's, their field values are placeholders
+pending real WPAS payloads; the NHS numbers are replaced from the test range
+(§5.1). The table has ten samples.
 
 ### §4.6 `hl7-server`
 

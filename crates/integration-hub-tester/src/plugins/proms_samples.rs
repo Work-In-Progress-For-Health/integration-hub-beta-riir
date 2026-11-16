@@ -181,3 +181,101 @@ pub(super) const PREREAD: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
   <consultant_code>TESTD</consultant_code>
   <clinicianName>Tester, Dana</clinicianName>
 </PromsEventRequest>"#;
+
+// --- TEMP: placeholder samples for the additional WPAS PROMS event scenarios
+// (upstream `8a7f6f3`). No real WPAS payloads exist for these codes yet; the
+// field values are dummy, copied from upstream's tester until WPAS supplies
+// real ones.
+
+pub(super) const SURGERY_PERF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<PromsEventRequest>
+  <system_id>149</system_id>
+  <hbCode>X98</hbCode>
+  <eventCode>SURGERY-PERF</eventCode>
+  <eventDate>2024-07-21</eventDate>
+  <eventPathway>ORTHO</eventPathway>
+  <pathway>7A22867981</pathway>
+  <nhsNumber>9990000077</nhsNumber>
+  <crn>CV0044318</crn>
+  <patientFirstname>Ifor</patientFirstname>
+  <patientSurname>Rees</patientSurname>
+  <gender>M</gender>
+  <dob>1968-02-11</dob>
+  <postCode>CF10 1EP</postCode>
+  <referrer_location>UNIVERSITY HOSPITAL OF WALES, HEATH PARK, CARDIFF, CF14 4XW</referrer_location>
+  <referrer_postcode>CF14 4XW</referrer_postcode>
+  <dhaCode>7A4</dhaCode>
+  <consultant_code>JONMG</consultant_code>
+  <clinicianName>Morgan, James</clinicianName>
+  <appointmentDate>2024-07-21</appointmentDate>
+  <appointmentTime>10:00</appointmentTime>
+</PromsEventRequest>"#;
+
+pub(super) const SURGERY_DN: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<PromsEventRequest>
+  <system_id>149</system_id>
+  <hbCode>X98</hbCode>
+  <eventCode>SURGERY-DN</eventCode>
+  <eventDate>2024-07-23</eventDate>
+  <pathway>7A22867982</pathway>
+  <activityNotekey>ANK-7A22867982</activityNotekey>
+  <nhsNumber>9990000085</nhsNumber>
+  <crn>CV0044326</crn>
+  <patientFirstname>Ifor</patientFirstname>
+  <patientSurname>Rees</patientSurname>
+  <gender>M</gender>
+  <dob>1968-02-11</dob>
+  <postCode>CF10 1EP</postCode>
+  <referrer_location>UNIVERSITY HOSPITAL OF WALES, HEATH PARK, CARDIFF, CF14 4XW</referrer_location>
+  <referrer_postcode>CF14 4XW</referrer_postcode>
+  <dhaCode>7A4</dhaCode>
+  <consultant_code>JONMG</consultant_code>
+  <clinicianName>Morgan, James</clinicianName>
+</PromsEventRequest>"#;
+
+pub(super) const PREOP_VIS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<PromsEventRequest>
+  <system_id>149</system_id>
+  <hbCode>X98</hbCode>
+  <eventCode>PREOP-VIS</eventCode>
+  <eventDate>2024-08-20</eventDate>
+  <pathway>7A22867984</pathway>
+  <activityNotekey>ANK-7A22867984</activityNotekey>
+  <nhsNumber>9990000093</nhsNumber>
+  <crn>SB0011318</crn>
+  <patientFirstname>Bethan</patientFirstname>
+  <patientSurname>Lewis</patientSurname>
+  <gender>F</gender>
+  <dob>1972-05-09</dob>
+  <postCode>SA2 8QA</postCode>
+  <referrer_location>MORRISTON HOSPITAL, SWANSEA, SA6 6NL</referrer_location>
+  <referrer_postcode>SA6 6NL</referrer_postcode>
+  <dhaCode>7A2</dhaCode>
+  <consultant_code>DAVIP</consultant_code>
+  <clinicianName>Price, David</clinicianName>
+</PromsEventRequest>"#;
+
+pub(super) const PREOP_AR: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<PromsEventRequest>
+  <system_id>149</system_id>
+  <hbCode>X98</hbCode>
+  <eventCode>PREOP-AR</eventCode>
+  <eventDate>2024-08-10</eventDate>
+  <pathway>7A22867983</pathway>
+  <activityNotekey>ANK-7A22867983</activityNotekey>
+  <nhsNumber>9990000107</nhsNumber>
+  <crn>SB0011300</crn>
+  <patientFirstname>Gareth</patientFirstname>
+  <patientSurname>Jones</patientSurname>
+  <gender>M</gender>
+  <dob>1960-01-20</dob>
+  <postCode>SA2 8QA</postCode>
+  <referrer_location>MORRISTON HOSPITAL, SWANSEA, SA6 6NL</referrer_location>
+  <referrer_postcode>SA6 6NL</referrer_postcode>
+  <dhaCode>7A2</dhaCode>
+  <consultant_code>DAVIP</consultant_code>
+  <clinicianName>Price, David</clinicianName>
+  <main_specialty_name>Trauma and Orthopaedics</main_specialty_name>
+  <appointmentDate>2024-08-22</appointmentDate>
+  <appointmentTime>16:30</appointmentTime>
+</PromsEventRequest>"#;

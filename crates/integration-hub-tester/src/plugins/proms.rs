@@ -25,7 +25,8 @@ impl Plugin for PromsPlugin {
     }
     fn description(&self) -> &'static str {
         "WPAS XML (PromsEventRequest) -> Promptly FHIR R4B message Bundle. Supported eventCodes: \
-         REFERRAL, SURGERY, PREOP, INPATIENT, CANCELLED, PREREAD"
+         REFERRAL, SURGERY(-PROC/-PERF/-DN), PREOP(-AS/-VIS/-AR), INPATIENT, CANCELLED, PREREAD \
+         (TEMP: suffixed codes are placeholders)"
     }
     fn input_label(&self) -> &'static str {
         "WPAS PromsEventRequest XML"
@@ -37,7 +38,14 @@ impl Plugin for PromsPlugin {
         &[
             ("REFERRAL (Referral)", samples::REFERRAL),
             ("SURGERY (Procedure)", samples::SURGERY),
+            (
+                "SURGERY-PERF (Surgery Performed) TEMP",
+                samples::SURGERY_PERF,
+            ),
+            ("SURGERY-DN (Discharge) TEMP", samples::SURGERY_DN),
             ("PREOP (Appointment)", samples::PREOP),
+            ("PREOP-VIS (Outpatient Visit) TEMP", samples::PREOP_VIS),
+            ("PREOP-AR (Appointment Reschedule) TEMP", samples::PREOP_AR),
             ("INPATIENT (Encounter)", samples::INPATIENT),
             ("CANCELLED (Appointment Cancelled)", samples::CANCELLED),
             ("PREREAD (Pre-admission)", samples::PREREAD),

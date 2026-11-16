@@ -191,9 +191,10 @@ fn core_reference_leaves_an_out_of_scope_trigger_alone() {
 
 #[test]
 fn proms_builds_a_bundle_for_every_supported_event_code() {
-    // §4.5 — one sample per code of spec/16-proms-transformer.md §2.4.1.
+    // §4.5 — one sample per routed code of spec/16-proms-transformer.md §2.4.1,
+    // the four `TEMP` placeholders included.
     let plugin = PromsPlugin;
-    assert_eq!(plugin.samples().len(), 6);
+    assert_eq!(plugin.samples().len(), 10);
     for (name, text) in plugin.samples() {
         let out = plugin.run(text).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert!(
