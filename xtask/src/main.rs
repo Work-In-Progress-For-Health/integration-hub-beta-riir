@@ -33,6 +33,7 @@ use std::process::{Command, ExitCode};
 
 mod gate;
 mod hooks;
+mod schedule;
 mod stack;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -159,6 +160,7 @@ fn main() -> ExitCode {
         Some("fmt-check") => fmt(true),
         Some("msrv") => msrv(),
         Some("install-hooks") => hooks::run(),
+        Some("schedule") => schedule::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         Some("stack") => stack::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         Some("gate") => gate::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         Some("verify-pipelines") => verify_pipelines(),

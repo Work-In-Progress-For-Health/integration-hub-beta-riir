@@ -859,9 +859,12 @@ Not started. Independent of the other phases.
   port. Run live (up in 31 s) and tier 2 passed against it. The hosted job
   now calls it. **Not verified:** the `podman-compose` fallback on a machine
   that needs it. [`spec/21`](spec/21-local-ci.md) §6, §6.4
-- [ ] **P10.6** **Scheduled local runs** of tiers 2 and 3 (launchd), one
-  Compose profile at a time, writing the record of P10.4.
-  [`spec/21`](spec/21-local-ci.md) §2.2
+- [x] **P10.6** **Scheduled local runs** of tiers 2 and 3 (launchd), one
+  Compose profile at a time, writing the record of P10.4. `cargo xtask
+  schedule print|install|remove|status|run`; installed on this machine at
+  02:30 daily. Skips a dirty tree, a running job and an already-green commit.
+  **The first nightly log has not been seen yet.**
+  [`spec/21`](spec/21-local-ci.md) §2.2, §10
 - [x] **P10.7** **Trial `cargo-nextest`** (0.9.149): **not adopted.**
   Tier 1 (no emulator): `cargo test --workspace --lib --tests` 61.5 s and
   59.1 s against `cargo nextest run --workspace` 35.7 s and 36.5 s, 1965

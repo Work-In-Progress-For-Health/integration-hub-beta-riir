@@ -195,3 +195,34 @@ calls the task, this is the test that it does.)
 
 §9.2 The record of §3 MUST be tested for: dirty tree refused for posting;
 no secret in the file; a failing tier recorded as failing.
+
+## §10 The nightly run
+
+§10.1 `cargo xtask schedule install` writes a launchd user agent
+(`~/Library/LaunchAgents/com.dhcw.integration-hub-riir.nightly.plist`) that
+runs `cargo xtask schedule run` daily at 02:30 local time, at low priority.
+`print` shows the plist without installing, `status` says whether it is
+loaded, and `remove` unloads and deletes it. Installing is the user's act:
+nothing else in this repository installs it.
+
+§10.2 The plist names the repository and a login shell, and **no secret**.
+The job reads `local/.secrets` itself and passes it only to its child
+processes (`MSSQL_SA_PASSWORD`, §3.2).
+
+§10.3 **The job yields.** It skips, and says why in the log, when the working
+tree is dirty, when another scheduled run holds the lock, or when the commit's
+record already shows tiers 2 and 3 passed on a clean tree. It never posts a
+commit status and never pushes.
+
+§10.4 **Order.** Tier 2 (`stack`) after `stack up`, then `stack down`, then
+tier 3 (`flows`), so the Service Bus emulator's connection quota is never
+shared between them (§2.2). The stack is brought down even when tier 2 failed.
+Each tier writes its entry into the commit's record (§3), so a failure is
+visible in `target/gate/<sha>.json`, and the job exits non-zero.
+
+§10.5 The log is `~/Library/Logs/integration-hub-riir-nightly.log`.
+
+§10.6 Tests: the plist's content and escaping, the secrets parser, the
+skip decision, and the lock's stale-holder handling. **The launchd
+registration and the 02:30 firing are not unit-testable; they were checked by
+`status` after install and by the first nightly log.**
