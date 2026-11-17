@@ -411,6 +411,12 @@ two crates whose emulator tests touch one queue can still collide however
 carefully each is written internally. Where that is possible, the queues
 are chosen so no two binaries share one.
 
+§9.2.1f **`cargo-nextest` is not a drop-in runner for the emulator tier.**
+It runs each test in its own process, so a lock inside a test binary
+(§9.2.1c) serialises nothing; `clearing_really_empties_a_queue` failed on
+the first run. Tier 1 is about 40% faster under it (61 s to 36 s), so it
+may be used there, but the emulator tier stays on `cargo test`.
+
 §9.2.1a The same rule applies to **process-global** state inside one test
 binary. A test whose premise is "nothing is configured" must establish that
 premise, not inherit it: `ihb_telemetry::otel::configure` installs a global

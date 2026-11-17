@@ -859,10 +859,17 @@ Not started. Independent of the other phases.
 - [ ] **P10.6** **Scheduled local runs** of tiers 2 and 3 (launchd), one
   Compose profile at a time, writing the record of P10.4.
   [`spec/21`](spec/21-local-ci.md) §2.2
-- [ ] **P10.7** **Trial `cargo-nextest`** (installed): time the workspace
-  against `cargo test`, confirm the emulator tests keep their isolation
-  (`spec/17` §9.2.1), and keep `cargo test --doc` since nextest does not run
-  doctests. Adopt only on a measured, repeatable gain.
+- [x] **P10.7** **Trial `cargo-nextest`** (0.9.149): **not adopted.**
+  Tier 1 (no emulator): `cargo test --workspace --lib --tests` 61.5 s and
+  59.1 s against `cargo nextest run --workspace` 35.7 s and 36.5 s, 1965
+  tests all passing, so a repeatable gain of about 40%. The emulator tier is
+  the problem: nextest runs every test in its own process, so the in-binary
+  locks that `spec/17` §9.2.1 relies on no longer serialise anything, and
+  `buswatch::emulator clearing_really_empties_a_queue` failed on the first
+  nextest run (the same suite passes under `cargo test`). Making the
+  emulator tests safe under nextest means per-test queues or nextest test
+  groups, which is a separate piece of work for a 25 s saving. Revisit if
+  tier 1 becomes the bottleneck; `cargo test --doc` would stay either way.
 - [ ] **P10.8** **Decide, with the Hub team, whether Azure DevOps minutes
   are the real cost** on the private estate. If so, a self-hosted ADO agent
   (free tier: one self-hosted parallel job, unlimited minutes), after
