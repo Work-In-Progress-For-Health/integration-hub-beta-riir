@@ -251,7 +251,7 @@ stage. It does **not** run the `docker-build-push` stages: those need a
 container engine inside the agent, i.e. a socket mounted into a container that
 runs pipeline code. That is a privilege decision for the Hub team.
 
-§11.4 **Status.** The image builds on `arm64` and refuses to start without its
+§11.4 **Status: deferred (2026-11-17).** The image builds on `arm64` and refuses to start without its
 three variables, and the agent binary runs (`--version`). **It has not been
 registered against an organisation and has run no job**, because that needs a
 PAT and a pool that only the Hub team can issue.

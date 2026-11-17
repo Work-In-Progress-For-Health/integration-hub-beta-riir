@@ -876,15 +876,14 @@ Not started. Independent of the other phases.
   emulator tests safe under nextest means per-test queues or nextest test
   groups, which is a separate piece of work for a 25 s saving. Revisit if
   tier 1 becomes the bottleneck; `cargo test --doc` would stay either way.
-- [ ] **P10.8** **Decide, with the Hub team, whether Azure DevOps minutes
-  are the real cost** on the private estate. If so, a self-hosted ADO agent
-  (free tier: one self-hosted parallel job, unlimited minutes), after
-  confirming the organisation's plan and whether the estate runs `amd64`
-  while this machine is `arm64`. **Partly done:** the ephemeral agent image
-  is built (`docker/ado-agent/`, `spec/21` §11), but it is not registered, has
-  run no job, and cannot run the Docker build stages. Still to decide with the
-  Hub team: the pipelines already use a managed pool
-  (`UKS-DHCW-IH-DEV-ADOManagedPool`), so check whether minutes are the cost.
+- [ ] **P10.8** **DEFERRED (2026-11-17, by the user): the self-hosted Azure
+  DevOps agent.** The ephemeral image exists (`docker/ado-agent/`, `spec/21`
+  §11) and is not registered, has run no job, and cannot run the Docker build
+  stages. Picked up again only if the Hub team says ADO minutes are a real
+  cost: the pipelines already use a managed pool
+  (`UKS-DHCW-IH-DEV-ADOManagedPool`), the plan and the `amd64`/`arm64` match
+  are unchecked, and `spec/21` §5.3 says not to rely on self-hosted minutes
+  staying free.
 
 ---
 
