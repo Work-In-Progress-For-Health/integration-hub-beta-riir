@@ -811,11 +811,17 @@ Specified in [`spec/21`](spec/21-local-ci.md); the evidence and the options
 weighed are in [`docs/local-ci-assessment.md`](docs/local-ci-assessment.md).
 Not started. Independent of the other phases.
 
-- [ ] **P10.1** **Repair the hosted `emulator-backed` job.** It fails at
-  `Start the local stack` in every run inspected: `podman compose` finds no
-  Podman socket on `ubuntu-latest`. Start the user socket or use the
-  runner's Docker Compose, add a `timeout-minutes` (one run hung for six
-  hours), and **prove it with a hosted run** before ticking.
+- [x] **P10.1** **Repair the hosted `emulator-backed` job.** Done, proved by
+  hosted run `43984183339` (commit `c8a956b`+`deny.toml`, all three jobs
+  green on the re-run). The causes, in the order found: Podman socket (fixed
+  earlier); a second consumer, `message-store-service`, competing for the
+  queues (Compose now starts only `sb-emulator sqledge`); teardown failing
+  with "rootless netns: kill network process: permission denied" after every
+  test passed (teardown is now best-effort). **Known flake:** the first
+  attempt of that run failed three `buswatch` emulator tests on
+  `Connect ... Timeout elapsed` and passed on re-run with no change; if it
+  recurs, give the test connection a retry. Also fixed on the way: a new
+  advisory (`RUSTSEC-2026-0441`, `pin-utils`) failing `cargo deny`.
   [`spec/21`](spec/21-local-ci.md) §8.1, §8.3
 - [ ] **P10.2** **`cargo xtask gate`**, tiered (`fast`, `gate`, `stack`,
   `flows`), `--keep-going`, tier 1 independent of Podman, MSRV only when
