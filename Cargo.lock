@@ -890,9 +890,9 @@ checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
 name = "er7"
-version = "0.1.4"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f169b89aea3f22e809b8979b91c5bf1352ef42ee19a7345d45588046be48762e"
+checksum = "c2495dc0a44dfebe8595757972ab221be465f7aeab0d31f2c82102af612816d5"
 
 [[package]]
 name = "errno"
@@ -1306,18 +1306,18 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hl7-2"
-version = "0.2.7"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "280d7e7c612396c4264e86cc412e5283f381c56413ceab5a74e78b86c0303ea5"
+checksum = "3b0c277cb019f4fa4bf07162d1effe1ff3e5085c5a8737294a51decf235719e0"
 dependencies = [
  "er7",
 ]
 
 [[package]]
 name = "hl7-2-from-er7-into-xml"
-version = "0.6.4"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f24fe89900863f5582ed4bacb9d400d6df5e14c2c4961a47b7daf3bf68dfec56"
+checksum = "f53a59bedb4fd88f44b6a2fa454f6b89df7654976911a65a95d6d6ad9e54cf30"
 dependencies = [
  "er7",
  "hl7-2",
@@ -1325,9 +1325,9 @@ dependencies = [
 
 [[package]]
 name = "hl7-2-from-xml-into-er7"
-version = "0.6.4"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37e59fca4593d5848a33382a331927309d18b43f72a7126964994fa4f1b0f1bd"
+checksum = "bccd28f7d03e57238715e8007fbe68b51569c428ca8b0b2e7027e7342e7d2688"
 dependencies = [
  "er7",
  "hl7-2-xml-lite-helper",
@@ -1335,18 +1335,18 @@ dependencies = [
 
 [[package]]
 name = "hl7-2-from-xsd-into-json-dictionary"
-version = "0.1.5"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "660cd7e6fed8a3cc5b927cbc3c74ba7336d6bd2289cecaae63d8e00e126c8153"
+checksum = "3f5963aa20abd8f207352b7deb3f0f0b03b9d318d5ad0d52ba06e91e3a42c1e1"
 dependencies = [
  "hl7-2-xml-lite-helper",
 ]
 
 [[package]]
 name = "hl7-2-mllp"
-version = "0.1.7"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c86de2c1d4f51291b92fab4aa34859c18f073a3572a3e4ca9e47b7951bb8b5c"
+checksum = "29a67bcab60fe0b395107c92da803eb4e19fb25f3a3be635c2f96e93da7a9ffa"
 dependencies = [
  "hl7-2",
 ]
@@ -1359,18 +1359,18 @@ checksum = "e186f9c34ca2b219c7ed6fc889f039a9860f7ace10d663e9c192cb8e0f9e916f"
 
 [[package]]
 name = "hl7-2-soap"
-version = "0.1.5"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a76b12d60fa7a29ea5443fdcd0318ddaec77bdca0e1d18fca24f69acb9fc1afe"
+checksum = "d402875c9ee7c3cd09ba4bcb8b1324bc07fa9aa0796df63a5a22550a15a15c70"
 dependencies = [
  "hl7-2-xml-lite-helper",
 ]
 
 [[package]]
 name = "hl7-2-xml-lite-helper"
-version = "0.1.5"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e196d76507770bd0c699d4ed431852ae07c905ced927373cf71e4f1baf546098"
+checksum = "a91eef4088fad4cbb1336bfbf1f5463ad77efccd314d9fe77939fe85028ba575"
 
 [[package]]
 name = "hl7-chemo-transformer"
@@ -4552,9 +4552,9 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xsd-schema"
-version = "0.1.5"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65447ea986ea0848f7e5a29ea4aa5ce85d7ac571a1e02469baea9afaaa4b7683"
+checksum = "19a2b106222e47fe47c5ddce19ae2ad8b1aeb107dadb58e1037b2a70c0270613"
 dependencies = [
  "ahash",
  "base64 0.22.1",
