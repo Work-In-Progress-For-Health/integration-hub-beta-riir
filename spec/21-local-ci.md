@@ -136,7 +136,8 @@ the hook pretending to be a barrier it is not.
 
 ## §8 Defects this specification records
 
-§8.1 **The hosted `emulator-backed` job has never passed.** In every run
+§8.1 **The hosted `emulator-backed` job had never passed** (fixed 2026-11-17,
+hosted run 43984183339; see `tasks.md` P10.1). In every run
 inspected on 2026-11-04 (five of the repository's ten) it fails at
 `Start the local stack`: `podman compose` finds no Podman socket on the
 runner (`unix:///run/user/1001/podman/podman.sock`). The emulator tier has
@@ -162,9 +163,13 @@ Every other suite ran green on the runner in that run: the `ihb-bus`
 emulator tests (70 s), the SQL Server tests and the rest. That is the first
 time the emulator tier has had a hosted record.
 
-§8.2 The three gate lists of §1.2 disagree. Closed when `gate.yml` and
-`AGENTS.md` call `cargo xtask gate` and `17-testing-and-quality.md` §1 points
-here.
+§8.2 The three gate lists of §1.2 disagree. **Closed** (2026-11-17):
+`gate.yml` calls `cargo xtask gate`, `AGENTS.md` and
+`17-testing-and-quality.md` §1 point here, and `xtask`'s
+`the_workflow_only_calls_the_task` fails if the workflow lists a step again.
+The hosted `emulator` job still does its own environment setup (disk,
+Podman's API service, the secret, the stack and its waits); that is the
+runner, not the gate, and §6's helpers are not yet written (P10.x).
 
 §8.3 One hosted `gate` run (24 August 2026) ran for 21,616 seconds before it
 was cancelled. A hosted job SHOULD have a `timeout-minutes` well under the

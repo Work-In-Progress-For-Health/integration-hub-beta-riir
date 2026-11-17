@@ -39,19 +39,24 @@ clinical message silently — the one failure this system must not produce.
 
 ## The gate
 
-Every change passes all of this
-([`spec/17-testing-and-quality.md`](spec/17-testing-and-quality.md) §1):
+Every change passes `cargo xtask gate`
+([`spec/21-local-ci.md`](spec/21-local-ci.md) §1, the one definition; the
+steps are in `xtask/src/gate.rs`, and the hosted workflow calls the same
+task):
 
 ```sh
-cargo xtask fmt-check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-cargo xtask verify-dictionaries
-cargo xtask verify-pipelines
-cargo deny check
-cargo +"$(cargo xtask msrv)" check --workspace --all-targets
+cargo xtask gate                  # tier 1: fmt-check, clippy, test, doc,
+                                  # verify-dictionaries, verify-pipelines, deny;
+                                  # the MSRV build too when Cargo.toml,
+                                  # Cargo.lock or rust-toolchain.toml changed
+cargo xtask gate --keep-going     # report every failing step, not the first
+cargo xtask gate --tier fast      # formatting only, seconds
+cargo xtask gate --tier stack     # needs the bus stack running
+cargo xtask gate --tier flows     # Compose profiles, one at a time
 ```
+
+Run the **exact** command, not a filtered copy of it: a clippy run whose
+output was cut with `head` once hid an error the hosted gate then found.
 
 `cargo xtask fmt-check`, **not** `cargo fmt --all`. See
 [`agents/conventions.md`](agents/conventions.md).

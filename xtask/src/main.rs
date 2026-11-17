@@ -25,10 +25,13 @@
 //! wrong. `cargo fmt -p <member>`, one member at a time, does not.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+
+mod gate;
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -152,6 +155,7 @@ fn main() -> ExitCode {
         Some("fmt") => fmt(false),
         Some("fmt-check") => fmt(true),
         Some("msrv") => msrv(),
+        Some("gate") => gate::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         Some("verify-pipelines") => verify_pipelines(),
         Some(other) => {
             eprintln!("xtask: unknown task {other:?}");
@@ -177,7 +181,7 @@ fn main() -> ExitCode {
 fn usage() {
     eprintln!(
         "usage: cargo xtask \
-         <build-dictionaries|verify-dictionaries|fmt|fmt-check|msrv|verify-pipelines>"
+         <build-dictionaries|verify-dictionaries|fmt|fmt-check|msrv|verify-pipelines|gate>"
     );
 }
 
@@ -336,6 +340,12 @@ fn verify_pipelines() -> Result<()> {
 /// copy, and a second copy is a thing that goes stale the first time the
 /// floor moves.
 fn msrv() -> Result<()> {
+    println!("{}", declared_msrv()?);
+    Ok(())
+}
+
+/// The `rust-version` declared under `[workspace.package]`.
+fn declared_msrv() -> Result<String> {
     let root = workspace_root()?.join("Cargo.toml");
     let text =
         std::fs::read_to_string(&root).with_context(|| format!("reading {}", root.display()))?;
@@ -348,7 +358,7 @@ fn msrv() -> Result<()> {
         // plain scan is honest here.
         .find_map(|line| line.strip_prefix("rust-version"))
         .and_then(|rest| rest.trim_start().strip_prefix('='))
-        .map(|rest| rest.trim().trim_matches('"'))
+        .map(|rest| rest.trim().trim_matches('"').to_string())
         .filter(|version| !version.is_empty())
         .ok_or_else(|| {
             anyhow!(
@@ -359,8 +369,7 @@ fn msrv() -> Result<()> {
             )
         })?;
 
-    println!("{version}");
-    Ok(())
+    Ok(version)
 }
 
 /// Format, or check the formatting of, every member of this workspace.

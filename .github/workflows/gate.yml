@@ -54,34 +54,13 @@ jobs:
         with:
           tool: cargo-deny
 
-      # §1's order, cheapest first, so a failure arrives as fast as it can.
-      #
-      # §1.0: `cargo xtask fmt-check`, NOT `cargo fmt --all` — `--all`
-      # reaches beyond this workspace. The task also fails if its member
-      # list has drifted from the manifest's, which is how a newly added
-      # crate gets noticed.
-      - run: cargo xtask fmt-check
-
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-
-      # Without `--all-features`: the emulator and sqlserver features need
-      # services this job does not have. They run in `emulator` below.
-      - run: cargo test --workspace
-
-      - name: Documentation
-        run: cargo doc --workspace --no-deps
-        env:
-          RUSTDOCFLAGS: -D warnings
-
-      # The XSD-derived dictionaries are generated and committed; this
-      # fails if the committed form no longer matches the source.
-      - run: cargo xtask verify-dictionaries
-
-      # spec/18 §6.6 — a new service without a build definition never
-      # ships, and nothing else notices.
-      - run: cargo xtask verify-pipelines
-
-      - run: cargo deny check
+      # spec/21 §1 — the steps are not listed here. `cargo xtask gate` is
+      # the one definition (fmt-check, clippy, test, doc, the two verifies
+      # and cargo deny, cheapest first), and a test in `xtask` fails if this
+      # file ever lists a step of its own again. The MSRV build is the
+      # separate job below, so tier 1 skips it here (no toolchain for it is
+      # installed in this job, and it says so).
+      - run: cargo xtask gate
 
   msrv:
     name: MSRV (spec/17 §1.4)
@@ -110,7 +89,7 @@ jobs:
       # `check`, not `test`: §1.4 is about the floor compiling. Running the
       # suite twice buys nothing and doubles the wall clock.
       - name: Build against the declared MSRV
-        run: cargo +${{ steps.msrv.outputs.version }} check --workspace --all-targets
+        run: cargo xtask gate --tier msrv
 
   emulator:
     name: emulator-backed (spec/17 §9.2)
@@ -213,18 +192,13 @@ jobs:
       # each other's `compose down` and fail (the first run that got this far
       # failed exactly so). They are one-at-a-time by design (CLAUDE.md;
       # spec/21 §2.2) and belong to tier 3, not to this parallel tier.
+      # Tier 2 (spec/21 §2.1): the emulator-backed tests, then the
+      # in-process chain. What each one runs, and why `ihb-e2e` is excluded
+      # from the parallel one, is in `xtask/src/gate.rs`.
       - name: Emulator-backed tests
         env:
           MSSQL_SA_PASSWORD: ${{ secrets.MSSQL_SA_PASSWORD || 'CI-only-Passw0rd!' }}
-        run: cargo test --workspace --all-features --exclude ihb-e2e
-
-      # The in-process chain: real services in this process against the
-      # emulator, no Compose profile of its own, so it is safe beside the
-      # stack above.
-      - name: In-process end-to-end chain
-        env:
-          MSSQL_SA_PASSWORD: ${{ secrets.MSSQL_SA_PASSWORD || 'CI-only-Passw0rd!' }}
-        run: cargo test -p ihb-e2e --features emulator
+        run: cargo xtask gate --tier stack
 
       - name: Stack logs on failure
         if: failure()

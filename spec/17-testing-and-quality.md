@@ -7,18 +7,26 @@ Python did.
 
 ## §1 The gate
 
-A change is acceptable when all of the following are clean. CI runs them in
-this order, because the cheap ones fail fastest.
+A change is acceptable when `cargo xtask gate` is clean
+([`21-local-ci.md`](21-local-ci.md) §1: the task is the one definition of
+the gate, and `gate.yml` only calls it). It runs, cheapest first:
 
 ```sh
 cargo xtask fmt-check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test  --workspace --all-features
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test  --workspace
 cargo doc   --workspace --no-deps           # RUSTDOCFLAGS="-D warnings"
 cargo xtask verify-dictionaries
+cargo xtask verify-pipelines
 cargo deny check                            # licences and advisories
-cargo +$(cargo xtask msrv) check --workspace --all-targets   # §1.4
+cargo +$(cargo xtask msrv) check --workspace --all-targets   # §1.4, when a
+                                            # toolchain input changed
 ```
+
+The list is shown for reading only; the task is what runs, and a test in
+`xtask` fails if the workflow lists a step of its own. Clippy and the tests
+run **without** `--all-features`: the `emulator` and `sqlserver` features
+need services and are tier 2 (`21-local-ci.md` §2.1, §9.2 below).
 
 §1.4 **The MSRV is checked, not intended.** The workspace declares
 `rust-version` under `[workspace.package]`, and the gate builds against that

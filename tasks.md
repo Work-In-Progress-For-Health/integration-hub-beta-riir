@@ -823,11 +823,16 @@ Not started. Independent of the other phases.
   recurs, give the test connection a retry. Also fixed on the way: a new
   advisory (`RUSTSEC-2026-0441`, `pin-utils`) failing `cargo deny`.
   [`spec/21`](spec/21-local-ci.md) §8.1, §8.3
-- [ ] **P10.2** **`cargo xtask gate`**, tiered (`fast`, `gate`, `stack`,
-  `flows`), `--keep-going`, tier 1 independent of Podman, MSRV only when
-  the toolchain inputs changed. Make `gate.yml` and `AGENTS.md` call it and
-  point `spec/17` §1 at it; add the test that the workflow only calls it.
-  [`spec/21`](spec/21-local-ci.md) §1, §2, §8.2, §9.1
+- [x] **P10.2** **`cargo xtask gate`**, tiered (`fast`, `gate`, `stack`,
+  `flows`, plus `msrv`), `--keep-going`; tier 1 needs no Podman; the MSRV
+  build runs only when a toolchain input changed since the merge base, and a
+  skip is printed, never silent. `gate.yml`, `AGENTS.md` and `spec/17` §1
+  call or point at it; `the_workflow_only_calls_the_task` is the §9.1 test.
+  Not done here: the tier-2/3 stack helpers (start Compose, detect
+  `podman compose` vs `podman-compose`, wait on a connection; §6), which
+  stay in the workflow's setup and the developer's hands. Tier 2 refuses up
+  front, with the command to run, when the broker or database is not
+  listening. [`spec/21`](spec/21-local-ci.md) §1, §2, §8.2, §9.1
 - [ ] **P10.3** **`cargo xtask install-hooks`**: `core.hooksPath` to a
   committed `.githooks/`; pre-commit tier 0, pre-push tier 1; never touches
   global git config. [`spec/21`](spec/21-local-ci.md) §7
