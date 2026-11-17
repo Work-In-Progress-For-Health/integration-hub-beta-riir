@@ -125,8 +125,7 @@ pub fn parse_response(body: &str) -> Result<Vec<Row>, Error> {
         let faultstring = fault
             .children()
             .find(|n| n.is_element() && n.tag_name().name() == "faultstring")
-            .map(text)
-            .unwrap_or_default();
+            .map_or_default(text);
         return Err(Error::Fault(faultstring));
     }
 
@@ -145,9 +144,8 @@ pub fn parse_response(body: &str) -> Result<Vec<Row>, Error> {
         }) {
             let name = child(pair, MES_NS, "Attribute")
                 .and_then(|attribute| child(attribute, MES_NS, "Name"))
-                .map(text)
-                .unwrap_or_default();
-            let value = child(pair, MES_NS, "Value").map(text).unwrap_or_default();
+                .map_or_default(text);
+            let value = child(pair, MES_NS, "Value").map_or_default(text);
             if !name.is_empty() {
                 values.insert(name, value);
             }

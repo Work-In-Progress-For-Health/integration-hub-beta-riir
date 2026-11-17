@@ -279,9 +279,9 @@ mod tests {
         let mut body = format!("{msh}<ns0:EVN><ns0:EVN.1>{trigger}</ns0:EVN.1></ns0:EVN>");
         if structure == "ADT_A39" {
             for (ids, merged) in patients {
-                let mrg = merged
-                    .map(|v| format!("<ns0:MRG>{}</ns0:MRG>", cx("MRG.1", v, "328", "PI")))
-                    .unwrap_or_default();
+                let mrg = merged.map_or_default(|v| {
+                    format!("<ns0:MRG>{}</ns0:MRG>", cx("MRG.1", v, "328", "PI"))
+                });
                 body += &format!(
                     "<ns0:ADT_A39.PATIENT>{}{mrg}</ns0:ADT_A39.PATIENT>",
                     pid(ids)

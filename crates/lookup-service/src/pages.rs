@@ -779,8 +779,7 @@ async fn upload_page<S: TableStore>(
     let table = parse_pairs(query.as_deref().unwrap_or_default())
         .into_iter()
         .find(|(name, _)| name == "table")
-        .map(|(_, value)| value)
-        .unwrap_or_default();
+        .map_or_default(|(_, value)| value);
     let fields = HashMap::from([("table".to_owned(), table)]);
     Ok(render(
         &upload_page_for(
@@ -892,16 +891,13 @@ fn definition_from_form(
 ) -> Result<Map<String, Value>, LookupError> {
     let table = fields.get("table").map(|t| t.trim().to_owned());
     let split = |name: &str| -> Vec<String> {
-        fields
-            .get(name)
-            .map(|raw| {
-                raw.split(',')
-                    .map(str::trim)
-                    .filter(|c| !c.is_empty())
-                    .map(str::to_owned)
-                    .collect()
-            })
-            .unwrap_or_default()
+        fields.get(name).map_or_default(|raw| {
+            raw.split(',')
+                .map(str::trim)
+                .filter(|c| !c.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
     };
     let key_columns = split("key_columns");
     let case = fields.get("key_case").map_or("preserve", String::as_str);

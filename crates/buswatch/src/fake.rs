@@ -98,8 +98,7 @@ impl FakeReader {
     pub fn depth(&self, queue: &str) -> usize {
         self.queues
             .lock()
-            .map(|queues| queues.get(queue).map_or(0, |q| q.messages.len()))
-            .unwrap_or_default()
+            .map_or_default(|queues| queues.get(queue).map_or(0, |q| q.messages.len()))
     }
 
     /// Mutate one queue's entry, creating it if absent.

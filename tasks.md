@@ -56,7 +56,7 @@ technical bets the whole plan rests on. **Both have now passed.**
   job of §9.2, plus the MSRV job of §1.4 — `cargo +$(cargo xtask msrv) check
   --workspace --all-targets`, with the toolchain read from the declaration
   rather than pinned a second time in the workflow.
-  [`spec/rust-msrv-n-minus-3.md`](spec/rust-msrv-n-minus-3.md)
+  [`spec/rust-msrv-n-minus-2.md`](spec/rust-msrv-n-minus-2.md)
   `.github/workflows/gate.yml`, three jobs: `gate`, `msrv`, `emulator`.
   Writing it found two things the local habit had hidden — `dashboard` was
   never added to `xtask`'s member list (so §1.0's drift check had never
@@ -79,7 +79,7 @@ technical bets the whole plan rests on. **Both have now passed.**
   `[workspace.package]`, inherited by every member, printed by `cargo xtask
   msrv`, and **verified** — the workspace builds clean on 1.95 with
   `--all-targets --all-features`.
-  [`spec/rust-msrv-n-minus-3.md`](spec/rust-msrv-n-minus-3.md)
+  [`spec/rust-msrv-n-minus-2.md`](spec/rust-msrv-n-minus-2.md)
   `.github/workflows/gate.yml`, three jobs: `gate`, `msrv`, `emulator`.
   Writing it found two things the local habit had hidden — `dashboard` was
   never added to `xtask`'s member list (so §1.0's drift check had never

@@ -110,16 +110,13 @@ pub fn escape(value: &str) -> String {
 pub fn standalone(source: &str, node: Node<'_, '_>) -> String {
     let slice = source.get(node.range()).unwrap_or_default();
 
-    let inherited: Vec<(Option<&str>, &str)> = node
-        .parent_element()
-        .map(|parent| {
-            parent
-                .namespaces()
-                .filter(|ns| ns.name() != Some("xml"))
-                .map(|ns| (ns.name(), ns.uri()))
-                .collect()
-        })
-        .unwrap_or_default();
+    let inherited: Vec<(Option<&str>, &str)> = node.parent_element().map_or_default(|parent| {
+        parent
+            .namespaces()
+            .filter(|ns| ns.name() != Some("xml"))
+            .map(|ns| (ns.name(), ns.uri()))
+            .collect()
+    });
 
     // Declared on the element itself (or overriding an ancestor's): it
     // already carries those in its own opening tag.

@@ -231,7 +231,7 @@ mod tests {
             commit,
             entry(Tier::Gate, clean, &outcomes, Duration::from_secs(5)),
             "rustc 1.100.0",
-            "1.95",
+            "1.98",
         )
     }
 
@@ -305,9 +305,9 @@ mod tests {
             &[outcome("emulator", Some(true))],
             Duration::from_secs(9),
         );
-        let both = merge(Some(first.clone()), "abc", stack.clone(), "rustc", "1.95");
+        let both = merge(Some(first.clone()), "abc", stack.clone(), "rustc", "1.98");
         assert!(both["tiers"]["gate"].is_object() && both["tiers"]["stack"].is_object());
-        let next = merge(Some(first), "def", stack, "rustc", "1.95");
+        let next = merge(Some(first), "def", stack, "rustc", "1.98");
         assert!(
             next["tiers"]["gate"].is_null(),
             "another commit's tiers do not carry over"
@@ -330,7 +330,7 @@ mod tests {
             "abc",
             entry(Tier::Stack, true, &outcomes, Duration::from_secs(1)),
             "rustc 1.100.0",
-            "1.95",
+            "1.98",
         );
         let text = serde_json::to_string(&doc).unwrap();
         assert!(

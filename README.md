@@ -39,9 +39,9 @@ cargo test  --workspace
 ```
 
 Development happens on current stable. The **minimum supported Rust version
-is current stable minus three** — 1.95 at the time of writing — recorded in
+is current stable minus two** — 1.98 at the time of writing — recorded in
 the root `Cargo.toml` and checked by the gate. See
-[`spec/rust-msrv-n-minus-3.md`](spec/rust-msrv-n-minus-3.md).
+[`spec/rust-msrv-n-minus-2.md`](spec/rust-msrv-n-minus-2.md).
 
 ```sh
 rustup toolchain install $(cargo xtask msrv)

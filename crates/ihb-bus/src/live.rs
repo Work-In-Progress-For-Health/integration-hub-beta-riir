@@ -949,7 +949,7 @@ fn to_incoming(message: &ServiceBusReceivedMessage, token: Token) -> Incoming {
     }
 
     Incoming {
-        body: message.body().map(<[u8]>::to_vec).unwrap_or_default(),
+        body: message.body().map_or_default(<[u8]>::to_vec),
         message_id: message.message_id().map(|id| id.to_string()),
         session_id: message.session_id().map(str::to_string),
         properties,
@@ -974,7 +974,7 @@ fn to_peeked(message: &ServiceBusPeekedMessage) -> Peeked {
     }
 
     Peeked {
-        body: message.body().map(<[u8]>::to_vec).unwrap_or_default(),
+        body: message.body().map_or_default(<[u8]>::to_vec),
         sequence: message.sequence_number(),
         enqueued_at: message
             .enqueued_time()

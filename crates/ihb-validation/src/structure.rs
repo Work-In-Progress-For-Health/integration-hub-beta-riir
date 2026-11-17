@@ -168,8 +168,7 @@ fn read(message: &Message, path: &str) -> String {
         .get(path)
         .ok()
         .flatten()
-        .map(|value| value.trim().to_string())
-        .unwrap_or_default()
+        .map_or_default(|value| value.trim().to_string())
 }
 
 #[cfg(test)]

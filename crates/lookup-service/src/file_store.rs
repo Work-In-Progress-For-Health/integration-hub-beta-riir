@@ -84,12 +84,10 @@ impl SeedSource {
         for path in paths {
             let file_name = path
                 .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
+                .map_or_default(|n| n.to_string_lossy().into_owned());
             let stem = path
                 .file_stem()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
+                .map_or_default(|n| n.to_string_lossy().into_owned());
             let size = std::fs::metadata(&path).map_or(0, |m| m.len());
             if size > MAX_SEED_FILE_BYTES {
                 return Err(SeedDataError(format!(
@@ -335,11 +333,7 @@ impl TableStore for FileTableStore {
     }
 
     async fn load_rows(&self, table: &str) -> Result<Vec<Row>, LookupError> {
-        Ok(self
-            .tables
-            .get(table)
-            .map(|t| t.rows.clone())
-            .unwrap_or_default())
+        Ok(self.tables.get(table).map_or_default(|t| t.rows.clone()))
     }
 
     async fn query_rows(

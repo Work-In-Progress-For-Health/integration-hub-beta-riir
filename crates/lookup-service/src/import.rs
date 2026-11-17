@@ -129,8 +129,7 @@ pub fn read_csv(text: &str, max_errors: usize) -> (CsvDocument, Vec<RecordError>
     let mut records = parse_records(text).into_iter();
     let header: Vec<String> = records
         .next()
-        .map(|(_, cells)| cells.iter().map(|c| c.trim().to_owned()).collect())
-        .unwrap_or_default();
+        .map_or_default(|(_, cells)| cells.iter().map(|c| c.trim().to_owned()).collect());
 
     if header.iter().all(String::is_empty) {
         return (

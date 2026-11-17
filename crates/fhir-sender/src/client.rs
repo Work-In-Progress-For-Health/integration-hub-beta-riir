@@ -426,7 +426,7 @@ fn summarise_outcome(response: &Response) -> String {
     let parts: Vec<String> = body
         .get("issue")
         .and_then(serde_json::Value::as_array)
-        .map(|issues| {
+        .map_or_default(|issues| {
             issues
                 .iter()
                 .filter(|issue| issue.is_object())
@@ -448,8 +448,7 @@ fn summarise_outcome(response: &Response) -> String {
                         .to_string()
                 })
                 .collect()
-        })
-        .unwrap_or_default();
+        });
 
     let summary = if parts.is_empty() {
         body.to_string()

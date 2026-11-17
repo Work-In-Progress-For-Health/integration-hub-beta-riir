@@ -33,7 +33,7 @@ need services and are tier 2 (`21-local-ci.md` §2.1, §9.2 below).
 exact toolchain — because a dependency bump or a newly stabilised API raises
 the real floor silently, and an MSRV nobody compiles against is a comment.
 `cargo xtask msrv` prints the declared version so the check cannot drift from
-the declaration. See [`rust-msrv-n-minus-3.md`](rust-msrv-n-minus-3.md).
+the declaration. See [`rust-msrv-n-minus-2.md`](rust-msrv-n-minus-2.md).
 
 §1.5 Two things sit outside the gate, deliberately, because neither gives a
 yes-or-no answer on a single run:
@@ -264,8 +264,8 @@ its own flags on a nightly toolchain, and making it a member would make
 `cargo build` at the root need nightly too.
 
 §10.1.1 It is therefore **exempt from the MSRV**
-([`rust-msrv-n-minus-3.md`](rust-msrv-n-minus-3.md)): it already requires
-nightly, so a floor three releases behind stable means nothing to it. The
+([`rust-msrv-n-minus-2.md`](rust-msrv-n-minus-2.md)): it already requires
+nightly, so a floor two releases behind stable means nothing to it. The
 MSRV job of §1.4 does not build it. Nothing ships from `fuzz/`, so no
 consumer is affected.
 

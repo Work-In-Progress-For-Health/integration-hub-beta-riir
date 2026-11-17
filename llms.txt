@@ -1,0 +1,41 @@
+# Integration Hub Beta (Rust)
+
+> A Rust rewrite of the NHS Wales Integration Hub: it receives HL7 v2
+> clinical messages from hospital systems, validates and transforms them, and
+> delivers them to the Master Patient Index and other destinations. Work in
+> progress; the Python it replaces is what runs today. `spec/` is the source
+> of truth; code and tests follow it.
+
+Rules that apply to every task: patient data never reaches a log; a message
+is never acknowledged unless it was delivered; the gate is `cargo xtask gate`
+(never `cargo fmt --all`: use `cargo xtask fmt`).
+
+## Start here
+
+- [AGENTS.md](AGENTS.md): the rules every task follows, and the gate
+- [CLAUDE.md](CLAUDE.md): what is specific to working here interactively
+- [index.md](index.md): every document and when to read it
+- [spec/index.md](spec/index.md): the normative specification
+- [tasks.md](tasks.md): what is done and what is next
+- [plan.md](plan.md): the plan, and the deliberate deviations from the Python
+
+## Specification
+
+- [spec/01-architecture.md](spec/01-architecture.md): the services and the flows between them
+- [spec/02-configuration.md](spec/02-configuration.md): every environment variable
+- [spec/03-message-bus.md](spec/03-message-bus.md): Service Bus behaviour
+- [spec/10-senders.md](spec/10-senders.md): the HL7, SOAP, database and FHIR senders
+- [spec/17-testing-and-quality.md](spec/17-testing-and-quality.md): the gate and lints
+- [spec/21-local-ci.md](spec/21-local-ci.md): tiers, the evidence record, hooks
+- [spec/rust-msrv-n-minus-2.md](spec/rust-msrv-n-minus-2.md): the minimum supported Rust version
+
+## Operations
+
+- [docs/upstream-sync-2026-10.md](docs/upstream-sync-2026-10.md): what has been ported from the Python, and what has not
+- [docs/cutover-runbook.md](docs/cutover-runbook.md): cutover from the Python
+- [agents/workspace.md](agents/workspace.md): the crate map
+
+## Optional
+
+- [docs/local-ci-assessment.md](docs/local-ci-assessment.md): the evidence behind local CI
+- [docs/deviation-sign-off.md](docs/deviation-sign-off.md): deviations awaiting sign-off

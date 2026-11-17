@@ -403,7 +403,7 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Processor<E, S, M> {
                     let wrrs = self.settings.wrrs.as_ref();
                     (
                         self.wrrs.as_ref(),
-                        wrrs.map(|w| w.session_id.clone()).unwrap_or_default(),
+                        wrrs.map_or_default(|w| w.session_id.clone()),
                         wrrs.map_or_else(
                             || self.identity.workflow_id.clone(),
                             |w| w.workflow_id.clone(),

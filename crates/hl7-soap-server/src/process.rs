@@ -276,11 +276,7 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Processor<E, S, M> {
             correlation_id: self.mint.correlation_id(),
             received_at: self.mint.received_at(),
             source_system: ihb_validation::parse(&er7)
-                .map(|message| ihb_fields::read(&message, "MSH-3"))
-                // The message validated a moment ago, so this cannot fail;
-                // an empty `SourceSystem` is what `spec/03-message-bus.md`
-                // §4 specifies for "not present" in any case.
-                .unwrap_or_default(),
+                .map_or_default(|message| ihb_fields::read(&message, "MSH-3")),
             workflow_id: self.config.workflow_id.clone(),
         };
 

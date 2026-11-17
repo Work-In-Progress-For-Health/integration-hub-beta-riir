@@ -164,9 +164,8 @@ fn validate_hl7_standard(
     // element claims: `xml_to_er7` converts whatever segments sit under the
     // root regardless of the root's own name, so a payload could declare an
     // allowed root while its MSH-9 names a disallowed structure.
-    let actual = structure::resolve(&message, None)
-        .map(|resolved| resolved.structure_id)
-        .unwrap_or_default();
+    let actual =
+        structure::resolve(&message, None).map_or_default(|resolved| resolved.structure_id);
     if actual != declared {
         let actual = if actual.is_empty() {
             "unknown"

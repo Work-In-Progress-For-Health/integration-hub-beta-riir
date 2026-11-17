@@ -52,10 +52,10 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-# The MSRV is current stable minus three. See
-# spec/rust-msrv-n-minus-3.md; it is recorded here and nowhere else,
+# The MSRV is current stable minus two. See
+# spec/rust-msrv-n-minus-2.md; it is recorded here and nowhere else,
 # and every member inherits it with `rust-version.workspace = true`.
-rust-version = "1.95"
+rust-version = "1.98"
 license = "MIT"
 repository = "https://github.com/DHCW-Digital-Health-and-Care-Wales/Integration-Hub-Beta"
 authors = ["DHCW Integration Hub team"]

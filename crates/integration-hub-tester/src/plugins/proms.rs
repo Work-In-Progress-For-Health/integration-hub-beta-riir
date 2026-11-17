@@ -64,13 +64,12 @@ impl Plugin for PromsPlugin {
         let kinds: Vec<&str> = value
             .get("entry")
             .and_then(serde_json::Value::as_array)
-            .map(|entries| {
+            .map_or_default(|entries| {
                 entries
                     .iter()
                     .filter_map(|entry| entry.pointer("/resource/resourceType")?.as_str())
                     .collect()
-            })
-            .unwrap_or_default();
+            });
         Ok(Outcome::accepted(
             pretty,
             format!("{} entries: {}", kinds.len(), kinds.join(", ")),

@@ -1,0 +1,116 @@
+{
+  "name": "Integration Hub Beta (Rust)",
+  "summary": "A Rust rewrite of the NHS Wales Integration Hub: it receives HL7 v2 clinical messages from hospital systems, validates and transforms them, and delivers them to the Master Patient Index and other destinations. Work in progress; the Python it replaces is what runs today. `spec/` is the source of truth; code and tests follow it.",
+  "sections": [
+    {
+      "name": "Start here",
+      "links": [
+        {
+          "title": "AGENTS.md",
+          "url": "AGENTS.md",
+          "note": "the rules every task follows, and the gate"
+        },
+        {
+          "title": "CLAUDE.md",
+          "url": "CLAUDE.md",
+          "note": "what is specific to working here interactively"
+        },
+        {
+          "title": "index.md",
+          "url": "index.md",
+          "note": "every document and when to read it"
+        },
+        {
+          "title": "spec/index.md",
+          "url": "spec/index.md",
+          "note": "the normative specification"
+        },
+        {
+          "title": "tasks.md",
+          "url": "tasks.md",
+          "note": "what is done and what is next"
+        },
+        {
+          "title": "plan.md",
+          "url": "plan.md",
+          "note": "the plan, and the deliberate deviations from the Python"
+        }
+      ]
+    },
+    {
+      "name": "Specification",
+      "links": [
+        {
+          "title": "spec/01-architecture.md",
+          "url": "spec/01-architecture.md",
+          "note": "the services and the flows between them"
+        },
+        {
+          "title": "spec/02-configuration.md",
+          "url": "spec/02-configuration.md",
+          "note": "every environment variable"
+        },
+        {
+          "title": "spec/03-message-bus.md",
+          "url": "spec/03-message-bus.md",
+          "note": "Service Bus behaviour"
+        },
+        {
+          "title": "spec/10-senders.md",
+          "url": "spec/10-senders.md",
+          "note": "the HL7, SOAP, database and FHIR senders"
+        },
+        {
+          "title": "spec/17-testing-and-quality.md",
+          "url": "spec/17-testing-and-quality.md",
+          "note": "the gate and lints"
+        },
+        {
+          "title": "spec/21-local-ci.md",
+          "url": "spec/21-local-ci.md",
+          "note": "tiers, the evidence record, hooks"
+        },
+        {
+          "title": "spec/rust-msrv-n-minus-2.md",
+          "url": "spec/rust-msrv-n-minus-2.md",
+          "note": "the minimum supported Rust version"
+        }
+      ]
+    },
+    {
+      "name": "Operations",
+      "links": [
+        {
+          "title": "docs/upstream-sync-2026-10.md",
+          "url": "docs/upstream-sync-2026-10.md",
+          "note": "what has been ported from the Python, and what has not"
+        },
+        {
+          "title": "docs/cutover-runbook.md",
+          "url": "docs/cutover-runbook.md",
+          "note": "cutover from the Python"
+        },
+        {
+          "title": "agents/workspace.md",
+          "url": "agents/workspace.md",
+          "note": "the crate map"
+        }
+      ]
+    },
+    {
+      "name": "Optional",
+      "links": [
+        {
+          "title": "docs/local-ci-assessment.md",
+          "url": "docs/local-ci-assessment.md",
+          "note": "the evidence behind local CI"
+        },
+        {
+          "title": "docs/deviation-sign-off.md",
+          "url": "docs/deviation-sign-off.md",
+          "note": "deviations awaiting sign-off"
+        }
+      ]
+    }
+  ]
+}

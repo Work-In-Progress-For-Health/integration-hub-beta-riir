@@ -50,7 +50,7 @@ specification is right and the code is a defect.
 | [`17-testing-and-quality.md`](spec/17-testing-and-quality.md) | Tests, fixtures, lints, the gate |
 | [`18-deployment.md`](spec/18-deployment.md) | Containers, Compose, pipelines, cutover |
 | [`21-local-ci.md`](spec/21-local-ci.md) | Local CI: one gate command, tiers, hooks, evidence |
-| [`rust-msrv-n-minus-3.md`](spec/rust-msrv-n-minus-3.md) | The minimum supported Rust version |
+| [`rust-msrv-n-minus-2.md`](spec/rust-msrv-n-minus-2.md) | The minimum supported Rust version |
 | [`agents-directory-name-is-lowercase.md`](spec/agents-directory-name-is-lowercase.md) | What an agents directory is called |
 
 ---

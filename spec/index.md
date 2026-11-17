@@ -38,7 +38,7 @@ directory says what "built" means.
 | [`21-local-ci.md`](21-local-ci.md) | Running the gate locally: one `cargo xtask gate`, tiers, hooks, the evidence of a run, what must stay hosted |
 | [`integration-hub-tester-component-preview.md`](integration-hub-tester-component-preview.md) | Integration Hub tester: developer tool that previews one component's logic on one message, no Service Bus |
 | [`ultra7-test-message-sender.md`](ultra7-test-message-sender.md) | Ultra7: developer tool that sends synthetic test messages (MLLP, REST, SOAP) |
-| [`rust-msrv-n-minus-3.md`](rust-msrv-n-minus-3.md) | The minimum supported Rust version, and why |
+| [`rust-msrv-n-minus-2.md`](rust-msrv-n-minus-2.md) | The minimum supported Rust version, and why |
 | [`agents-directory-name-is-lowercase.md`](agents-directory-name-is-lowercase.md) | What an AI agents directory is called |
 
 ---

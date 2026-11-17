@@ -264,9 +264,8 @@ where
     events.log_message_received(body, Some(RECEIVED_AUDIT_TEXT), correlation_id);
 
     // ---- Step 5: the control id. -----------------------------------
-    let message_id = ihb_validation::parse(body)
-        .map(|parsed| ihb_fields::read(&parsed, "MSH-10"))
-        .unwrap_or_default();
+    let message_id =
+        ihb_validation::parse(body).map_or_default(|parsed| ihb_fields::read(&parsed, "MSH-10"));
     tracing::info!(message_id = %message_id, "sending message");
 
     // ---- Step 6: the store, first attempt only (§2.2). --------------

@@ -465,7 +465,7 @@ mod tests {
     use super::*;
 
     fn names(tier: Tier) -> Vec<&'static str> {
-        steps(tier, "1.95").iter().map(|step| step.name).collect()
+        steps(tier, "1.98").iter().map(|step| step.name).collect()
     }
 
     #[test]
@@ -494,14 +494,14 @@ mod tests {
     fn formatting_is_the_xtask_task_never_cargo_fmt_all() {
         // spec/21 §1.4, spec/17 §1.0.
         for tier in [Tier::Fast, Tier::Gate] {
-            let first = &steps(tier, "1.95")[0];
+            let first = &steps(tier, "1.98")[0];
             assert_eq!(first.command, ["cargo", "xtask", "fmt-check"]);
         }
     }
 
     #[test]
     fn the_doc_step_denies_warnings_for_itself_only() {
-        let plan = steps(Tier::Gate, "1.95");
+        let plan = steps(Tier::Gate, "1.98");
         let doc = plan.iter().find(|step| step.name == "doc").unwrap();
         assert_eq!(doc.env, [("RUSTDOCFLAGS", "-D warnings".to_string())]);
         assert!(
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn tier_one_needs_neither_podman_nor_the_stack() {
         // spec/21 §2.3: no all-features build, no compose feature.
-        for step in steps(Tier::Gate, "1.95") {
+        for step in steps(Tier::Gate, "1.98") {
             let joined = step.command.join(" ");
             assert!(!joined.contains("all-features"), "{joined}");
             assert!(!joined.contains("compose"), "{joined}");
@@ -525,14 +525,14 @@ mod tests {
     #[test]
     fn the_flows_run_one_at_a_time() {
         // spec/21 §2.2.
-        let flows = &steps(Tier::Flows, "1.95")[0];
+        let flows = &steps(Tier::Flows, "1.98")[0];
         assert!(flows.command.contains(&"--test-threads=1".to_string()));
     }
 
     #[test]
     fn the_stack_tier_leaves_the_compose_tests_to_tier_three() {
         // spec/21 §8.1.1.
-        let joined: Vec<String> = steps(Tier::Stack, "1.95")
+        let joined: Vec<String> = steps(Tier::Stack, "1.98")
             .iter()
             .map(|step| step.command.join(" "))
             .collect();
@@ -542,10 +542,10 @@ mod tests {
 
     #[test]
     fn the_msrv_step_names_the_declared_toolchain() {
-        let step = &steps(Tier::Msrv, "1.95")[0];
+        let step = &steps(Tier::Msrv, "1.98")[0];
         assert_eq!(
             step.command,
-            ["cargo", "+1.95", "check", "--workspace", "--all-targets"]
+            ["cargo", "+1.98", "check", "--workspace", "--all-targets"]
         );
     }
 

@@ -190,8 +190,7 @@ impl TableStore for MemoryTableStore {
         Ok(self
             .lock()
             .get(table)
-            .map(|held| held.rows.clone())
-            .unwrap_or_default())
+            .map_or_default(|held| held.rows.clone()))
     }
 
     async fn query_rows(
@@ -218,8 +217,7 @@ impl TableStore for MemoryTableStore {
         let mut tables = self.lock();
         let previous: HashMap<&Vec<String>, ()> = tables
             .get(&definition.name)
-            .map(|held| held.rows.iter().map(|row| (&row.key, ())).collect())
-            .unwrap_or_default();
+            .map_or_default(|held| held.rows.iter().map(|row| (&row.key, ())).collect());
         let new_keys: std::collections::HashSet<&Vec<String>> =
             rows.iter().map(|row| &row.key).collect();
         let removed = previous

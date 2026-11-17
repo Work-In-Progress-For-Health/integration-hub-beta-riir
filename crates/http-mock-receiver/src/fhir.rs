@@ -189,8 +189,7 @@ impl FhirMock {
 
         let bundle_id = bundle
             .get("id")
-            .map(|id| id.as_str().map_or_else(|| id.to_string(), str::to_string))
-            .unwrap_or_default();
+            .map_or_default(|id| id.as_str().map_or_else(|| id.to_string(), str::to_string));
         let scenario = bundle_id.strip_prefix(SCENARIO_PREFIX).unwrap_or("");
 
         if let Some(failure) = submit_failure(&mut state, &bundle_id, scenario) {

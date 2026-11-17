@@ -176,16 +176,13 @@ impl Plugin for Hl7SenderAckPlugin {
 
         let reply = to_er7(input);
         let verdict = hl7_sender::evaluate(&reply);
-        let control_id = ihb_validation::parse(&reply)
-            .map(|m| ihb_fields::read(&m, "MSH-10"))
-            .unwrap_or_default();
+        let control_id =
+            ihb_validation::parse(&reply).map_or_default(|m| ihb_fields::read(&m, "MSH-10"));
 
         let (label, code, behaviour) = match &verdict {
             Verdict::Accepted { .. } => (
                 "SUCCESS",
-                ihb_validation::parse(&reply)
-                    .map(|m| ihb_fields::read(&m, "MSA-1"))
-                    .unwrap_or_default(),
+                ihb_validation::parse(&reply).map_or_default(|m| ihb_fields::read(&m, "MSA-1")),
                 "Send treated as successful - no retry.",
             ),
             Verdict::Nack { class, code, .. } => (

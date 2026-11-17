@@ -333,7 +333,7 @@ fn verify_pipelines() -> Result<()> {
 
 /// Print the declared minimum supported Rust version.
 ///
-/// Implements `spec/rust-msrv-n-minus-3.md` §1.3.
+/// Implements `spec/rust-msrv-n-minus-2.md` §1.3.
 ///
 /// One line, no newline decoration beyond it, so the gate and the README can
 /// both write `cargo +$(cargo xtask msrv) check`. The point is that the
@@ -365,7 +365,7 @@ fn declared_msrv() -> Result<String> {
         .ok_or_else(|| {
             anyhow!(
                 "no `rust-version` in {}.\n\
-                 spec/rust-msrv-n-minus-3.md §1.3 requires the MSRV to be \
+                 spec/rust-msrv-n-minus-2.md §1.3 requires the MSRV to be \
                  declared under [workspace.package].",
                 root.display()
             )

@@ -247,8 +247,7 @@ fn inline_items(root: Node<'_, '_>, structure_id: &str) -> Vec<Item> {
     }
     xs_children(root, "element")
         .find(|e| e.attribute("name") == Some(structure_id))
-        .map(walk)
-        .unwrap_or_default()
+        .map_or_default(walk)
 }
 
 /// What a successful match produced: the segments arranged as the grammar

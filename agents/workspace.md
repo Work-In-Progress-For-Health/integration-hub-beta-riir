@@ -81,6 +81,6 @@ that is not committed.
 
 ## MSRV
 
-Current stable minus three, declared **once** as `rust-version` under
+Current stable minus two, declared **once** as `rust-version` under
 `[workspace.package]`. `cargo xtask msrv` prints it so nothing else has to
-repeat it. See [`../spec/rust-msrv-n-minus-3.md`](../spec/rust-msrv-n-minus-3.md).
+repeat it. See [`../spec/rust-msrv-n-minus-2.md`](../spec/rust-msrv-n-minus-2.md).
