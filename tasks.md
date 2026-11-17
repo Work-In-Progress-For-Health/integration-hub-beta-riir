@@ -850,10 +850,12 @@ Not started. Independent of the other phases.
   no record. Tests per §9.2 (7 in `xtask/src/gate/record.rs`). **Not run:**
   an actual `gh api` post (it would publish a status on the real
   repository); the refusal path was run live. [`spec/21`](spec/21-local-ci.md) §3
-- [ ] **P10.5** **A container-runtime helper** that detects whether
-  `podman compose` or `podman-compose` works, says which it used, and waits
-  on a real connection rather than a port or a container health state.
-  [`spec/21`](spec/21-local-ci.md) §6
+- [x] **P10.5** **A container-runtime helper**: `cargo xtask stack
+  up|down|status`; detects `podman compose` vs `podman-compose` and says
+  which; waits on a protocol answer (TDS pre-login, AMQP header), never a
+  port. Run live (up in 31 s) and tier 2 passed against it. The hosted job
+  now calls it. **Not verified:** the `podman-compose` fallback on a machine
+  that needs it. [`spec/21`](spec/21-local-ci.md) §6, §6.4
 - [ ] **P10.6** **Scheduled local runs** of tiers 2 and 3 (launchd), one
   Compose profile at a time, writing the record of P10.4.
   [`spec/21`](spec/21-local-ci.md) §2.2

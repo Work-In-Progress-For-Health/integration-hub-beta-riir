@@ -142,56 +142,16 @@ jobs:
           echo "the Podman API socket did not appear"
           exit 1
 
-      # spec/18-deployment.md §5.0 — Podman, not Docker.
-      - name: Start the local stack
-        # Only the broker and the database. A bare `up -d` also starts the
-        # default-profile `message-store-service`, which consumes
-        # `local-inthub-messagestore` and so steals the event the in-process
-        # chain waits for (the run that reached that step timed out on
-        # "the store event" after 361s).
-        run: podman compose -f local/docker-compose.yml up -d sb-emulator sqledge
+      # spec/21 §6 — `cargo xtask stack up` picks a working Compose, starts
+      # only the broker and the database (a bare `up -d` also starts
+      # `message-store-service`, which stole the event the in-process chain
+      # waits for), and waits until each answers its protocol: the AMQP
+      # header from the broker, a TDS pre-login from the database. An open
+      # port is not a broker that answers, and the log line this job used to
+      # grep for is not a connection.
+      - name: Start the local stack and wait for it
+        run: cargo xtask stack up
 
-      # The emulator prints this line when it is ready to accept AMQP.
-      # Polling the log is more reliable than polling the port: the port
-      # opens before the broker will answer.
-      - name: Wait for the Service Bus emulator
-        run: |
-          for _ in $(seq 1 60); do
-            if podman logs ihb-rs-sb-emulator 2>&1 | grep -q 'Successfully Up'; then
-              echo "the emulator is up"
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "the emulator did not start"
-          podman logs ihb-rs-sb-emulator 2>&1 | tail -40
-          exit 1
-
-      - name: Wait for the database
-        run: |
-          for _ in $(seq 1 60); do
-            if podman exec ihb-rs-sqledge bash -c 'exit 0' 2>/dev/null; then
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "the database did not start"
-          podman logs ihb-rs-sqledge 2>&1 | tail -40
-          exit 1
-
-      # §9.2.1 — run in parallel, as `cargo test` runs everything else.
-      # These tests are isolated by construction (a per-test session id, and
-      # a lock on the shared non-session queue), so `--test-threads=1` is
-      # deliberately NOT passed here: it would hide exactly the contention
-      # that rule exists to prevent.
-      #
-      # `ihb-e2e` is excluded here, and run separately below. Its `compose`
-      # feature (switched on by --all-features) makes each test tear down and
-      # bring up a whole Compose profile on the one project, so two of them
-      # in parallel, or one beside the stack this job already started, race
-      # each other's `compose down` and fail (the first run that got this far
-      # failed exactly so). They are one-at-a-time by design (CLAUDE.md;
-      # spec/21 §2.2) and belong to tier 3, not to this parallel tier.
       # Tier 2 (spec/21 §2.1): the emulator-backed tests, then the
       # in-process chain. What each one runs, and why `ihb-e2e` is excluded
       # from the parallel one, is in `xtask/src/gate.rs`.
@@ -206,11 +166,12 @@ jobs:
           podman logs ihb-rs-sb-emulator 2>&1 | tail -60
           podman logs ihb-rs-sqledge 2>&1 | tail -60
 
-      # Best effort. The runner is a throwaway VM, so teardown frees nothing
-      # that matters, and rootless Podman cannot always kill its own network
-      # process when stopping `sqledge` ("rootless netns: kill network
-      # process: permission denied", run 43978474780, after every test had
-      # passed). A teardown error must not turn a green test run red.
+      # Best effort, inside the task (it prints a warning and exits 0). The
+      # runner is a throwaway VM, so teardown frees nothing that matters, and
+      # rootless Podman cannot always kill its own network process when
+      # stopping `sqledge` ("rootless netns: kill network process: permission
+      # denied", run 43978474780, after every test had passed). A teardown
+      # error must not turn a green test run red.
       - name: Stop the local stack
         if: always()
-        run: podman compose -f local/docker-compose.yml down --volumes || echo "::warning::teardown failed; the runner is discarded anyway"
+        run: cargo xtask stack down

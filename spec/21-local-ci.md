@@ -122,6 +122,18 @@ every service then reports unhealthy. A helper that waits on container
 health under `podman-compose` MUST wait on a connection instead (§6.1) or
 the healthcheck MUST be written so it survives the rewrite.
 
+§6.4 `cargo xtask stack up|down|status` is that helper (P10.5). `up` tries
+`podman compose` then `podman-compose`, prints which it used, starts only
+`sb-emulator` and `sqledge`, and waits until the database answers a TDS
+pre-login and the broker echoes the AMQP header (§6.1: a protocol answer,
+never a port or a health state; §6.3 is why not the latter). `down` is best
+effort. Tier 2 refuses to start unless both answer, with the command to run.
+Verified on 2026-11-17: `up` in 31 s on the machine where `podman compose`
+works; tier 2 then passed against it (781 s, including the `buswatch`
+emulator tests that flaked on the hosted runner). **Not verified:** the
+`podman-compose` fallback, because `podman compose` works here (the helper
+and its choice are unit-tested; the machine of §6.2 is not this one).
+
 ## §7 Hooks
 
 §7.1 `cargo xtask install-hooks` MUST set `core.hooksPath` to a committed

@@ -436,20 +436,24 @@ fn report(outcomes: &[Outcome]) {
     }
 }
 
-/// Tier 2 needs the broker and the database, and a password for the latter;
-/// say so up front instead of failing 70 seconds into a test.
+/// Tier 2 needs the broker and the database answering, and a password for
+/// the latter; say so up front instead of failing 70 seconds into a test.
+///
+/// "Answering" is a protocol reply, not an open port
+/// (`spec/21` §6.1; see `stack`).
 fn require_stack() -> Result<()> {
-    use std::net::{SocketAddr, TcpStream};
-    for (what, port) in [("Service Bus emulator", 5672_u16), ("SQL Edge", 1433)] {
-        let address = SocketAddr::from(([127, 0, 0, 1], port));
-        TcpStream::connect_timeout(&address, Duration::from_secs(2)).with_context(|| {
-            format!(
-                "the {what} is not listening on {address}. Start it with: \
-                 podman compose -f local/docker-compose.yml up -d sb-emulator sqledge \
-                 (and wait for it: a port that is open is not a broker that answers, \
+    let (amqp, tds) = crate::stack::both_ready();
+    for (what, ready) in [
+        ("Service Bus emulator (AMQP)", amqp),
+        ("SQL Edge (TDS)", tds),
+    ] {
+        if !ready {
+            bail!(
+                "the {what} is not answering. `cargo xtask stack up` starts both \
+                 and waits until they do (an open port is not a broker that answers, \
                  spec/17 §9.2.1e)"
-            )
-        })?;
+            );
+        }
     }
     if std::env::var_os("MSSQL_SA_PASSWORD").is_none() {
         bail!(
@@ -594,8 +598,9 @@ mod tests {
     /// `spec/21` §9.1 — the workflow does not carry its own list.
     ///
     /// Every `cargo` invocation in `gate.yml` MUST be `cargo xtask gate ...`,
-    /// or `cargo xtask msrv` (which only reads the declared version so the
-    /// msrv job can install it). Anything else is a second list, which is
+    /// `cargo xtask msrv` (which only reads the declared version so the
+    /// msrv job can install it), or `cargo xtask stack` (the container runtime
+    /// helper, `spec/21` §6). Anything else is a second list, which is
     /// the drift `spec/21` §1.2 records.
     #[test]
     fn the_workflow_only_calls_the_task() {
@@ -616,6 +621,7 @@ mod tests {
             if command.starts_with("cargo ")
                 && !command.starts_with("cargo xtask gate")
                 && !command.starts_with("cargo xtask msrv")
+                && !command.starts_with("cargo xtask stack")
             {
                 offenders.push(command.to_string());
             }
