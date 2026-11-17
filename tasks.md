@@ -477,12 +477,12 @@ mocks.
      `AuthMethod::aad_token`. `spec/12` §5.4.1–§5.4.4. **Unit-tested against a
      fake endpoint only: SQL Edge cannot validate an Entra token, so it is
      unproven against Azure SQL until a non-production deployment.**
-  3. [ ] **Found, not fixed:** the dashboard's `HttpsClient` refuses plaintext
+  3. [x] **Fixed, not run in a Container App:** the dashboard's `HttpsClient` refuses plaintext
      URLs (`spec/15` §4.7), but a Container App's `IDENTITY_ENDPOINT` is
      `http://localhost:<port>/msi/token`, so its ambient-credential path
      probably cannot reach it. Not run against a real Container App; check
-     before relying on the dashboard's managed identity, and consider moving
-     it onto `ihb-identity`.
+     before relying on it. The ambient path now goes through `ihb-identity`
+     (`spec/15` §4.6.2a).
 
 ---
 

@@ -279,6 +279,14 @@ and every integration reports unavailable, per §4.2 — it does not fall back
 to IMDS, because a request to a link-local address from a machine that is
 not in Azure hangs until it times out, once per panel per refresh.
 
+§4.6.2a **The identity endpoint is plain HTTP on loopback**
+(`http://localhost:<port>/msi/token`), which §4.7's HTTPS-only client refuses.
+The ambient credential therefore fetches through `ihb-identity`
+(`12-message-store.md` §5.4.3), which accepts loopback and nothing else, and
+keeps its own cache. Found 2026-11-17 by reading, while implementing the same
+credential for SQL: until then the ambient path would have been refused by §4.7
+in a real Container App. Not yet run in one.
+
 §4.6.3 **Tokens are cached until shortly before they expire.** An AAD token
 lasts about an hour and every panel needs one; fetching per request would
 turn one page load into a dozen token requests and hit AAD's own throttle.

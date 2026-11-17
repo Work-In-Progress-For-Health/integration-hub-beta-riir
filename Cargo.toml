@@ -310,6 +310,18 @@ cargo_common_metadata = "allow"
 # duplicate and advisory policy actually lives.
 multiple_crate_versions = "allow"
 
+[profile.dev]
+# Line tables are enough for a backtrace and a debugger's stepping; full
+# variable-level debuginfo roughly doubles `target/` and link time for
+# information a test run never reads.
+debug = "line-tables-only"
+# One `.o` per unit and no `dsym` bundle to assemble on every link (macOS).
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+# Dependencies are never stepped through here.
+debug = false
+
 [profile.release]
 # A panic in a clinical message path should stop the container, not unwind
 # into a half-processed state that acknowledges what it did not deliver.

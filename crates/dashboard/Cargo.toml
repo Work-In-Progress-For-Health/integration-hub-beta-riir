@@ -34,6 +34,7 @@ ihb-config.workspace = true
 ihb-health.workspace = true
 ihb-runtime.workspace = true
 ihb-telemetry.workspace = true
+ihb-identity.workspace = true
 ihb-tls.workspace = true
 serde.workspace = true
 serde_json.workspace = true

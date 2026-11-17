@@ -786,6 +786,7 @@ dependencies = [
  "hyper-util",
  "ihb-config",
  "ihb-health",
+ "ihb-identity",
  "ihb-runtime",
  "ihb-telemetry",
  "ihb-tls",

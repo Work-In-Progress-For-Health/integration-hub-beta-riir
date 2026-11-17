@@ -66,6 +66,11 @@ pub struct TokenSource {
     /// Held tokens, by scope. Different scopes are different tokens
     /// (§4.6.1), so this cannot be a single slot.
     held: Mutex<BTreeMap<String, Held>>,
+    /// The ambient credential, when that is the mode. It reaches
+    /// `IDENTITY_ENDPOINT` over plain HTTP on loopback, which `client`
+    /// refuses by design (§4.7), so it has its own transport and its own
+    /// cache (§4.6.2).
+    identity: Option<Box<ihb_identity::ManagedIdentity>>,
 }
 
 impl std::fmt::Debug for TokenSource {
@@ -81,10 +86,17 @@ impl TokenSource {
     /// A source using this credential.
     #[must_use]
     pub fn new(auth: AzureAuth, client: HttpsClient) -> Self {
+        let identity = match &auth {
+            AzureAuth::Ambient { client_id } => Some(Box::new(ihb_identity::ManagedIdentity::new(
+                client_id.clone(),
+            ))),
+            AzureAuth::ServicePrincipal { .. } => None,
+        };
         Self {
             auth,
             client,
             held: Mutex::new(BTreeMap::new()),
+            identity,
         }
     }
 
@@ -97,6 +109,16 @@ impl TokenSource {
     /// reason is returned so it can be logged, because otherwise nobody
     /// ever finds out why every panel is blank.
     pub async fn token(&self, scope: &str) -> Result<String, HttpError> {
+        // §4.6.2: the identity endpoint is `http://localhost:<port>/...` in
+        // Container Apps, and `HttpsClient` refuses plaintext, so the
+        // ambient credential could never have reached it through `fetch`.
+        if let Some(identity) = &self.identity {
+            return identity
+                .token(scope)
+                .await
+                .map_err(|error| HttpError::Url(format!("{error} (spec/15-dashboard.md §4.6.2)")));
+        }
+
         // The lock is held across the fetch, so a page fanning out to four
         // integrations at once makes **one** token request rather than
         // four. That is the whole point of §4.6.3.
