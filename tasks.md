@@ -434,7 +434,7 @@ mocks.
 
 - [x] **P6.1** `ihb-sql`: `tiberius` connection, lazy open,
   discard-on-error, explicit transactions, parameter chunking, no
-  credentials in logs. **Password authentication only — see P6.6.**
+  credentials in logs. **Password or managed identity (P6.6).**
   [`spec/12`](spec/12-message-store.md) §5
 - [x] **P6.2** `message-store-service`: the record builder and its error
   cases. **Including the §0.8 test: a known patient marker driven through
@@ -464,19 +464,25 @@ mocks.
   image ships no `sqlcmd` and a setup step a developer must remember is one
   that is sometimes skipped.
   [`spec/12`](spec/12-message-store.md) §6.5, [`spec/13`](spec/13-message-replay.md) §8.4
-- [ ] **P6.6** **Managed identity for Azure SQL — the one half left.**
-  1. [x] **TLS.** `tiberius` 0.13.0 (2026-09-24) moved to `rustls` 0.23 and
+- [x] **P6.6** **Azure SQL: TLS and managed identity.**
+  1. [x] **TLS.** `tiberius` 0.13.0 moved to `rustls` 0.23 and
      `rustls-webpki` 0.103.17, past RUSTSEC-2026-0098, -0099 and -0104. Both
-     `ihb-sql` and `db-sender` now honour `Encrypt=Yes` (`Required`, with the
+     `ihb-sql` and `db-sender` honour `Encrypt=Yes` (`Required`, with the
      compiled-in Mozilla roots, since the image is distroless) and
      `TrustServerCertificate`. Proved against SQL Edge over TLS, plus a test
      that an untrusted certificate is refused. `spec/12` §5.8.
-  2. [ ] **Managed identity** is not implemented, so only password
-     authentication works. `crates/dashboard/src/azure/token.rs` already
-     fetches and caches an AAD token from `IDENTITY_ENDPOINT` (scope would be
-     `https://database.windows.net/.default`); the work is to share that
-     rather than copy it, then pass the token as `AuthMethod::aad_token` and
-     refresh it per connection rebuild (`spec/12` §5.4.1, §5.4.2).
+  2. [x] **Managed identity.** New crate `ihb-identity` fetches and caches an
+     AAD token from the loopback identity endpoint (`azure-token-lite` for the
+     request and parsing); `ihb-sql` and `db-sender` present it as
+     `AuthMethod::aad_token`. `spec/12` §5.4.1–§5.4.4. **Unit-tested against a
+     fake endpoint only: SQL Edge cannot validate an Entra token, so it is
+     unproven against Azure SQL until a non-production deployment.**
+  3. [ ] **Found, not fixed:** the dashboard's `HttpsClient` refuses plaintext
+     URLs (`spec/15` §4.7), but a Container App's `IDENTITY_ENDPOINT` is
+     `http://localhost:<port>/msi/token`, so its ambient-credential path
+     probably cannot reach it. Not run against a real Container App; check
+     before relying on the dashboard's managed identity, and consider moving
+     it onto `ihb-identity`.
 
 ---
 

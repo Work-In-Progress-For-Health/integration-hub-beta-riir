@@ -234,13 +234,9 @@ impl AppConfig {
         let auth = match (username, password) {
             (Some(username), Some(password)) => DbAuth::Password { username, password },
             (None, None) => {
-                // Upstream used `Authentication=ActiveDirectoryMsi`; this
-                // build cannot (`spec/12-message-store.md` §5.4.1).
-                reader.conflict(
-                    "DB_USERNAME and DB_PASSWORD are not set, which selects managed identity, \
-                     and managed-identity authentication is not yet implemented \
-                     (spec/12-message-store.md §5.4.1)",
-                );
+                // Upstream used `Authentication=ActiveDirectoryMsi`; this is
+                // the same thing through the identity endpoint
+                // (`spec/12-message-store.md` §5.4.1).
                 DbAuth::ManagedIdentity {
                     client_id: reader.optional_string("MANAGED_IDENTITY_CLIENT_ID"),
                 }
@@ -497,14 +493,18 @@ mod tests {
     }
 
     #[test]
-    fn managed_identity_is_a_startup_failure_for_now() {
-        let errors = AppConfig::from_pairs([
+    fn no_credentials_selects_managed_identity() {
+        let config = AppConfig::from_pairs([
             ("INGRESS_TOPIC_NAME", "t"),
             ("INGRESS_SUBSCRIPTION_NAME", "s"),
-            ("DB_ENCRYPT", "No"),
+            ("MANAGED_IDENTITY_CLIENT_ID", "abc-123"),
         ])
-        .unwrap_err();
-        assert!(errors.to_string().contains("managed"), "{errors}");
+        .unwrap();
+        assert!(
+            matches!(config.db.auth, DbAuth::ManagedIdentity { client_id: Some(ref id) } if id == "abc-123"),
+            "{:?}",
+            config.db.auth
+        );
     }
 
     #[test]

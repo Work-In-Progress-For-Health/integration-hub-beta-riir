@@ -30,6 +30,9 @@ type Connected = Client<Compat<TcpStream>>;
 pub struct SqlConnection {
     /// How to reach the server.
     config: SqlConfig,
+    /// The managed identity, when that is the mode. Held for the life of the
+    /// connection object so its token cache survives a reconnect (§5.4.2).
+    identity: Option<ihb_identity::ManagedIdentity>,
     /// The connection, once opened.
     client: Option<Connected>,
 }
@@ -46,16 +49,24 @@ impl std::fmt::Debug for SqlConnection {
             .field("database", &self.config.database)
             .field("auth", &self.config.auth.describe())
             .field("open", &self.client.is_some())
-            .finish()
+            // The identity (and its cached token) is left out on purpose.
+            .finish_non_exhaustive()
     }
 }
 
 impl SqlConnection {
     /// A connection that will open on first use.
     #[must_use]
-    pub const fn new(config: SqlConfig) -> Self {
+    pub fn new(config: SqlConfig) -> Self {
+        let identity = match &config.auth {
+            Auth::ManagedIdentity { client_id } => {
+                Some(ihb_identity::ManagedIdentity::new(client_id.clone()))
+            }
+            Auth::Password { .. } => None,
+        };
         Self {
             config,
+            identity,
             client: None,
         }
     }
@@ -135,23 +146,18 @@ impl SqlConnection {
             Auth::Password { username, password } => {
                 config.authentication(AuthMethod::sql_server(username, password.expose()));
             }
-            Auth::ManagedIdentity { client_id } => {
-                // §5.4.1 — an AAD token for `https://database.windows.net/`,
-                // from the ambient credential or the named user-assigned
-                // identity. This replaces the Python's
-                // `Authentication=ActiveDirectoryMsi` ODBC parameter.
-                //
-                // Not yet wired to a credential provider: that arrives with
-                // the managed-identity work, and until then a deployment
-                // that selects this mode is told so rather than failing
-                // against the server with a confusing TDS error.
-                return Err(SqlError::Token(format!(
-                    "managed-identity authentication is not yet implemented\
-                     {}; set SQL_USERNAME and MSSQL_SA_PASSWORD",
-                    client_id
-                        .as_ref()
-                        .map_or(String::new(), |id| format!(" (client id {id})"))
-                )));
+            Auth::ManagedIdentity { .. } => {
+                // §5.4.1 — an AAD token for `https://database.windows.net/`
+                // from the identity endpoint. This replaces the Python's
+                // `Authentication=ActiveDirectoryMsi` ODBC parameter. §5.4.2:
+                // the identity caches it and refreshes it before expiry, so a
+                // reconnect per §5.2 always presents a live one.
+                let token = match &self.identity {
+                    Some(identity) => identity.sql_token().await,
+                    None => unreachable!("a managed-identity config always builds an identity"),
+                }
+                .map_err(|error| SqlError::Token(error.to_string()))?;
+                config.authentication(AuthMethod::aad_token(token));
             }
         }
 
@@ -308,10 +314,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn managed_identity_says_so_rather_than_failing_obscurely() {
-        // Until the credential provider is wired up, a deployment that
-        // selects this mode is told plainly. The alternative is a TDS login
-        // failure that looks like a firewall problem.
+    async fn managed_identity_without_an_endpoint_names_the_missing_variable() {
+        // §5.4.1. Off Azure there is no identity endpoint, and the failure
+        // must say so at once rather than look like a firewall problem. Not
+        // asserted when the variable is set, as it is on a Container App.
+        if std::env::var("IDENTITY_ENDPOINT").is_ok() {
+            return;
+        }
         let mut connection = SqlConnection::new(SqlConfig {
             auth: Auth::ManagedIdentity {
                 client_id: Some("abc-123".to_string()),
@@ -321,10 +330,7 @@ mod tests {
 
         let error = connection.take().await.unwrap_err();
 
-        assert!(
-            matches!(error, SqlError::Token(_)),
-            "{error:?} should name the missing capability"
-        );
-        assert!(error.to_string().contains("SQL_USERNAME"), "{error}");
+        assert!(matches!(error, SqlError::Token(_)), "{error:?}");
+        assert!(error.to_string().contains("IDENTITY_ENDPOINT"), "{error}");
     }
 }

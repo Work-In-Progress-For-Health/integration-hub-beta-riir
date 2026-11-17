@@ -32,6 +32,20 @@ ignore = [
   # Clears when azservicebus drops the wasm timer path. Nothing to do here.
   "RUSTSEC-2026-0441",
 
+  # RUSTSEC-2026-0543 — `chrono` is unmaintained (all versions; no
+  # vulnerability, the advisory says "unmaintained" only, and names `jiff`
+  # and `time` as alternatives).
+  #
+  # Compiled, unlike the two above: `xsd-schema` 0.3.1 depends on it for the
+  # XSD date and time types, and `ihb-validation` is the only path in. This
+  # workspace uses `time` everywhere else (`Cargo.toml`, the `tiberius`
+  # line). Found by the local gate on 2026-11-17, the first run after the
+  # advisory was published; nothing in this workspace changed.
+  #
+  # Clears when `xsd-schema` moves to `time` or `jiff`. That crate is ours,
+  # so the fix is there, not here.
+  "RUSTSEC-2026-0543",
+
   # RUSTSEC-2026-0194 and -0195 (quick-xml) were here until 2026-08-22.
   # `xsd-schema` 0.1.4 brings `quick-xml` 0.41.0, which carries both fixes,
   # so the ignores are **removed** rather than kept "just in case": an

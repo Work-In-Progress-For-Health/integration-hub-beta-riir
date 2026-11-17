@@ -1,0 +1,19 @@
+[package]
+name = "ihb-identity"
+description = "A managed-identity access token for Azure SQL, fetched from the local identity endpoint and cached until shortly before it expires."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+azure-token-lite.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "net", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "net", "io-util"] }
+
+[lints]
+workspace = true

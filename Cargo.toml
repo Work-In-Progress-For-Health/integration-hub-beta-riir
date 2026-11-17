@@ -22,6 +22,7 @@ members = [
   "crates/hl7-soap-server",
   "crates/ihb-transformer",
   "crates/ihb-sender",
+  "crates/ihb-identity",
   "crates/ihb-sql",
   "crates/buswatch",
   "crates/message-store-service",
@@ -110,6 +111,7 @@ ihb-bus = { version = "0.1", path = "crates/ihb-bus" }
 ihb-transformer = { version = "0.1", path = "crates/ihb-transformer" }
 ihb-sender = { version = "0.1", path = "crates/ihb-sender" }
 wrds-service = { version = "0.1", path = "crates/wrds-service" }
+ihb-identity = { version = "0.1", path = "crates/ihb-identity" }
 ihb-sql = { version = "0.1", path = "crates/ihb-sql" }
 hl7-mock-receiver = { version = "0.1", path = "crates/hl7-mock-receiver" }
 hl7-sender = { version = "0.1", path = "crates/hl7-sender" }

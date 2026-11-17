@@ -398,9 +398,10 @@ message type, never the MSH text.**
 `DB_ENCRYPT=Yes` (the default) makes TLS mandatory
 (`12-message-store.md` §5.8): a server that will not encrypt, or whose
 certificate does not verify, is a connection failure. `DB_TRUST_SERVER_CERTIFICATE=Yes`
-skips verification and is off by default. One deviation remains:
-managed-identity authentication (no username and password) is a startup
-failure until it is implemented. The connection is lazy and long-lived (§5.1).
+skips verification and is off by default. With neither `DB_USERNAME` nor
+`DB_PASSWORD` the sender uses its managed identity (`MANAGED_IDENTITY_CLIENT_ID`
+selects a user-assigned one); `12-message-store.md` §5.4. The connection is
+lazy and long-lived (§5.1).
 
 §7.8 **Queue ID Update** (`DB_PROCEDURE_TYPE=queue_id_update`; upstream
 `#455`, `handlers/queue_idupd_handler.py`). The same service, a second

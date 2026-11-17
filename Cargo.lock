@@ -818,6 +818,7 @@ dependencies = [
  "ihb-config",
  "ihb-fields",
  "ihb-health",
+ "ihb-identity",
  "ihb-runtime",
  "ihb-telemetry",
  "ihb-tls",
@@ -2001,6 +2002,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ihb-identity"
+version = "0.1.0"
+dependencies = [
+ "azure-token-lite",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "ihb-runtime"
 version = "0.1.0"
 dependencies = [
@@ -2032,6 +2042,7 @@ name = "ihb-sql"
 version = "0.1.0"
 dependencies = [
  "ihb-config",
+ "ihb-identity",
  "thiserror 2.0.21",
  "tiberius",
  "time",

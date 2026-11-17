@@ -229,6 +229,9 @@ pub struct SqlRunner {
     statement: String,
     /// `EXEC dbo.proc @P1 .. @P6`, for the Queue ID Update.
     id_update_statement: String,
+    /// The managed identity, when that is the mode; its token cache must
+    /// outlive a reconnect (`spec/12-message-store.md` §5.4.2).
+    identity: Option<ihb_identity::ManagedIdentity>,
     /// The connection, once opened.
     client: Option<Connected>,
 }
@@ -262,10 +265,17 @@ impl SqlRunner {
             "DECLARE @rc INT; EXEC @rc = {} @P1, @P2, @P3, @P4, @P5, @P6; SELECT @rc;",
             config.stored_procedure
         );
+        let identity = match &config.auth {
+            DbAuth::ManagedIdentity { client_id } => {
+                Some(ihb_identity::ManagedIdentity::new(client_id.clone()))
+            }
+            DbAuth::Password { .. } => None,
+        };
         Self {
             config,
             statement,
             id_update_statement,
+            identity,
             client: None,
         }
     }
@@ -298,11 +308,18 @@ impl SqlRunner {
                 config.authentication(AuthMethod::sql_server(username, password.expose()));
             }
             DbAuth::ManagedIdentity { .. } => {
-                return Err(DatabaseError::new(
-                    FailureKind::Transient,
-                    0,
-                    "managed-identity authentication is not yet implemented",
-                ));
+                // `spec/12-message-store.md` §5.4.1. A failure to get a token
+                // is transient: the identity endpoint can be briefly down at
+                // start-up, and the message must be abandoned for redelivery,
+                // never dead-lettered for a fault that is not in it.
+                let token = match &self.identity {
+                    Some(identity) => identity.sql_token().await,
+                    None => unreachable!("a managed-identity config always builds an identity"),
+                }
+                .map_err(|error| {
+                    DatabaseError::new(FailureKind::Transient, 0, &error.to_string())
+                })?;
+                config.authentication(AuthMethod::aad_token(token));
             }
         }
 

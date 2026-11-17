@@ -56,6 +56,7 @@ const MEMBERS: &[&str] = &[
     "hl7-soap-server",
     "ihb-transformer",
     "ihb-sender",
+    "ihb-identity",
     "ihb-sql",
     "buswatch",
     "message-store-service",

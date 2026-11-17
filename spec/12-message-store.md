@@ -138,7 +138,23 @@ and presented to the server as an AAD token. This replaces the Python's
 `Authentication=ActiveDirectoryMsi` ODBC parameter.
 
 §5.4.2 The token MUST be refreshed before expiry; a connection rebuilt per
-§5.2 acquires a fresh one.
+§5.2 acquires a fresh one. `ihb-identity` caches it per scope and treats it as
+expired five minutes early, and the cache lives as long as the connection
+object, so a reconnect reuses a live token and never presents a dead one.
+
+§5.4.3 **The identity endpoint is plain HTTP on loopback, and nothing else is
+accepted.** `IDENTITY_ENDPOINT` is `http://localhost:<port>/...` on App Service
+and Container Apps. The request carries `IDENTITY_HEADER`, a secret, and the
+response carries a bearer token, so `ihb-identity` refuses any host that is not
+`localhost`, `127.0.0.1` or `::1`, and any `https` URL, rather than send either
+over a network. It does not use IMDS (`169.254.169.254`), which hangs rather
+than fails off Azure; without `IDENTITY_ENDPOINT` it fails at once, naming the
+variable. An error status is reported by its code only, because an error body
+can echo the request.
+
+§5.4.4 **A failure to obtain a token is transient in `db-sender`**: the
+endpoint can be briefly down at start-up, and the message is abandoned for
+redelivery rather than dead-lettered for a fault that is not in it.
 
 §5.5 `SQL_ENCRYPT` and `SQL_TRUST_SERVER_CERTIFICATE` map to the TDS
 encryption mode and certificate-trust setting. `Yes`/`No`, case-insensitive.
@@ -192,9 +208,11 @@ its own `DB_COMMAND_TIMEOUT` (`10-senders.md` §7.3) is the authority.
 a real server; `an_untrusted_certificate_is_refused_and_never_downgraded`
 proves verification is real.
 
-§5.8.7 **Still blocking production use against Azure SQL:** managed-identity
-authentication (§5.4.1) is not implemented, so only password authentication
-works.
+§5.8.7 **Managed identity (§5.4.1) is implemented in `ihb-identity`**, shared by
+`ihb-sql` and `db-sender`, and unit-tested against a fake identity endpoint.
+**It has not been proven against Azure SQL**: SQL Edge cannot validate an Entra
+token, so the first real run is the first deployment to Azure. Do that in a
+non-production environment first.
 
 ---
 

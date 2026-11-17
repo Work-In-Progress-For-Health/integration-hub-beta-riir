@@ -17,6 +17,7 @@ sqlserver = []
 
 [dependencies]
 ihb-config.workspace = true
+ihb-identity.workspace = true
 thiserror.workspace = true
 tiberius.workspace = true
 time.workspace = true
