@@ -1,0 +1,34 @@
+# A self-hosted Azure DevOps build agent (spec/21 §11).
+#
+#   podman build -f docker/ado-agent/Containerfile \
+#     --build-arg AGENT_ARCH=arm64 -t ihb-rs/ado-agent:dev docker/ado-agent
+#
+# AGENT_ARCH is `arm64` or `x64` and MUST match the machine it runs on and the
+# architecture the pipelines' images are deployed on (spec/21 §11.2). Nothing
+# secret is baked in: the organisation URL, pool and token arrive at run time.
+FROM docker.io/library/ubuntu:24.04
+
+ARG AGENT_VERSION=5.281.1
+ARG AGENT_ARCH=arm64
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl git jq libicu74 libssl3t64 tar build-essential pkg-config \
+ && rm -rf /var/lib/apt/lists/*
+
+# Not root: the agent runs the pipelines' scripts, so what it can touch is
+# what a pipeline can touch.
+RUN useradd --create-home --shell /bin/bash agent
+USER agent
+WORKDIR /home/agent/azp
+
+RUN curl -fsSL "https://download.agent.dev.azure.com/agent/${AGENT_VERSION}/vsts-agent-linux-${AGENT_ARCH}-${AGENT_VERSION}.tar.gz" \
+      | tar -xz
+
+# Rust, at the toolchain the workspace pins (rust-toolchain.toml selects it).
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+ENV PATH="/home/agent/.cargo/bin:${PATH}"
+
+COPY --chown=agent:agent start.sh /home/agent/azp/start.sh
+ENTRYPOINT ["/home/agent/azp/start.sh"]

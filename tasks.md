@@ -880,7 +880,11 @@ Not started. Independent of the other phases.
   are the real cost** on the private estate. If so, a self-hosted ADO agent
   (free tier: one self-hosted parallel job, unlimited minutes), after
   confirming the organisation's plan and whether the estate runs `amd64`
-  while this machine is `arm64`. Not decided; not started.
+  while this machine is `arm64`. **Partly done:** the ephemeral agent image
+  is built (`docker/ado-agent/`, `spec/21` §11), but it is not registered, has
+  run no job, and cannot run the Docker build stages. Still to decide with the
+  Hub team: the pipelines already use a managed pool
+  (`UKS-DHCW-IH-DEV-ADOManagedPool`), so check whether minutes are the cost.
 
 ---
 

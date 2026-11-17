@@ -226,3 +226,33 @@ visible in `target/gate/<sha>.json`, and the job exits non-zero.
 skip decision, and the lock's stale-holder handling. **The launchd
 registration and the 02:30 firing are not unit-testable; they were checked by
 `status` after install and by the first nightly log.**
+
+## §11 A self-hosted Azure DevOps agent
+
+§11.1 `docker/ado-agent/` builds an **ephemeral** agent image: each container
+registers, runs one job (`run.sh --once`) and exits, so the next job starts
+clean. It is run with `podman run --rm`; `docker/ado-agent/README.md` has the
+commands. No secret is in the image or the repository: the organisation URL,
+the pool and a PAT scoped to *Agent Pools (read, manage)* arrive in the
+environment, and the agent drops the PAT before the job starts (§5.2).
+
+§11.2 **Check before registering it.** (a) **Architecture:** the image is built
+for `AGENT_ARCH=arm64` or `x64`, and must match the machine and the
+architecture the pipelines' images are deployed on. This machine is `arm64`. (b)
+**The pool:** every pipeline here already uses `UKS-DHCW-IH-DEV-ADOManagedPool`,
+which looks like a *Managed DevOps Pool*, billed as Azure compute rather than
+as hosted-agent minutes. If so, a self-hosted agent saves less than P10.8
+assumed, and that must be confirmed with the Hub team first. (c) **The plan:**
+the free tier is one self-hosted parallel job (§5.3 says not to depend on that
+staying free).
+
+§11.3 The image carries Rust and the build tools, so it runs the `CodeQuality`
+stage. It does **not** run the `docker-build-push` stages: those need a
+container engine inside the agent, i.e. a socket mounted into a container that
+runs pipeline code. That is a privilege decision for the Hub team.
+
+§11.4 **Status.** The image builds on `arm64` and refuses to start without its
+three variables, and the agent binary runs (`--version`). **It has not been
+registered against an organisation and has run no job**, because that needs a
+PAT and a pool that only the Hub team can issue.
+
