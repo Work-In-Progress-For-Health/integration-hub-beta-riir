@@ -841,10 +841,15 @@ Not started. Independent of the other phases.
   Run once to prove it, then **undone** here: it makes every push run the
   ~5-minute gate, which is the developer's choice to opt into.
   [`spec/21`](spec/21-local-ci.md) §7
-- [ ] **P10.4** **The evidence record** `target/gate/<sha>.json`, and
-  `gate --post` for a `local/<tier>` commit status. Refuses a dirty tree, a
-  mismatched commit or a failed tier; carries no secret. Tests per §9.2.
-  [`spec/21`](spec/21-local-ci.md) §3
+- [x] **P10.4** **The evidence record** `target/gate/<sha>.json`, and
+  `gate --post` / `--post-only` for a `local/<tier>` commit status. Every
+  run of tier 1 or above writes the record (failures and skips included;
+  tiers accumulate per commit); the record holds names, results, durations,
+  host and toolchain, never a command line or environment. Posting refuses
+  a dirty tree (now or when the tier ran), another commit, a failed tier or
+  no record. Tests per §9.2 (7 in `xtask/src/gate/record.rs`). **Not run:**
+  an actual `gh api` post (it would publish a status on the real
+  repository); the refusal path was run live. [`spec/21`](spec/21-local-ci.md) §3
 - [ ] **P10.5** **A container-runtime helper** that detects whether
   `podman compose` or `podman-compose` works, says which it used, and waits
   on a real connection rather than a port or a container health state.

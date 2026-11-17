@@ -18,6 +18,8 @@
 //! rebuilds the whole workspace, which a developer would pay on every run.
 //! The hosted workflow sets it in its environment (`spec/17` §1).
 
+mod record;
+
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -174,24 +176,38 @@ struct Options {
     tier: Tier,
     /// Report every failing step rather than stopping at the first.
     keep_going: bool,
+    /// After the run, post `local/<tier>` (`spec/21` §3.3).
+    post: bool,
+    /// Post from the existing record without running anything.
+    post_only: bool,
 }
 
 /// Parse `gate`'s arguments.
 fn parse(args: &[String]) -> Result<Options> {
     let mut tier = Tier::Gate;
     let mut keep_going = false;
+    let (mut post, mut post_only) = (false, false);
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--keep-going" => keep_going = true,
+            "--post" => post = true,
+            "--post-only" => post_only = true,
             "--tier" => {
                 let value = iter.next().ok_or_else(|| anyhow!("--tier needs a value"))?;
                 tier = Tier::parse(value)?;
             }
-            other => bail!("unknown argument {other:?}; usage: gate [--tier T] [--keep-going]"),
+            other => bail!(
+                "unknown argument {other:?}; usage: gate [--tier T] [--keep-going] [--post | --post-only]"
+            ),
         }
     }
-    Ok(Options { tier, keep_going })
+    Ok(Options {
+        tier,
+        keep_going,
+        post,
+        post_only,
+    })
 }
 
 /// The files changed since the merge base with `origin/main`, or `None`
@@ -262,6 +278,10 @@ fn execute(step: &Step) -> Outcome {
 pub(crate) fn run(args: &[String]) -> Result<()> {
     let options = parse(args)?;
     let msrv_version = crate::declared_msrv()?;
+    if options.post_only {
+        return post_existing(options.tier);
+    }
+    let started = Instant::now();
     let mut plan = steps(options.tier, &msrv_version);
     let mut outcomes: Vec<Outcome> = Vec::new();
 
@@ -313,11 +333,81 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
         .filter(|outcome| outcome.passed == Some(false))
         .map(|outcome| outcome.name)
         .collect();
-    if failed.is_empty() {
-        Ok(())
-    } else {
-        Err(anyhow!("the gate failed at: {}", failed.join(", ")))
+
+    // `spec/21` §3.1 — tier 1 and above leave a record, failures included.
+    if options.tier != Tier::Fast {
+        write_record(options.tier, &outcomes, started.elapsed(), &msrv_version)?;
     }
+
+    if !failed.is_empty() {
+        return Err(anyhow!("the gate failed at: {}", failed.join(", ")));
+    }
+    if options.post {
+        post_existing(options.tier)?;
+    }
+    Ok(())
+}
+
+/// The commit checked out, and whether the tree is clean.
+fn head_and_clean() -> Result<(String, bool)> {
+    let git = |args: &[&str]| -> Result<String> {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(crate::workspace_root()?)
+            .output()
+            .context("running git")?;
+        if !output.status.success() {
+            bail!("git {} failed", args.join(" "));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    };
+    Ok((
+        git(&["rev-parse", "HEAD"])?,
+        git(&["status", "--porcelain"])?.is_empty(),
+    ))
+}
+
+/// Write this run's tier into the commit's record (`spec/21` §3.1).
+fn write_record(
+    tier: Tier,
+    outcomes: &[Outcome],
+    took: Duration,
+    msrv_version: &str,
+) -> Result<()> {
+    let root = crate::workspace_root()?;
+    let (commit, clean) = head_and_clean()?;
+    if !clean {
+        println!("working tree is dirty: the record says so and no status can be posted from it");
+    }
+    let toolchain = Command::new("rustc").arg("--version").output().map_or_else(
+        |_| "unknown".to_string(),
+        |output| String::from_utf8_lossy(&output.stdout).trim().to_string(),
+    );
+    let entry = record::entry(tier, clean, outcomes, took);
+    let doc = record::merge(
+        record::read(&root, &commit),
+        &commit,
+        entry,
+        &toolchain,
+        msrv_version,
+    );
+    let path = record::write(&root, &commit, &doc)?;
+    println!("record: {}", path.display());
+    Ok(())
+}
+
+/// Post `local/<tier>` from the existing record, if §3.3 allows.
+fn post_existing(tier: Tier) -> Result<()> {
+    let root = crate::workspace_root()?;
+    let (head, clean_now) = head_and_clean()?;
+    let record = record::read(&root, &head);
+    if let Some(why) = record::refusal(record.as_ref(), tier, &head, clean_now) {
+        bail!("not posting local/{}: {why}", tier.name());
+    }
+    let entry = record
+        .as_ref()
+        .map_or(&serde_json::Value::Null, |doc| &doc["tiers"][tier.name()]);
+    record::post(tier, &head, entry)
 }
 
 /// A skipped step's outcome.
@@ -482,14 +572,18 @@ mod tests {
             parse(&args(&[])).unwrap(),
             Options {
                 tier: Tier::Gate,
-                keep_going: false
+                keep_going: false,
+                post: false,
+                post_only: false
             }
         );
         assert_eq!(
             parse(&args(&["--tier", "stack", "--keep-going"])).unwrap(),
             Options {
                 tier: Tier::Stack,
-                keep_going: true
+                keep_going: true,
+                post: false,
+                post_only: false
             }
         );
         assert!(parse(&args(&["--tier", "nope"])).is_err());
