@@ -19,6 +19,19 @@ ignore = [
   # Clears when azservicebus drops the wasm timer path. Nothing to do here.
   "RUSTSEC-2024-0384",
 
+  # RUSTSEC-2026-0441 — `pin-utils` is unmaintained (archived 2026-10-01;
+  # no vulnerability, the advisory is "unmaintained" only).
+  #
+  # The same path as `instant` above, and for the same reason: it is
+  # reached only as azservicebus -> fluvio-wasm-timer -> pin-utils, the
+  # wasm timer shim. `cargo tree -i pin-utils` (this target) prints nothing;
+  # it resolves only under `--target all`. A line in Cargo.lock, not a
+  # compiled dependency. Found by the hosted gate on 2026-11-16, the first
+  # run after the advisory was published; nothing in this workspace changed.
+  #
+  # Clears when azservicebus drops the wasm timer path. Nothing to do here.
+  "RUSTSEC-2026-0441",
+
   # RUSTSEC-2026-0194 and -0195 (quick-xml) were here until 2026-08-22.
   # `xsd-schema` 0.1.4 brings `quick-xml` 0.41.0, which carries both fixes,
   # so the ignores are **removed** rather than kept "just in case": an
