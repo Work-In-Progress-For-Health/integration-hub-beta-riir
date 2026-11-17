@@ -25,7 +25,6 @@ use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
-use tokio_rustls::rustls::ClientConfig;
 
 use crate::Error;
 
@@ -44,7 +43,7 @@ pub(crate) const CONTENT_TYPE_VALUE: &str = "text/xml; charset=utf-8";
 /// roots cannot be built or the PEM has no certificate or no usable key.
 pub(crate) fn connector(client_cert: Option<&Path>) -> Result<TlsConnector, Error> {
     let roots = ihb_tls::root_store().map_err(|error| Error::Tls(error.to_string()))?;
-    let builder = ClientConfig::builder().with_root_certificates(roots);
+    let builder = ihb_tls::client_builder().with_root_certificates(roots);
 
     let config = if let Some(path) = client_cert {
         let chain = CertificateDer::pem_file_iter(path)

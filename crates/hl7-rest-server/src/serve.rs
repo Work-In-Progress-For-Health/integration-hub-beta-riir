@@ -76,7 +76,7 @@ pub fn tls_config(tls: &Tls) -> Result<ServerConfig, TlsError> {
         source: io::Error::other(error.to_string()),
     })?;
 
-    ServerConfig::builder()
+    ihb_tls::server_builder()
         .with_no_client_auth()
         .with_single_cert(certificates, key)
         .map_err(|error| TlsError::Rejected(error.to_string()))

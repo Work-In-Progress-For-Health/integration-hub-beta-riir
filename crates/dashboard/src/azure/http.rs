@@ -117,7 +117,7 @@ impl HttpsClient {
     /// With no bundle configured — the laptop case of §1.2 — this cannot
     /// fail.
     pub fn new() -> Result<Self, ihb_tls::TrustError> {
-        let tls = ClientConfig::builder()
+        let tls = ihb_tls::client_builder()
             .with_root_certificates(ihb_tls::root_store()?)
             .with_no_client_auth();
 

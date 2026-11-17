@@ -71,9 +71,9 @@ pub struct DbConfig {
     pub stored_procedure: String,
     /// The login.
     pub auth: DbAuth,
-    /// `DB_ENCRYPT`. Always `false` in a configuration that was accepted:
-    /// `Yes` (the default) is a startup failure until the build has a TLS
-    /// backend (`spec/10-senders.md` §7.6, `spec/12-message-store.md` §5.8).
+    /// `DB_ENCRYPT`, default `true`. `Yes` makes TLS mandatory: a server
+    /// that will not encrypt is a connection failure, not a plaintext
+    /// connection (`spec/10-senders.md` §7.6, `spec/12-message-store.md` §5.8).
     pub encrypt: bool,
     /// `DB_TRUST_SERVER_CERTIFICATE`, default `false`. Strictly `Yes`/`No`.
     pub trust_server_certificate: bool,
@@ -255,16 +255,6 @@ impl AppConfig {
         };
 
         let encrypt = yes_or_no(&mut reader, "DB_ENCRYPT", true);
-        if encrypt {
-            // `spec/12-message-store.md` §5.8: no TLS backend, so a request
-            // for encryption must not become a plaintext connection that the
-            // operator believes is encrypted.
-            reader.conflict(
-                "DB_ENCRYPT is Yes (the default), but this build has no TLS backend; \
-                 set DB_ENCRYPT=No (spec/12-message-store.md §5.8)",
-            );
-        }
-
         let db = DbConfig {
             server: reader.string_or("DB_SERVER", "localhost"),
             port: reader.optional_positive_integer("DB_PORT").unwrap_or(1433),
@@ -497,12 +487,13 @@ mod tests {
     }
 
     #[test]
-    fn encryption_is_a_startup_failure_in_this_build() {
-        // §7.6: the default is Yes, and this build cannot honour it.
+    fn encryption_defaults_on_and_trust_defaults_off() {
+        // §7.6 and `spec/12` §5.8: TLS is the default and is honoured.
         let mut pairs = valid();
         pairs.retain(|(k, _)| *k != "DB_ENCRYPT");
-        let errors = AppConfig::from_pairs(pairs).unwrap_err();
-        assert!(errors.to_string().contains("§5.8"), "{errors}");
+        let config = AppConfig::from_pairs(pairs).unwrap();
+        assert!(config.db.encrypt);
+        assert!(!config.db.trust_server_certificate);
     }
 
     #[test]

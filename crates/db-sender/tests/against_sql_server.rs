@@ -45,7 +45,7 @@ async fn raw(database: &str) -> Client<Compat<TcpStream>> {
     config.host("127.0.0.1");
     config.port(1433);
     config.database(database);
-    config.encryption(EncryptionLevel::NotSupported);
+    config.encryption(EncryptionLevel::Required);
     config.authentication(AuthMethod::sql_server("sa", password()));
     config.trust_cert();
     let stream = TcpStream::connect("127.0.0.1:1433").await.unwrap();
@@ -103,7 +103,8 @@ fn runner_with_timeout(procedure: &str, procedure_type: &str, command_timeout: &
         ("DB_PROCEDURE_TYPE", procedure_type),
         ("DB_USERNAME", "sa"),
         ("DB_PASSWORD", password.as_str()),
-        ("DB_ENCRYPT", "No"),
+        ("DB_ENCRYPT", "Yes"),
+        ("DB_TRUST_SERVER_CERTIFICATE", "Yes"),
         ("DB_COMMAND_TIMEOUT", command_timeout),
     ])
     .unwrap();

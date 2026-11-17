@@ -114,19 +114,22 @@ impl SqlConnection {
         config.port(1433);
         config.database(&self.config.database);
 
-        // §5.5 and §5.8. This build carries no TLS backend, so encryption
-        // cannot be honoured — and a request for it fails here rather than
-        // opening a plaintext connection that the operator believes is
-        // encrypted. See the workspace `Cargo.toml` for why the backend is
-        // absent.
-        if self.config.encrypt {
-            return Err(SqlError::Connect {
-                server: self.config.server.clone(),
-                reason: "SQL_ENCRYPT is Yes, but this build has no TLS backend;                          see spec/12-message-store.md §5.8"
-                    .to_string(),
-            });
+        // §5.5 and §5.8. `Required` means TLS or no connection: the server
+        // refusing to encrypt is a failure, never a downgrade to plaintext,
+        // because this is the connection that carries full patient records.
+        // Trusting the server certificate without checking it is a separate,
+        // explicit opt-in (`SQL_TRUST_SERVER_CERTIFICATE`), off by default.
+        config.encryption(if self.config.encrypt {
+            EncryptionLevel::Required
+        } else {
+            EncryptionLevel::NotSupported
+        });
+        if self.config.trust_server_certificate {
+            config.trust_cert();
+        } else {
+            // The image has no system trust store (spec/18 §4.4).
+            config.trust_webpki_roots();
         }
-        config.encryption(EncryptionLevel::NotSupported);
 
         match &self.config.auth {
             Auth::Password { username, password } => {
@@ -169,7 +172,9 @@ impl SqlConnection {
             })?;
         stream.set_nodelay(true).ok();
 
-        Client::connect(config, stream.compat_write())
+        // Boxed: with a TLS backend the handshake future is ~17 KB, and it
+        // would otherwise be inlined into every caller's future.
+        Box::pin(Client::connect(config, stream.compat_write()))
             .await
             .map_err(|error| SqlError::Connect {
                 server: self.config.server.clone(),
@@ -303,19 +308,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn requesting_encryption_fails_rather_than_connecting_in_plaintext() {
-        // §5.8 — this build has no TLS backend, and the one thing it must
-        // not do is quietly send patient records unencrypted to a server
-        // the operator asked to be reached over TLS.
-        let mut connection = SqlConnection::new(config());
-
-        let error = connection.take().await.unwrap_err();
-
-        assert!(error.to_string().contains("no TLS backend"), "{error}");
-        assert!(error.to_string().contains("§5.8"), "{error}");
-    }
-
-    #[tokio::test]
     async fn managed_identity_says_so_rather_than_failing_obscurely() {
         // Until the credential provider is wired up, a deployment that
         // selects this mode is told plainly. The alternative is a TDS login
@@ -324,8 +316,6 @@ mod tests {
             auth: Auth::ManagedIdentity {
                 client_id: Some("abc-123".to_string()),
             },
-            // Encryption off, so the §5.8 check above does not fire first.
-            encrypt: false,
             ..config()
         });
 

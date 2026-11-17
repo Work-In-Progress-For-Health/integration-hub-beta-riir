@@ -152,54 +152,49 @@ per statement, all statements sharing one transaction. `MAX_BATCH_SIZE` of
 §5.7 A connection string, a username, or a password MUST NOT appear in any
 log line or error, at any level.
 
-### §5.8 This build cannot encrypt to SQL
+### §5.8 Encryption to SQL
 
-**Status: open. Blocks production use against Azure SQL. Tracked as P6.6.**
+**Status: implemented (P6.6, TLS half). Managed identity (§5.4.1) is still open.**
 
-`tiberius` 0.12.3 — its latest release — pins `tokio-rustls` 0.24, and so
-`rustls` 0.21 and `rustls-webpki` 0.101. That version of `rustls-webpki`
-carries three unfixed advisories:
-
-| Advisory | Defect |
-| --- | --- |
-| RUSTSEC-2026-0098 | URI name constraints ignored rather than rejected |
-| RUSTSEC-2026-0099 | Name constraints accepted for wildcard names |
-| RUSTSEC-2026-0104 | Reachable panic parsing a certificate revocation list |
-
-All three are in certificate verification, and the fix needs
-`rustls-webpki` >= 0.103.12. There is no patched 0.101 release, so no
-upgrade path exists while `tiberius` pins `rustls` 0.21.
-
-§5.8.1 **The response is to carry no TLS backend at all**, rather than to
-carry a weak one. `tiberius` is built with neither `rustls` nor
-`native-tls`, which removes the vulnerable crates from the dependency graph
-entirely — `cargo deny` passes with no ignore, and there is no possibility
-of a future change quietly starting to use them.
-
-`native-tls` is not an alternative:
+§5.8.1 **TLS is `rustls` 0.23 with the compiled-in Mozilla roots.**
+`tiberius` is built with `rustls` and `rustls-webpki-roots`, and the
+connection calls `Config::trust_webpki_roots()`. The runtime image is
+distroless and has no system trust store
+([`18-deployment.md`](18-deployment.md) §4.4), and
 [`17-testing-and-quality.md`](17-testing-and-quality.md) §8.2 forbids
-openssl, and [`18-deployment.md`](18-deployment.md) §2.3 depends on there
-being no system TLS library to link against.
+`native-tls` and so openssl.
 
-§5.8.2 **`SQL_ENCRYPT=Yes` is therefore a connection failure**, naming this
-section. It is not downgraded to plaintext. This is the connection that
-carries `RawPayload` — every message crossing the Hub, in full and
-unredacted (§2.3) — and an operator who asked for TLS and silently got none
-would have no way to find out.
+§5.8.2 **`SQL_ENCRYPT=Yes` (the default) means TLS or no connection.** It
+maps to `EncryptionLevel::Required`: a server that will not encrypt, or whose
+certificate does not verify, is a connection failure. It is never a
+downgrade to plaintext, because this connection carries `RawPayload` — every
+message crossing the Hub, in full and unredacted (§2.3).
+`SQL_ENCRYPT=No` maps to `NotSupported` and is for a local container only.
 
-§5.8.3 **What this permits today.** A local SQL Server over plaintext,
-which is what §6.5's tests use, and which is how the local stack of
-[`18-deployment.md`](18-deployment.md) §5 runs. It does **not** permit
-production use against Azure SQL, which requires encryption in transit.
+§5.8.3 **`SQL_TRUST_SERVER_CERTIFICATE=Yes` skips verification** and is the
+operator's explicit choice, off by default. It is what the local SQL Edge
+container needs, because its certificate is self-signed.
 
-§5.8.4 The other thing blocking production use is §5.4.1: managed-identity
-authentication is not implemented, so only password authentication works.
-The two are tracked together, because either alone is enough to stop a
-deployment.
+§5.8.4 **History.** `tiberius` 0.12.3 pinned `rustls` 0.21 and so
+`rustls-webpki` 0.101, which carried three unfixed advisories
+(RUSTSEC-2026-0098, -0099, -0104) with no patched release on that line. The
+build therefore carried no TLS backend and `SQL_ENCRYPT=Yes` was a startup
+failure. `tiberius` 0.13.0 (2026-09-24) moved to `rustls` 0.23 and
+`rustls-webpki` 0.103.17, which is past the fix (>= 0.103.12), so `cargo deny`
+passes with no ignore.
 
-§5.8.5 The fix is upstream, and is one line here when it lands: `tiberius`
-moving to `rustls` 0.23. Until then this section is the reason not to
-deploy these two services against Azure SQL.
+§5.8.5 **Behaviour that 0.13 changed.** `command_timeout` defaults to 30 s and
+`handshake_timeout` to 15 s. `db-sender` sets the former to `None`, because
+its own `DB_COMMAND_TIMEOUT` (`10-senders.md` §7.3) is the authority.
+
+§5.8.6 Tests: `ihb-sql` and `db-sender` run their SQL Server suites with
+`Encrypt=Yes` and the certificate trusted, which proves the TLS path against
+a real server; `an_untrusted_certificate_is_refused_and_never_downgraded`
+proves verification is real.
+
+§5.8.7 **Still blocking production use against Azure SQL:** managed-identity
+authentication (§5.4.1) is not implemented, so only password authentication
+works.
 
 ---
 

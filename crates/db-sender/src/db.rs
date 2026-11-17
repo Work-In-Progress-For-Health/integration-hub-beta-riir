@@ -276,9 +276,23 @@ impl SqlRunner {
         config.host(&self.config.server);
         config.port(self.config.port);
         config.database(&self.config.database);
-        // `config::AppConfig` has already refused `DB_ENCRYPT=Yes`
-        // (`spec/12-message-store.md` §5.8); this is belt and braces.
-        config.encryption(EncryptionLevel::NotSupported);
+        // `spec/12-message-store.md` §5.8: `Required` is TLS or no
+        // connection, never a quiet downgrade to plaintext.
+        config.encryption(if self.config.encrypt {
+            EncryptionLevel::Required
+        } else {
+            EncryptionLevel::NotSupported
+        });
+        if self.config.trust_server_certificate {
+            config.trust_cert();
+        } else {
+            // The image has no system trust store (spec/18 §4.4).
+            config.trust_webpki_roots();
+        }
+        // `tiberius` 0.13 bounds a command at 30 s by default. This
+        // sender's own `DB_COMMAND_TIMEOUT` is the authority (§7.3), so the
+        // driver's must not preempt it with a different error.
+        config.command_timeout(None);
         match &self.config.auth {
             DbAuth::Password { username, password } => {
                 config.authentication(AuthMethod::sql_server(username, password.expose()));
@@ -306,7 +320,8 @@ impl SqlRunner {
             stream.set_nodelay(true).ok();
             // A login the server refused (18456) is `Error::Server`, so it
             // is classified fatal, as upstream's `pyodbc.Error` was.
-            Client::connect(config, stream.compat_write())
+            // Boxed: the TLS handshake future is ~17 KB (`large_futures`).
+            Box::pin(Client::connect(config, stream.compat_write()))
                 .await
                 .map_err(|e| from_tiberius(&e))
         };

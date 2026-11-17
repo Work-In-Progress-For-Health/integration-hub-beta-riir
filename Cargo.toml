@@ -231,20 +231,16 @@ tower = { version = "0.5", default-features = false }
 # --- SQL -------------------------------------------------------------------
 # `tiberius` is a pure-Rust TDS client.
 #
-# **No TLS backend**, deliberately. `native-tls` is out because spec/17 §8.2
-# forbids openssl and spec/18 §2.3 depends on there being no system TLS
-# library to link against. `rustls` is out because `tiberius` 0.12.3 pins
-# `tokio-rustls` 0.24 -> `rustls` 0.21 -> `rustls-webpki` 0.101, which
-# carries three unfixed advisories (RUSTSEC-2026-0098, -0099, -0104) with no
-# patched release on that line — on the one connection in this estate that
-# carries full unredacted patient records.
-#
-# So this build cannot encrypt to SQL at all, and `SQL_ENCRYPT=Yes` is a
-# startup failure rather than a silent plaintext connection. See
-# spec/12-message-store.md §5.8 and tasks.md P6.6.
+# **TLS is `rustls`, with the compiled-in Mozilla roots** (`rustls-webpki-roots`
+# and `Config::trust_webpki_roots`), because the runtime image is distroless
+# and has no system trust store (spec/18 §4.4). `native-tls` stays out:
+# spec/17 §8.2 forbids openssl. 0.12.3 pinned `rustls` 0.21 and so the
+# vulnerable `rustls-webpki` 0.101 (RUSTSEC-2026-0098, -0099, -0104), which
+# is why this build once carried no TLS at all; 0.13 is on `rustls` 0.23.
+# See spec/12-message-store.md §5.8.
 #
 # `time` rather than `chrono`, so the workspace has one date library.
-tiberius = { version = "0.12", default-features = false, features = ["tds73", "time"] }
+tiberius = { version = "0.13", default-features = false, features = ["tds73", "time", "rustls", "rustls-webpki-roots"] }
 
 # --- XSD validation --------------------------------------------------------
 # Two independent XML Schema validators, run side by side and compared. See

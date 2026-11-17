@@ -17,7 +17,6 @@ use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
-use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::rustls::pki_types::ServerName;
 
 /// The most of a response that is read. An `OperationOutcome` is small; a
@@ -133,7 +132,7 @@ impl HyperTransport {
     /// [`TransportError`] when the trust roots cannot be built.
     pub fn new() -> Result<Self, TransportError> {
         let roots = ihb_tls::root_store().map_err(|error| TransportError(error.to_string()))?;
-        let config = ClientConfig::builder()
+        let config = ihb_tls::client_builder()
             .with_root_certificates(roots)
             .with_no_client_auth();
         Ok(Self {

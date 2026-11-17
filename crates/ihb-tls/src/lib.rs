@@ -70,13 +70,90 @@
 pub const CERT_FILE_VARIABLE: &str = rustls_extra_roots::DEFAULT_VARIABLE;
 
 pub use rustls_extra_roots::{
-    TrustError, client_config, configured_bundle, root_store, root_store_from, startup_check,
-    validate_at_startup,
+    TrustError, configured_bundle, root_store, root_store_from, startup_check, validate_at_startup,
 };
+
+use std::sync::Arc;
+
+use tokio_rustls::rustls::crypto::{CryptoProvider, ring};
+use tokio_rustls::rustls::{ClientConfig, ConfigBuilder, ServerConfig, WantsVerifier};
+
+/// The crypto provider every TLS configuration here is built with: `ring`.
+///
+/// **Named, never defaulted.** `tiberius` 0.13 depends on `tokio-rustls`
+/// with its default features, which adds `aws-lc-rs` next to `ring`. With two
+/// providers compiled in, `rustls` cannot choose one and `ClientConfig::builder()`
+/// panics at runtime — which is how the dashboard's tests failed under
+/// `cargo test --workspace` and passed under `-p dashboard`
+/// (`spec/12-message-store.md` §5.8.5). Naming the provider makes the choice
+/// independent of which crates a binary happens to link.
+#[must_use]
+pub fn provider() -> Arc<CryptoProvider> {
+    Arc::new(ring::default_provider())
+}
+
+/// A client configuration builder on [`provider`].
+///
+/// # Panics
+///
+/// Never in practice: `ring` supports the default protocol versions.
+#[must_use]
+#[allow(
+    clippy::expect_used,
+    reason = "ring supports the default versions; a failure here is a build defect"
+)]
+pub fn client_builder() -> ConfigBuilder<ClientConfig, WantsVerifier> {
+    ClientConfig::builder_with_provider(provider())
+        .with_safe_default_protocol_versions()
+        .expect("ring supports rustls's default protocol versions")
+}
+
+/// A client configuration trusting the Mozilla roots plus any configured bundle.
+///
+/// Built on [`provider`]. It replaces `rustls_extra_roots::client_config`,
+/// which consults the process-default provider and so panics once two are
+/// linked.
+///
+/// # Errors
+///
+/// [`TrustError`], as [`root_store`].
+pub fn client_config() -> Result<ClientConfig, TrustError> {
+    Ok(client_builder()
+        .with_root_certificates(root_store()?)
+        .with_no_client_auth())
+}
+
+/// A server configuration builder on [`provider`].
+///
+/// # Panics
+///
+/// Never in practice: `ring` supports the default protocol versions.
+#[must_use]
+#[allow(
+    clippy::expect_used,
+    reason = "ring supports the default versions; a failure here is a build defect"
+)]
+pub fn server_builder() -> ConfigBuilder<ServerConfig, WantsVerifier> {
+    ServerConfig::builder_with_provider(provider())
+        .with_safe_default_protocol_versions()
+        .expect("ring supports rustls's default protocol versions")
+}
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+
+    #[test]
+    fn the_builders_do_not_depend_on_a_process_default_provider() {
+        // `spec/12-message-store.md` §5.8.5: this must hold however many
+        // providers the binary links, and no default is installed here.
+        assert!(
+            tokio_rustls::rustls::crypto::CryptoProvider::get_default().is_none(),
+            "this test is only meaningful with no process default"
+        );
+        let _client = super::client_builder();
+        let _server = super::server_builder();
+    }
 
     use super::*;
 

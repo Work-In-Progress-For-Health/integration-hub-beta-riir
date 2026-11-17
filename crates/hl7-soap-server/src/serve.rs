@@ -67,7 +67,7 @@ pub fn tls_config(tls: &Tls) -> Result<ServerConfig, TlsError> {
     let certificates = read_certificates(&tls.certificate)?;
     let key = read_key(&tls.key)?;
 
-    ServerConfig::builder()
+    ihb_tls::server_builder()
         .with_no_client_auth()
         .with_single_cert(certificates, key)
         .map_err(|error| TlsError::Rejected(error.to_string()))

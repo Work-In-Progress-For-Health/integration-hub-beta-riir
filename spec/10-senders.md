@@ -395,11 +395,12 @@ message type, never the MSH text.**
 | `WORKFLOW_ID`, `MICROSERVICE_ID` | `risp-to-wrrs`, `wrrs_stmsg_dbsender` | |
 | `HEALTH_BOARD`, `PEER_SERVICE` | `SHARED`, `WRRS` | |
 
-Deviations, both from `12-message-store.md` §5.8: this build cannot encrypt
-to SQL, so `DB_ENCRYPT=Yes` (the default) is a **startup failure** naming
-§5.8, not a plaintext connection; and managed-identity authentication (no
-username and password) is likewise a startup failure until it is
-implemented. The connection is lazy and long-lived (§5.1).
+`DB_ENCRYPT=Yes` (the default) makes TLS mandatory
+(`12-message-store.md` §5.8): a server that will not encrypt, or whose
+certificate does not verify, is a connection failure. `DB_TRUST_SERVER_CERTIFICATE=Yes`
+skips verification and is off by default. One deviation remains:
+managed-identity authentication (no username and password) is a startup
+failure until it is implemented. The connection is lazy and long-lived (§5.1).
 
 §7.8 **Queue ID Update** (`DB_PROCEDURE_TYPE=queue_id_update`; upstream
 `#455`, `handlers/queue_idupd_handler.py`). The same service, a second

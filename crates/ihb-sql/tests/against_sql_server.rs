@@ -72,7 +72,7 @@ fn bootstrap_connection() -> SqlConnection {
             ("SQL_DATABASE", BOOTSTRAP_DATABASE),
             ("SQL_USERNAME", "sa"),
             ("MSSQL_SA_PASSWORD", password.as_str()),
-            ("SQL_ENCRYPT", "No"),
+            ("SQL_ENCRYPT", "Yes"),
             ("SQL_TRUST_SERVER_CERTIFICATE", "Yes"),
         ])
         .expect("the test configuration is complete"),
@@ -81,9 +81,9 @@ fn bootstrap_connection() -> SqlConnection {
 
 /// A connection to the local container.
 ///
-/// `SQL_ENCRYPT=No` because this build carries no TLS backend
-/// (`spec/12-message-store.md` §5.8) — and against a container on the
-/// loopback interface there is nothing to protect from.
+/// `SQL_ENCRYPT=Yes` with the server certificate trusted: the container's
+/// certificate is self-signed, and this proves the TLS path
+/// (`spec/12-message-store.md` §5.8).
 fn connection() -> SqlConnection {
     let password = std::env::var("MSSQL_SA_PASSWORD")
         .expect("MSSQL_SA_PASSWORD; see this file's documentation");
@@ -93,7 +93,7 @@ fn connection() -> SqlConnection {
         ("SQL_DATABASE", DATABASE),
         ("SQL_USERNAME", "sa"),
         ("MSSQL_SA_PASSWORD", password.as_str()),
-        ("SQL_ENCRYPT", "No"),
+        ("SQL_ENCRYPT", "Yes"),
         ("SQL_TRUST_SERVER_CERTIFICATE", "Yes"),
     ])
     .expect("the test configuration is complete");
@@ -364,7 +364,7 @@ async fn a_credential_never_reaches_an_error() {
         ("SQL_DATABASE", DATABASE),
         ("SQL_USERNAME", "sa"),
         ("MSSQL_SA_PASSWORD", "a-deliberately-wrong-password-9f3c"),
-        ("SQL_ENCRYPT", "No"),
+        ("SQL_ENCRYPT", "Yes"),
         ("SQL_TRUST_SERVER_CERTIFICATE", "Yes"),
     ])
     .unwrap();
@@ -380,5 +380,35 @@ async fn a_credential_never_reaches_an_error() {
     assert!(
         rendered.contains("127.0.0.1"),
         "the server may appear: {rendered}"
+    );
+}
+
+#[tokio::test]
+async fn an_untrusted_certificate_is_refused_and_never_downgraded() {
+    // `spec/12-message-store.md` §5.8: with encryption required and the
+    // certificate not trusted, the container's self-signed certificate must
+    // fail verification. The connection must not fall back to plaintext, and
+    // trusting a certificate is only ever the operator's explicit choice.
+    let password = std::env::var("MSSQL_SA_PASSWORD")
+        .expect("MSSQL_SA_PASSWORD; see this file's documentation");
+    let config = SqlConfig::from_pairs([
+        ("SQL_SERVER", "127.0.0.1"),
+        ("SQL_DATABASE", DATABASE),
+        ("SQL_USERNAME", "sa"),
+        ("MSSQL_SA_PASSWORD", password.as_str()),
+        ("SQL_ENCRYPT", "Yes"),
+        ("SQL_TRUST_SERVER_CERTIFICATE", "No"),
+    ])
+    .unwrap();
+
+    let mut sql = SqlConnection::new(config);
+    let error = sql
+        .take()
+        .await
+        .expect_err("a self-signed certificate must not verify");
+
+    assert!(
+        !format!("{error}\n{error:?}").contains(&password),
+        "the password reached an error"
     );
 }
