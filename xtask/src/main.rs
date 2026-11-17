@@ -32,6 +32,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 mod gate;
+mod hooks;
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -155,6 +156,7 @@ fn main() -> ExitCode {
         Some("fmt") => fmt(false),
         Some("fmt-check") => fmt(true),
         Some("msrv") => msrv(),
+        Some("install-hooks") => hooks::run(),
         Some("gate") => gate::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         Some("verify-pipelines") => verify_pipelines(),
         Some(other) => {
@@ -181,7 +183,7 @@ fn main() -> ExitCode {
 fn usage() {
     eprintln!(
         "usage: cargo xtask \
-         <build-dictionaries|verify-dictionaries|fmt|fmt-check|msrv|verify-pipelines|gate>"
+         <build-dictionaries|verify-dictionaries|fmt|fmt-check|msrv|verify-pipelines|gate|install-hooks>"
     );
 }
 

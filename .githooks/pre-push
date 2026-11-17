@@ -1,0 +1,4 @@
+#!/bin/sh
+# spec/21 §7.2 — tier 1. Calls the task and nothing else (§7.1); bypass with
+# `git push --no-verify`, which leaves no local/gate status (§7.3).
+exec cargo xtask gate

@@ -833,9 +833,14 @@ Not started. Independent of the other phases.
   stay in the workflow's setup and the developer's hands. Tier 2 refuses up
   front, with the command to run, when the broker or database is not
   listening. [`spec/21`](spec/21-local-ci.md) §1, §2, §8.2, §9.1
-- [ ] **P10.3** **`cargo xtask install-hooks`**: `core.hooksPath` to a
-  committed `.githooks/`; pre-commit tier 0, pre-push tier 1; never touches
-  global git config. [`spec/21`](spec/21-local-ci.md) §7
+- [x] **P10.3** **`cargo xtask install-hooks`**: sets this repository's
+  local `core.hooksPath` to the committed `.githooks/` and prints what it
+  changed (old value, how to undo); `pre-commit` runs tier 0, `pre-push`
+  tier 1; the global config is never read or written. Tests: the hooks only
+  call the task, are executable, and the source never names `--global`.
+  Run once to prove it, then **undone** here: it makes every push run the
+  ~5-minute gate, which is the developer's choice to opt into.
+  [`spec/21`](spec/21-local-ci.md) §7
 - [ ] **P10.4** **The evidence record** `target/gate/<sha>.json`, and
   `gate --post` for a `local/<tier>` commit status. Refuses a dirty tree, a
   mismatched commit or a failed tier; carries no secret. Tests per §9.2.
