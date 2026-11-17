@@ -203,7 +203,8 @@ no secret in the file; a failing tier recorded as failing.
 runs `cargo xtask schedule run` daily at 02:30 local time, at low priority.
 `print` shows the plist without installing, `status` says whether it is
 loaded, and `remove` unloads and deletes it. Installing is the user's act:
-nothing else in this repository installs it.
+nothing else in this repository installs it, and it is **not installed** on the
+machine this was written on (removed at the user's request, 2026-11-17).
 
 §10.2 The plist names the repository and a login shell, and **no secret**.
 The job reads `local/.secrets` itself and passes it only to its child

@@ -861,9 +861,10 @@ Not started. Independent of the other phases.
   that needs it. [`spec/21`](spec/21-local-ci.md) §6, §6.4
 - [x] **P10.6** **Scheduled local runs** of tiers 2 and 3 (launchd), one
   Compose profile at a time, writing the record of P10.4. `cargo xtask
-  schedule print|install|remove|status|run`; installed on this machine at
-  02:30 daily. Skips a dirty tree, a running job and an already-green commit.
-  **The first nightly log has not been seen yet.**
+  schedule print|install|remove|status|run`. **Built, not installed:** it was
+  installed once, then removed at the user's request (2026-11-17), and no
+  nightly run has completed. `install` schedules it at 02:30 daily. Skips a
+  dirty tree, a running job and an already-green commit.
   [`spec/21`](spec/21-local-ci.md) §2.2, §10
 - [x] **P10.7** **Trial `cargo-nextest`** (0.9.149): **not adopted.**
   Tier 1 (no emulator): `cargo test --workspace --lib --tests` 61.5 s and
