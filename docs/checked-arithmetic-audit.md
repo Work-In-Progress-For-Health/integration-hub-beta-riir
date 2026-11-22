@@ -20,7 +20,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `ultra7` | **0** (was 20) | | | | | | |
 | `hl7-soap-server` | **0** (was 17) | | | | | | |
 | `hl7-pims-transformer` | **0** (was 16) | | | | | | |
-| `ihb-validation` | 13 | 6 | 5 | 2 |  |  |  |
+| `ihb-validation` | **0** (was 13) | | | | | | |
 | `http-mock-receiver` | 11 | 4 | 7 |  |  |  |  |
 | `ihb-bus` | 8 | 7 |  | 1 |  |  |  |
 | `hl7-server` | 7 |  | 4 | 3 |  |  |  |
@@ -44,7 +44,8 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
-**Done:** `hl7-pims-transformer` (a network-supplied chunk size was added to unchecked, as in
+**Done:** `ihb-validation` (`drop_empty_elements` compared with the offset version on 400,000
+generated texts; `insertion_point` counts from the end instead of `+ 1`), `hl7-pims-transformer` (a network-supplied chunk size was added to unchecked, as in
 `lookup-service`; the retry back-off now ends retrying instead of saturating), `hl7-soap-server` (`payload::extract` on `get`/`checked_*`; compared with the
 offset version on 800,000 generated texts), `ultra7` (its stale-range and lenient-chunk fallbacks are kept and listed under
 decisions below), `dashboard` (§7.4 of its spec; 32 findings and the saturating/clamp uses
@@ -158,19 +159,6 @@ crates/ihb-sql/src/chunk.rs:15 integer_division
 crates/ihb-sql/src/connection.rs:157 unreachable
 crates/ihb-telemetry/src/clock.rs:160 arithmetic_side_effects
 crates/ihb-transformer/src/runtime.rs:262 arithmetic_side_effects
-crates/ihb-validation/src/convert.rs:204 string_slice
-crates/ihb-validation/src/convert.rs:205 string_slice
-crates/ihb-validation/src/convert.rs:212 string_slice
-crates/ihb-validation/src/convert.rs:213 arithmetic_side_effects
-crates/ihb-validation/src/convert.rs:213 string_slice
-crates/ihb-validation/src/convert.rs:225 string_slice
-crates/ihb-validation/src/flow.rs:136 indexing_slicing
-crates/ihb-validation/src/grammar.rs:305 arithmetic_side_effects
-crates/ihb-validation/src/grammar.rs:306 arithmetic_side_effects
-crates/ihb-validation/src/grammar.rs:325 arithmetic_side_effects
-crates/ihb-validation/src/repair.rs:171 arithmetic_side_effects
-crates/ihb-validation/src/repair.rs:194 indexing_slicing
-crates/ihb-validation/src/repair.rs:200 arithmetic_side_effects
 crates/integration-hub-tester/src/cli.rs:109 indexing_slicing
 crates/integration-hub-tester/src/cli.rs:136 indexing_slicing
 crates/integration-hub-tester/src/plugins/senders.rs:50 arithmetic_side_effects

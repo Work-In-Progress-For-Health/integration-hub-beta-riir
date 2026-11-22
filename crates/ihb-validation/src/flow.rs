@@ -118,10 +118,6 @@ impl Flow {
     // `cargo xtask verify-dictionaries` loads every one of them in CI — and
     // a service that cannot validate its flow must stop rather than start
     // pretending it can. See spec/17-testing-and-quality.md §2.3.
-    #[allow(
-        clippy::panic,
-        reason = "an unparseable committed dictionary is unrecoverable"
-    )]
     pub fn dictionary(self) -> Arc<Dictionary> {
         /// One cache slot per flow.
         static CACHE: [OnceLock<Arc<Dictionary>>; 6] = [
@@ -133,20 +129,31 @@ impl Flow {
             OnceLock::new(),
         ];
 
-        CACHE[self.index()]
-            .get_or_init(|| {
-                let json = self.dictionary_json();
-                let dictionary =
-                    Dictionary::from_json(json, self.as_str()).unwrap_or_else(|error| {
-                        panic!(
-                            "the committed {} dictionary does not parse: {error}. \
-                         Run `cargo xtask build-dictionaries`.",
-                            self.as_str()
-                        )
-                    });
-                Arc::new(dictionary)
-            })
-            .clone()
+        // `index()` is always below `CACHE.len()`; if it were not, the
+        // dictionary is built without caching, never indexed out of range.
+        let Some(slot) = CACHE.get(self.index()) else {
+            return self.build_dictionary();
+        };
+        slot.get_or_init(|| self.build_dictionary()).clone()
+    }
+
+    /// Parse the embedded dictionary for this flow.
+    ///
+    /// Panics, deliberately, as `dictionary` documents.
+    #[allow(
+        clippy::panic,
+        reason = "an unparseable committed dictionary is unrecoverable"
+    )]
+    fn build_dictionary(self) -> Arc<Dictionary> {
+        let json = self.dictionary_json();
+        let dictionary = Dictionary::from_json(json, self.as_str()).unwrap_or_else(|error| {
+            panic!(
+                "the committed {} dictionary does not parse: {error}. \
+                 Run `cargo xtask build-dictionaries`.",
+                self.as_str()
+            )
+        });
+        Arc::new(dictionary)
     }
 
     /// The message structures this flow has a schema for, sorted.

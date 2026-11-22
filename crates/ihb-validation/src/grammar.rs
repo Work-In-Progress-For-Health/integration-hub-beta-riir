@@ -293,7 +293,7 @@ pub struct MatchError {
 fn match_items(items: &[Item], tags: &[&str], mut pos: usize) -> (Option<Vec<Matched>>, usize) {
     let mut matched = Vec::new();
     for item in items {
-        let mut count = 0u32;
+        let mut any = false;
         loop {
             match item {
                 Item::Segment { name, max, .. } => {
@@ -302,8 +302,13 @@ fn match_items(items: &[Item], tags: &[&str], mut pos: usize) -> (Option<Vec<Mat
                             name: name.clone(),
                             index: pos,
                         });
-                        pos += 1;
-                        count += 1;
+                        // `pos` is a valid index into `tags`, so this cannot
+                        // overflow; if it did, matching would stop here.
+                        let Some(next) = pos.checked_add(1) else {
+                            break;
+                        };
+                        pos = next;
+                        any = true;
                         if max.repeats() {
                             continue;
                         }
@@ -322,7 +327,7 @@ fn match_items(items: &[Item], tags: &[&str], mut pos: usize) -> (Option<Vec<Mat
                         items: sub,
                     }));
                     pos = new_pos;
-                    count += 1;
+                    any = true;
                     if group.max.repeats() {
                         continue;
                     }
@@ -330,7 +335,7 @@ fn match_items(items: &[Item], tags: &[&str], mut pos: usize) -> (Option<Vec<Mat
                 }
             }
         }
-        if count == 0 && item.min() >= 1 {
+        if !any && item.min() >= 1 {
             return (None, pos);
         }
     }

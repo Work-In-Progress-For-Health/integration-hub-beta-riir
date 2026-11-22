@@ -167,9 +167,12 @@ fn repair_is_effective(items: &[Item], name: &str) -> bool {
 
     // Whatever comes next must be a plain segment for the Python's append to
     // land in the right place.
-    items
-        .get(position + 1)
-        .is_none_or(|next| matches!(next, Item::Segment { .. }))
+    // A position that cannot be advanced is not an effective repair.
+    position.checked_add(1).is_some_and(|after| {
+        items
+            .get(after)
+            .is_none_or(|next| matches!(next, Item::Segment { .. }))
+    })
 }
 
 /// Where a synthesised segment goes.
@@ -191,16 +194,17 @@ fn insertion_point(message: &Message, items: &[Item], name: &str) -> usize {
         return message.segments().count();
     };
 
-    let precede: Vec<&str> = order[..position].to_vec();
+    let precede: Vec<&str> = order.iter().take(position).copied().collect();
 
-    // The index after the last present segment that sorts before this one.
-    let mut index = 0;
-    for (at, segment) in message.segments().enumerate() {
-        if precede.contains(&segment.name.as_str()) {
-            index = at + 1;
-        }
-    }
-    index
+    // The index after the last present segment that sorts before this one:
+    // the number of segments up to and including it, counted from the end
+    // without any `+ 1`. None present counts none, so index 0.
+    let names: Vec<&str> = message.segments().map(|s| s.name.as_str()).collect();
+    names
+        .iter()
+        .rev()
+        .skip_while(|name| !precede.contains(name))
+        .count()
 }
 
 #[cfg(test)]

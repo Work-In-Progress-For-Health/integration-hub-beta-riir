@@ -201,16 +201,25 @@ fn drop_empty_elements(xml: &str) -> String {
     let mut rest = xml;
 
     while let Some(open) = rest.find('<') {
-        out.push_str(&rest[..open]);
-        rest = &rest[open..];
+        // `<` and `>` are ASCII, so every cut below is on a boundary; if one
+        // somehow is not, the rest is copied through unrepaired.
+        let Some((text, from_open)) = rest.split_at_checked(open) else {
+            break;
+        };
+        out.push_str(text);
 
-        let Some(close) = rest.find('>') else {
-            out.push_str(rest);
+        let Some(close) = from_open.find('>') else {
+            out.push_str(from_open);
             return out;
         };
 
-        let tag = &rest[..=close];
-        let after = &rest[close + 1..];
+        let Some((tag, after)) = close
+            .checked_add(1)
+            .and_then(|end| from_open.split_at_checked(end))
+        else {
+            out.push_str(from_open);
+            return out;
+        };
 
         // `<X/>`: nothing in it by construction.
         if tag.ends_with("/>") && !tag.starts_with("<?") && !tag.starts_with("<!") {
@@ -221,8 +230,8 @@ fn drop_empty_elements(xml: &str) -> String {
         // `<X></X>`: an open tag followed immediately by its close.
         if let Some(name) = element_name(tag) {
             let closing = format!("</{name}>");
-            if after.starts_with(&closing) {
-                rest = &after[closing.len()..];
+            if let Some(remainder) = after.strip_prefix(closing.as_str()) {
+                rest = remainder;
                 continue;
             }
         }

@@ -851,6 +851,15 @@ best-effort fallback.
 admits only by backtracking is rejected; this is the Python's behaviour and
 is kept, so the two accept the same messages.
 
+§10.3.4a **Checked arithmetic** (`rust-checked-arithmetic`): the crate denies
+`arithmetic_side_effects`, `as_conversions`, `indexing_slicing`, `string_slice`,
+`integer_division` and `unreachable`. The matcher advances `pos` with
+`checked_add` and tracks "matched anything" as a flag, not a counter; the
+repair's insertion point is the number of segments up to the last one that
+precedes it, counted from the end. The one deliberate `panic` stays: a
+committed dictionary that does not parse is unrecoverable (§2.3 of
+`17-testing-and-quality.md`).
+
 §10.3.5 A failure MUST name the structure and the **segment position and
 tag** at which matching stopped, never a field value (the tag is a
 three-character segment code, not patient data).
