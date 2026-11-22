@@ -45,6 +45,19 @@
 // held to the end of a function a few lines long, which is every use of a
 // guard in this crate: each critical section is the whole body by design,
 // and shortening one would split an update that must be atomic.
+// Checked arithmetic (`rust-checked-arithmetic`, RCA-ENF-3): denied for the
+// whole crate. Tests may use plain operators and indexing (RCA-EXC-5).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::integer_division,
+        clippy::unreachable
+    )
+)]
 #![allow(clippy::significant_drop_tightening)]
 // `option_if_let_else` would rewrite `if let Some(..) .. else ..` blocks that
 // build large structs into `map_or_else` closures, which reads worse where

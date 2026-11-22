@@ -24,6 +24,7 @@
 //! make the service fetch from Microsoft once per request; the interval
 //! bounds that (deviation, `§12.2`).
 
+use crate::form::split_at_needle;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -121,8 +122,9 @@ impl JwksKeys {
                 jwk.get("kid").and_then(Value::as_str),
                 field("n"),
                 field("e"),
-            ) {
-                keys.insert(kid.to_owned(), rsa_public_key_der(&n, &e));
+            ) && let Some(der) = rsa_public_key_der(&n, &e)
+            {
+                keys.insert(kid.to_owned(), der);
             }
         }
         Ok(keys)
@@ -189,7 +191,10 @@ fn exchange<S: Read + Write>(mut stream: S, request: &str) -> Result<Vec<u8>, &'
         match stream.read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => {
-                raw.extend_from_slice(&chunk[..n]);
+                // `read` never reports more than the buffer, so `get` always
+                // answers; a lie from a broken `Read` is an error, not a panic.
+                let read = chunk.get(..n).ok_or("the key document could not be read")?;
+                raw.extend_from_slice(read);
                 if raw.len() > MAX_DOCUMENT_BYTES {
                     return Err("the key document is too large");
                 }
@@ -205,11 +210,8 @@ fn exchange<S: Read + Write>(mut stream: S, request: &str) -> Result<Vec<u8>, &'
 
 /// The body of a `200`, de-chunked.
 fn split_ok_body(raw: &[u8]) -> Result<Vec<u8>, &'static str> {
-    let split = raw
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .ok_or("the key answer was incomplete")?;
-    let head = String::from_utf8_lossy(&raw[..split]).into_owned();
+    let (head, body) = split_at_needle(raw, b"\r\n\r\n").ok_or("the key answer was incomplete")?;
+    let head = String::from_utf8_lossy(head).into_owned();
     let mut lines = head.split("\r\n");
     let status = lines.next().and_then(|l| l.split(' ').nth(1));
     if status != Some("200") {
@@ -219,30 +221,35 @@ fn split_ok_body(raw: &[u8]) -> Result<Vec<u8>, &'static str> {
         let l = l.to_ascii_lowercase();
         l.starts_with("transfer-encoding:") && l.contains("chunked")
     });
-    let body = &raw[split + 4..];
     if !chunked {
         return Ok(body.to_vec());
     }
+    dechunk(body)
+}
+
+/// A chunked body, reassembled. A chunk size is read off the network, so it
+/// is never added to: `split_at_checked` refuses one that runs past the data
+/// (RCA-LEN-3).
+fn dechunk(body: &[u8]) -> Result<Vec<u8>, &'static str> {
+    const MALFORMED: &str = "the chunked answer was malformed";
     let mut out = Vec::new();
     let mut rest = body;
     loop {
-        let end = rest
-            .windows(2)
-            .position(|w| w == b"\r\n")
-            .ok_or("the chunked answer was malformed")?;
-        let size = std::str::from_utf8(&rest[..end])
+        let (size_line, after_line) = split_at_needle(rest, b"\r\n").ok_or(MALFORMED)?;
+        let size = std::str::from_utf8(size_line)
             .ok()
             .and_then(|s| usize::from_str_radix(s.split(';').next().unwrap_or("").trim(), 16).ok())
-            .ok_or("the chunked answer was malformed")?;
-        rest = &rest[end + 2..];
+            .ok_or(MALFORMED)?;
         if size == 0 {
             return Ok(out);
         }
-        if rest.len() < size + 2 {
-            return Err("the chunked answer was truncated");
-        }
-        out.extend_from_slice(&rest[..size]);
-        rest = &rest[size + 2..];
+        let (data, after_data) = after_line
+            .split_at_checked(size)
+            .ok_or("the chunked answer was truncated")?;
+        out.extend_from_slice(data);
+        rest = after_data
+            .strip_prefix(b"\r\n")
+            .ok_or("the chunked answer was truncated")?;
     }
 }
 
@@ -272,5 +279,75 @@ impl SigningKeys for JwksKeys {
         cache.keys = self.fetch()?;
         cache.fetched_at = Some(Instant::now());
         cache.keys.get(kid).cloned().ok_or(KeysError::Unknown)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn answer(head_extra: &str, body: &[u8]) -> Vec<u8> {
+        let mut raw = format!("HTTP/1.1 200 OK\r\n{head_extra}\r\n").into_bytes();
+        raw.extend_from_slice(body);
+        raw
+    }
+
+    #[test]
+    fn a_plain_body_is_returned_whole() {
+        assert_eq!(
+            split_ok_body(&answer("", b"{\"keys\":[]}")),
+            Ok(b"{\"keys\":[]}".to_vec())
+        );
+    }
+
+    #[test]
+    fn a_chunked_body_is_reassembled() {
+        let raw = answer(
+            "Transfer-Encoding: chunked\r\n",
+            b"4\r\nabcd\r\n3;ext=1\r\nefg\r\n0\r\n\r\n",
+        );
+        assert_eq!(split_ok_body(&raw), Ok(b"abcdefg".to_vec()));
+    }
+
+    /// `RCA-LEN-3`: a chunk size off the network never overflows an addition.
+    #[test]
+    fn a_huge_chunk_size_is_refused_not_a_panic() {
+        for size in ["ffffffffffffffff", "fffffffffffffffe", "7fffffffffffffff"] {
+            let raw = answer(
+                "Transfer-Encoding: chunked\r\n",
+                format!("{size}\r\nabc\r\n0\r\n\r\n").as_bytes(),
+            );
+            assert_eq!(
+                split_ok_body(&raw),
+                Err("the chunked answer was truncated"),
+                "{size}"
+            );
+        }
+    }
+
+    #[test]
+    fn broken_framing_is_an_error() {
+        let chunked = |body: &[u8]| answer("transfer-encoding: Chunked\r\n", body);
+        assert_eq!(
+            split_ok_body(&chunked(b"zz\r\nabc\r\n")),
+            Err("the chunked answer was malformed")
+        );
+        assert_eq!(
+            split_ok_body(&chunked(b"3\r\nabc")),
+            Err("the chunked answer was truncated")
+        );
+        assert_eq!(
+            split_ok_body(&chunked(b"3\r\nabcXX0\r\n\r\n")),
+            Err("the chunked answer was truncated"),
+            "no CRLF after the data"
+        );
+        assert_eq!(
+            split_ok_body(b"HTTP/1.1 200 OK\r\n"),
+            Err("the key answer was incomplete")
+        );
+        assert_eq!(
+            split_ok_body(b"HTTP/1.1 404 Not Found\r\n\r\nx"),
+            Err("the key host did not answer 200")
+        );
     }
 }

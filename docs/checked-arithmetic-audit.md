@@ -14,7 +14,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 
 | Crate | Total | arithmetic_side_effects | string_slice | indexing_slicing | as_conversions | integer_division | unreachable |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `lookup-service` | 64 | 37 |  | 19 | 4 | 4 |  |
+| `lookup-service` | **0** (was 64) | | | | | | |
 | `db-sender` | **0** (was 62) | | | | | | |
 | `dashboard` | 32 | 24 | 2 |  | 6 |  |  |
 | `ultra7` | 20 | 9 |  | 10 | 1 |  |  |
@@ -44,10 +44,8 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
-**In progress:** `lookup-service` (`cache`, `config`, `file_store`, `import`, `pages`,
-`ttl`, `web`, `admin` done; `form.rs`, `jwks.rs`, `security.rs` left, 44 findings).
-
-**Done:** `db-sender` (denied at the crate root; `sanitize.rs` rewritten on remainder
+**Done:** `lookup-service` (denied at the crate root; `jwks.rs` had a network-reachable
+overflow in the chunk-size arithmetic, fixed with tests) and `db-sender` (denied at the crate root; `sanitize.rs` rewritten on remainder
 slices, `msh.rs` salvage dropped, spec/10 §7.4 and §7.5).
 
 ## Found by grep, not by Clippy (RCA-ENF-5)
@@ -68,7 +66,7 @@ code (2026-11-22):
 | `ihb-sender/src/main_loop.rs:85`, `throttle.rs:158,166` | `saturating_sub`, `allowable.clamp(1, ..)` | declared floor, or error |
 | `dashboard/src/azure/email.rs:164` | `backoff * 2_u32.saturating_pow(attempt)` | declared ceiling |
 | `hl7-server/src/listener.rs:199` | `len().saturating_sub(buffered())` | `checked_sub`, the invariant is the point |
-| `lookup-service/src/security.rs:753` | `len().saturating_sub(1)` | `lookup-service` pass, below |
+| `lookup-service/src/security.rs:753` | `len().saturating_sub(1)` | done: `der_integer` rewritten |
 
 ## Decisions needed (rejection currently becomes a substitute, RCA-IN-2 / RCA-IN-7)
 
@@ -236,70 +234,6 @@ crates/integration-hub-tester/src/cli.rs:136 indexing_slicing
 crates/integration-hub-tester/src/plugins/senders.rs:50 arithmetic_side_effects
 crates/integration-hub-tester/src/plugins/senders.rs:103 arithmetic_side_effects
 crates/integration-hub-tester/src/plugins/senders.rs:104 arithmetic_side_effects
-crates/lookup-service/src/cache.rs:102 arithmetic_side_effects
-crates/lookup-service/src/cache.rs:107 arithmetic_side_effects
-crates/lookup-service/src/cache.rs:112 arithmetic_side_effects
-crates/lookup-service/src/cache.rs:116 arithmetic_side_effects
-crates/lookup-service/src/cache.rs:129 arithmetic_side_effects
-crates/lookup-service/src/config.rs:158 arithmetic_side_effects
-crates/lookup-service/src/file_store.rs:95 integer_division
-crates/lookup-service/src/file_store.rs:237 as_conversions
-crates/lookup-service/src/file_store.rs:240 integer_division
-crates/lookup-service/src/file_store.rs:332 indexing_slicing
-crates/lookup-service/src/form.rs:20 indexing_slicing
-crates/lookup-service/src/form.rs:22 arithmetic_side_effects
-crates/lookup-service/src/form.rs:23 arithmetic_side_effects
-crates/lookup-service/src/form.rs:23 indexing_slicing
-crates/lookup-service/src/form.rs:24 arithmetic_side_effects
-crates/lookup-service/src/form.rs:24 indexing_slicing
-crates/lookup-service/src/form.rs:27 arithmetic_side_effects
-crates/lookup-service/src/form.rs:27 indexing_slicing
-crates/lookup-service/src/form.rs:28 arithmetic_side_effects
-crates/lookup-service/src/form.rs:28 indexing_slicing
-crates/lookup-service/src/form.rs:29 arithmetic_side_effects
-crates/lookup-service/src/form.rs:30 arithmetic_side_effects
-crates/lookup-service/src/form.rs:34 arithmetic_side_effects
-crates/lookup-service/src/form.rs:42 arithmetic_side_effects
-crates/lookup-service/src/form.rs:43 arithmetic_side_effects
-crates/lookup-service/src/form.rs:44 arithmetic_side_effects
-crates/lookup-service/src/form.rs:105 arithmetic_side_effects
-crates/lookup-service/src/form.rs:108 arithmetic_side_effects
-crates/lookup-service/src/form.rs:108 indexing_slicing
-crates/lookup-service/src/form.rs:120 arithmetic_side_effects
-crates/lookup-service/src/form.rs:123 indexing_slicing
-crates/lookup-service/src/form.rs:131 arithmetic_side_effects
-crates/lookup-service/src/form.rs:133 indexing_slicing
-crates/lookup-service/src/form.rs:136 arithmetic_side_effects
-crates/lookup-service/src/form.rs:138 indexing_slicing
-crates/lookup-service/src/form.rs:140 arithmetic_side_effects
-crates/lookup-service/src/form.rs:142 indexing_slicing
-crates/lookup-service/src/form.rs:151 arithmetic_side_effects
-crates/lookup-service/src/import.rs:82 arithmetic_side_effects
-crates/lookup-service/src/import.rs:103 arithmetic_side_effects
-crates/lookup-service/src/import.rs:120 arithmetic_side_effects
-crates/lookup-service/src/jwks.rs:192 indexing_slicing
-crates/lookup-service/src/jwks.rs:212 indexing_slicing
-crates/lookup-service/src/jwks.rs:222 arithmetic_side_effects
-crates/lookup-service/src/jwks.rs:222 indexing_slicing
-crates/lookup-service/src/jwks.rs:233 indexing_slicing
-crates/lookup-service/src/jwks.rs:237 arithmetic_side_effects
-crates/lookup-service/src/jwks.rs:237 indexing_slicing
-crates/lookup-service/src/jwks.rs:241 arithmetic_side_effects
-crates/lookup-service/src/jwks.rs:244 indexing_slicing
-crates/lookup-service/src/jwks.rs:245 arithmetic_side_effects
-crates/lookup-service/src/jwks.rs:245 indexing_slicing
-crates/lookup-service/src/pages.rs:463 arithmetic_side_effects
-crates/lookup-service/src/pages.rs:580 arithmetic_side_effects
-crates/lookup-service/src/pages.rs:581 arithmetic_side_effects
-crates/lookup-service/src/security.rs:334 as_conversions
-crates/lookup-service/src/security.rs:336 as_conversions
-crates/lookup-service/src/security.rs:754 indexing_slicing
-crates/lookup-service/src/security.rs:755 arithmetic_side_effects
-crates/lookup-service/src/ttl.rs:41 integer_division
-crates/lookup-service/src/ttl.rs:57 arithmetic_side_effects
-crates/lookup-service/src/ttl.rs:57 integer_division
-crates/lookup-service/src/web.rs:69 as_conversions
-crates/lookup-service/src/web.rs:449 arithmetic_side_effects
 crates/message-replay-job/src/job.rs:223 arithmetic_side_effects
 crates/message-replay-job/src/main.rs:174 arithmetic_side_effects
 crates/message-replay-job/src/sql.rs:85 arithmetic_side_effects

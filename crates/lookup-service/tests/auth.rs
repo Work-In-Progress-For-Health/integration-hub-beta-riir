@@ -420,14 +420,16 @@ mod verifier {
     #[test]
     fn the_der_encoding_pads_a_high_bit() {
         assert_eq!(
-            rsa_public_key_der(&[0x80], &[0x01, 0x00, 0x01]),
-            [
-                0x30, 0x09, 0x02, 0x02, 0x00, 0x80, 0x02, 0x03, 0x01, 0x00, 0x01
-            ]
+            rsa_public_key_der(&[0x80], &[0x01, 0x00, 0x01]).as_deref(),
+            Some(
+                &[
+                    0x30, 0x09, 0x02, 0x02, 0x00, 0x80, 0x02, 0x03, 0x01, 0x00, 0x01
+                ][..]
+            )
         );
         assert_eq!(
-            rsa_public_key_der(&[0, 0, 0x7f], &[3]),
-            [0x30, 0x06, 0x02, 0x01, 0x7f, 0x02, 0x01, 0x03],
+            rsa_public_key_der(&[0, 0, 0x7f], &[3]).as_deref(),
+            Some(&[0x30, 0x06, 0x02, 0x01, 0x7f, 0x02, 0x01, 0x03][..]),
             "leading zeros are dropped"
         );
     }
@@ -437,8 +439,8 @@ mod verifier {
         let pair = key_pair();
         let components: ring::rsa::PublicKeyComponents<Vec<u8>> = pair.public().into();
         assert_eq!(
-            rsa_public_key_der(&components.n, &components.e),
-            pair.public().as_ref()
+            rsa_public_key_der(&components.n, &components.e).as_deref(),
+            Some(pair.public().as_ref())
         );
     }
 

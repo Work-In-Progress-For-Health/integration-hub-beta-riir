@@ -3,6 +3,19 @@
 //! Implements `spec/20-lookup-service.md`. **Phase 1: not production ready**
 //! (§1.1).
 
+// Checked arithmetic (`rust-checked-arithmetic`, RCA-ENF-3): see `lib.rs`.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::integer_division,
+        clippy::unreachable
+    )
+)]
+
 use std::process::ExitCode;
 use std::sync::Arc;
 

@@ -13,35 +13,50 @@ use std::fmt::Write as _;
 /// the lenient behaviour of the framework the Python runs on.
 #[must_use]
 pub fn percent_decode(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
+    let mut out = Vec::with_capacity(text.len());
+    let mut rest = text.as_bytes();
+    while let Some((&byte, tail)) = rest.split_first() {
+        rest = tail;
+        match byte {
             b'+' => out.push(b' '),
-            b'%' if i + 2 < bytes.len()
-                && hex(bytes[i + 1]).is_some()
-                && hex(bytes[i + 2]).is_some() =>
-            {
-                // The guard has just checked both digits.
-                let high = hex(bytes[i + 1]).unwrap_or(0);
-                let low = hex(bytes[i + 2]).unwrap_or(0);
-                out.push(high * 16 + low);
-                i += 2;
-            }
+            b'%' => match tail {
+                // Two hex digits make one byte; anything else keeps the `%`.
+                [high, low, after @ ..] if let Some(decoded) = escaped(*high, *low) => {
+                    out.push(decoded);
+                    rest = after;
+                }
+                _ => out.push(byte),
+            },
             byte => out.push(byte),
         }
-        i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The byte `%<high><low>` stands for, when both are hex digits.
+fn escaped(high: u8, low: u8) -> Option<u8> {
+    hex(high)?.checked_mul(16)?.checked_add(hex(low)?)
 }
 
 /// The value of a hex digit.
 const fn hex(byte: u8) -> Option<u8> {
     match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
+        b'0' => Some(0),
+        b'1' => Some(1),
+        b'2' => Some(2),
+        b'3' => Some(3),
+        b'4' => Some(4),
+        b'5' => Some(5),
+        b'6' => Some(6),
+        b'7' => Some(7),
+        b'8' => Some(8),
+        b'9' => Some(9),
+        b'a' | b'A' => Some(10),
+        b'b' | b'B' => Some(11),
+        b'c' | b'C' => Some(12),
+        b'd' | b'D' => Some(13),
+        b'e' | b'E' => Some(14),
+        b'f' | b'F' => Some(15),
         _ => None,
     }
 }
@@ -100,13 +115,23 @@ pub fn boundary_of(content_type: &str) -> Option<String> {
     })
 }
 
-/// Position of `needle` in `haystack` at or after `from`.
-fn find(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
-    if needle.is_empty() || haystack.len() < needle.len() || from > haystack.len() - needle.len() {
+/// What comes before and after the first `needle` in `haystack`.
+pub(crate) fn split_at_needle<'a>(
+    haystack: &'a [u8],
+    needle: &[u8],
+) -> Option<(&'a [u8], &'a [u8])> {
+    if needle.is_empty() {
         return None;
     }
-    (from..=haystack.len() - needle.len()).find(|&i| &haystack[i..i + needle.len()] == needle)
+    let at = haystack
+        .windows(needle.len())
+        .position(|window| window == needle)?;
+    let (before, from_needle) = haystack.split_at_checked(at)?;
+    Some((before, from_needle.get(needle.len()..)?))
 }
+
+/// The reason for every framing failure: never a piece of the body.
+const MALFORMED: &str = "malformed multipart body";
 
 /// Parse a multipart body into its parts.
 ///
@@ -116,39 +141,31 @@ fn find(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
 pub fn parse_multipart(body: &[u8], boundary: &str) -> Result<Vec<Part>, &'static str> {
     let delimiter = format!("--{boundary}").into_bytes();
     let separator = format!("\r\n--{boundary}").into_bytes();
-    let mut position =
-        find(body, &delimiter, 0).ok_or("malformed multipart body")? + delimiter.len();
+    let mut rest = split_at_needle(body, &delimiter).ok_or(MALFORMED)?.1;
     let mut parts = Vec::new();
     loop {
-        if body[position..].starts_with(b"--") {
+        if rest.starts_with(b"--") {
             return Ok(parts);
         }
         // Optional transport padding, then the line break after the boundary.
-        while body
-            .get(position)
-            .is_some_and(|b| *b == b' ' || *b == b'\t')
-        {
-            position += 1;
-        }
-        if !body[position..].starts_with(b"\r\n") {
-            return Err("malformed multipart body");
-        }
-        position += 2;
-        let headers_end = find(body, b"\r\n\r\n", position).ok_or("malformed multipart body")?;
-        let headers = std::str::from_utf8(&body[position..headers_end])
-            .map_err(|_| "malformed multipart headers")?;
-        let data_start = headers_end + 4;
-        let data_end = find(body, &separator, data_start).ok_or("malformed multipart body")?;
-        let data = body[data_start..data_end].to_vec();
+        let padding = rest
+            .iter()
+            .take_while(|byte| matches!(**byte, b' ' | b'\t'))
+            .count();
+        let after_padding = rest.get(padding..).ok_or(MALFORMED)?;
+        let line = after_padding.strip_prefix(b"\r\n").ok_or(MALFORMED)?;
+        let (headers, after_headers) = split_at_needle(line, b"\r\n\r\n").ok_or(MALFORMED)?;
+        let headers = std::str::from_utf8(headers).map_err(|_| "malformed multipart headers")?;
+        let (data, after_data) = split_at_needle(after_headers, &separator).ok_or(MALFORMED)?;
         let (name, file_name) = disposition(headers);
         if let Some(name) = name {
             parts.push(Part {
                 name,
                 file_name,
-                data,
+                data: data.to_vec(),
             });
         }
-        position = data_end + separator.len();
+        rest = after_data;
         if parts.len() > 64 {
             return Err("too many form fields");
         }

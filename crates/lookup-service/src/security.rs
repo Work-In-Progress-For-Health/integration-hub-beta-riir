@@ -330,10 +330,9 @@ impl TokenVerifier {
         let Some(exp) = claims.get("exp").and_then(Value::as_f64) else {
             return Err(invalid("missing exp"));
         };
-        #[allow(clippy::cast_precision_loss)] // seconds since 1970 fit an f64 exactly
-        let now_f = now as f64;
-        #[allow(clippy::cast_precision_loss)]
-        let skew = CLOCK_SKEW_SECONDS as f64;
+        let (Some(now_f), Some(skew)) = (exact_f64(now), exact_f64(CLOCK_SKEW_SECONDS)) else {
+            return Err(invalid("clock out of range"));
+        };
         if now_f > exp + skew {
             tracing::warn!(reason = "expired", "Rejected bearer token");
             return Err(LookupError::bearer_unauthorized("Token has expired"));
@@ -731,49 +730,67 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 ///
 /// // n = 0x80 needs a leading zero so it is not read as negative.
 /// assert_eq!(
-///     rsa_public_key_der(&[0x80], &[0x01, 0x00, 0x01]),
-///     [0x30, 0x09, 0x02, 0x02, 0x00, 0x80, 0x02, 0x03, 0x01, 0x00, 0x01]
+///     rsa_public_key_der(&[0x80], &[0x01, 0x00, 0x01]).as_deref(),
+///     Some(&[0x30, 0x09, 0x02, 0x02, 0x00, 0x80, 0x02, 0x03, 0x01, 0x00, 0x01][..])
 /// );
 /// ```
 #[must_use]
-pub fn rsa_public_key_der(modulus: &[u8], exponent: &[u8]) -> Vec<u8> {
-    let mut body = der_integer(modulus);
-    body.extend(der_integer(exponent));
+pub fn rsa_public_key_der(modulus: &[u8], exponent: &[u8]) -> Option<Vec<u8>> {
+    let mut body = der_integer(modulus)?;
+    body.extend(der_integer(exponent)?);
     let mut out = vec![0x30];
-    out.extend(der_length(body.len()));
+    out.extend(der_length(body.len())?);
     out.extend(body);
-    out
+    Some(out)
+}
+
+/// `seconds` as an `f64`, only if that is exact (at most 2^53, RCA-CONV-4).
+const fn exact_f64(seconds: u64) -> Option<f64> {
+    const EXACT_LIMIT: u64 = 1 << 53;
+    if seconds > EXACT_LIMIT {
+        return None;
+    }
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_precision_loss,
+        reason = "RCA-CONV-4: checked above, at most 2^53 is exact"
+    )]
+    Some(seconds as f64)
 }
 
 /// A DER INTEGER from unsigned big-endian bytes.
-fn der_integer(bytes: &[u8]) -> Vec<u8> {
-    let start = bytes
-        .iter()
-        .position(|b| *b != 0)
-        .unwrap_or_else(|| bytes.len().saturating_sub(1));
-    let trimmed = &bytes[start..];
-    let mut content = Vec::with_capacity(trimmed.len() + 1);
+fn der_integer(bytes: &[u8]) -> Option<Vec<u8>> {
+    let significant: Vec<u8> = bytes.iter().copied().skip_while(|b| *b == 0).collect();
+    // Zero is still one byte in DER; an empty input stays empty.
+    let trimmed = if significant.is_empty() && !bytes.is_empty() {
+        vec![0]
+    } else {
+        significant
+    };
+    let mut content = Vec::new();
     if trimmed.first().is_none_or(|b| b & 0x80 != 0) {
         content.push(0);
     }
-    content.extend_from_slice(trimmed);
+    content.extend_from_slice(&trimmed);
     let mut out = vec![0x02];
-    out.extend(der_length(content.len()));
+    out.extend(der_length(content.len())?);
     out.extend(content);
-    out
+    Some(out)
 }
 
-/// A DER length.
-fn der_length(length: usize) -> Vec<u8> {
-    if length < 0x80 {
-        return vec![u8::try_from(length).unwrap_or(0x7f)];
+/// A DER length, or `None` if it cannot be encoded.
+fn der_length(length: usize) -> Option<Vec<u8>> {
+    if let Ok(short) = u8::try_from(length)
+        && short < 0x80
+    {
+        return Some(vec![short]);
     }
-    let bytes: Vec<u8> = length
+    let digits: Vec<u8> = length
         .to_be_bytes()
         .into_iter()
         .skip_while(|b| *b == 0)
         .collect();
-    let mut out = vec![0x80 | u8::try_from(bytes.len()).unwrap_or(8)];
-    out.extend(bytes);
-    out
+    let mut out = vec![0x80 | u8::try_from(digits.len()).ok()?];
+    out.extend(digits);
+    Some(out)
 }
