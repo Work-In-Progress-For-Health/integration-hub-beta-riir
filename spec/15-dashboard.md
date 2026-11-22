@@ -474,7 +474,11 @@ checked before any signing or token request. **An HTTP status does not start
 it**: Cosmos answered, so it is reachable, and a `429` is the throttled write
 §5.6.2 is there to survive. The result is still `Unavailable`, never empty
 (§5.6.3). Tests: `a_connection_failure_pauses_requests_for_thirty_seconds`,
-`a_timeout_pauses_too`, `an_http_status_does_not_pause`. **Not ported from
+`a_timeout_pauses_too`, `an_http_status_does_not_pause`. **Declaration** (checked arithmetic): the
+pause's end is `now + 30 s`, computed with `Instant::checked_add`; an end that
+cannot be represented starts **no** pause (the request proceeds and succeeds or
+fails on its own), which is correct because the pause only avoids waiting on a
+known-dead account. **Not ported from
 `#461`:** the Python's resolved-container cache (the Rust store addresses a
 container by URL and resolves nothing), the `gunicorn` `gthread` worker,
 response compression and static-file fingerprinting (a different server), and

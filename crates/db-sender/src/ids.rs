@@ -94,40 +94,22 @@ pub fn count_segments(body: &str, segment: &str) -> usize {
         return 0;
     }
     if cleaned.starts_with('<') {
-        // The Python falls back to a text scan when the XML does not parse,
-        // so a broken multi-patient message is still refused.
-        return roxmltree::Document::parse(cleaned).map_or_else(
-            |_| count_open_tags(cleaned, segment),
-            |document| {
-                document
-                    .descendants()
-                    .filter(|node| node.is_element() && local(*node) == segment)
-                    .count()
-            },
-        );
+        // Not well-formed XML is invalid data, so it is not guessed at (the
+        // Python's text-scan fallback is not ported; module doc, `§7.8`;
+        // RCA-DECL-6). It counts as none, the identifier readers find
+        // nothing in it either, so `plan_update_identifier` dead-letters it
+        // as missing its identifiers.
+        return roxmltree::Document::parse(cleaned).map_or(0, |document| {
+            document
+                .descendants()
+                .filter(|node| node.is_element() && local(*node) == segment)
+                .count()
+        });
     }
     lines(cleaned)
         .filter(|line| {
             line.strip_prefix(segment)
                 .is_some_and(|rest| rest.starts_with('|'))
-        })
-        .count()
-}
-
-/// `<SEG`, `<ns:SEG` followed by whitespace, `>` or `/`
-/// (`<(?:[\w.-]+:)?SEG[\s>/]`).
-fn count_open_tags(text: &str, segment: &str) -> usize {
-    text.match_indices('<')
-        .filter(|(at, _)| {
-            let rest = &text[at + 1..];
-            let name_start = rest
-                .find(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '.' | '-')))
-                .filter(|&end| rest[end..].starts_with(':'))
-                .map_or(0, |end| end + 1);
-            rest[name_start..]
-                .strip_prefix(segment)
-                .and_then(|after| after.chars().next())
-                .is_some_and(|c| c.is_whitespace() || c == '>' || c == '/')
         })
         .count()
 }
@@ -470,13 +452,11 @@ mod tests {
     }
 
     #[test]
-    fn broken_xml_is_still_counted_by_a_text_scan() {
-        // Upstream falls back to a regular expression here, so a broken
-        // two-patient message is refused rather than read as having none.
-        let broken = "<A><PID><x/></PID>< PID ><ns:PID a='1'><PIDX/><PID/><oops";
-        assert_eq!(count_segments(broken, "PID"), 3);
-        assert_eq!(count_segments("<A><MRG>", "MRG"), 1);
-        assert_eq!(count_segments("<A><MRGX>", "MRG"), 0);
-        assert_eq!(count_segments("<", "PID"), 0, "nothing after the bracket");
+    fn broken_xml_is_not_guessed_at() {
+        // Deviation from upstream's regex fallback (module doc): the message
+        // is refused later as missing its identifiers, not counted here.
+        let broken = "<A><PID><x/></PID><PID/><oops";
+        assert_eq!(count_segments(broken, "PID"), 0);
+        assert_eq!(count_segments("<A><MRG>", "MRG"), 0);
     }
 }

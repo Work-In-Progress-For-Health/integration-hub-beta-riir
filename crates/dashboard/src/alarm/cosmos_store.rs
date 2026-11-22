@@ -75,8 +75,11 @@ impl Backoff {
 
     /// Start a pause of `length` at `now`.
     pub fn start_at(&self, now: Instant, length: Duration) {
+        // RCA-TIME-1: no `Instant + Duration`, which panics on overflow. An
+        // end that cannot be represented starts no pause (`§5.6.4`: the
+        // request goes ahead and fails or succeeds on its own).
         if let Ok(mut until) = self.until.lock() {
-            *until = Some(now + length);
+            *until = now.checked_add(length);
         }
     }
 

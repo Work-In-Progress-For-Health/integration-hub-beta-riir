@@ -478,8 +478,12 @@ The multi-patient refusal is the clause that matters: the `MRG` is read from
 the first segment but `PID-3` is searched in every `PID`, so a message with
 two patients could pair one patient's old identifier with another's new one
 and merge the wrong people. Upstream added it in the same PR, after review.
-`count_segments` falls back to a text scan when XML does not parse, so a broken
-two-patient message is still refused rather than read as none. **Not
+XML that does not parse is invalid data and is **not** guessed at: upstream's
+text-scan fallback in `count_segments` is not ported, because it would name a
+fallback for malformed input (RCA-DECL-6). A broken body counts as none and the
+identifier readers find nothing in it either, so it dead-letters as
+`MissingOldIdentifier` (as §7.8 does) and a broken two-patient message is still
+never delivered. **Not
 checked:** the widths of `spUpdateIdentifier`'s parameters (§7.8.1 does for
 `prQueueIdUpdate`); no WCRS database was available, so a value wider than its
 column may be silently truncated. Find the widths before first deployment.

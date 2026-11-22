@@ -20,6 +20,18 @@
 //! Two shapes of message arrive, pipe-delimited ER7 and HL7 v2 XML, as for
 //! `ids`.
 
+// New module: the checked-arithmetic lints are denied from the start
+// (RCA-ENF-3). Tests may use plain operators and indexing (RCA-EXC-5).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::indexing_slicing,
+        clippy::string_slice
+    )
+)]
+
 use crate::idupdate::Rejected;
 
 /// Dead-letter reason for every message the mapping cannot use.
@@ -225,6 +237,15 @@ fn parse_er7(message: &str) -> Parsed {
     let mut parsed = Parsed::default();
     // Carriage-return delimited; CRLF and LF are tolerated from other producers.
     let normalised = message.replace("\r\n", "\r").replace('\n', "\r");
+    // Counted, not incremented (RCA-INT-1): no arithmetic on an external figure.
+    let count = |prefix: &str| {
+        normalised
+            .split('\r')
+            .filter(|segment| segment.starts_with(prefix))
+            .count()
+    };
+    parsed.pid_segments = count("PID");
+    parsed.mrg_segments = count("MRG");
     for segment in normalised.split('\r') {
         if segment.starts_with("MSH") {
             let fields: Vec<&str> = segment.split('|').collect();
@@ -238,12 +259,15 @@ fn parse_er7(message: &str) -> Parsed {
                 parsed.trigger_event = trigger.trim().to_string();
             }
         } else if segment.starts_with("PID") {
-            parsed.pid_segments += 1;
             let fields: Vec<&str> = segment.split('|').collect();
             let Some(pid_3) = fields.get(3) else { continue };
             for repetition in pid_3.split('~') {
                 let components: Vec<&str> = repetition.split('^').collect();
-                let value = components[0];
+                // `split` always yields a first piece; `first` keeps the
+                // read free of indexing (RCA-LEN-2).
+                let Some(value) = components.first().copied() else {
+                    continue;
+                };
                 if value.trim().is_empty() {
                     continue;
                 }
@@ -253,7 +277,6 @@ fn parse_er7(message: &str) -> Parsed {
                 });
             }
         } else if segment.starts_with("MRG") {
-            parsed.mrg_segments += 1;
             if parsed.old.is_some() {
                 continue;
             }
@@ -263,7 +286,9 @@ fn parse_er7(message: &str) -> Parsed {
                 // MRG-1 may repeat; the first repetition is the superseded one.
                 let components: Vec<&str> =
                     mrg_1.split('~').next().unwrap_or("").split('^').collect();
-                old.value = components[0].to_string();
+                if let Some(first) = components.first() {
+                    old.value = (*first).to_string();
+                }
                 old.authority = er7_authority(&components);
             }
             parsed.old = Some(old);
