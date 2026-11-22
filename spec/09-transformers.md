@@ -632,7 +632,12 @@ introduced; see
 (default `0.5`, a number >= 0). A connection or read failure, or a status of
 `429`, `502`, `503` or `504`, is retried up to `MAX_RETRIES` times, sleeping
 `backoff * 2^(n-1)` before the n-th retry for n >= 2 and not at all before the
-first (`urllib3` 2.x `Retry.get_backoff_time`). A value that is set and
+first (`urllib3` 2.x `Retry.get_backoff_time`). **No ceiling is declared:** a wait
+that cannot be computed (`2^(n-1)` past `u32`, or a negative wait) **ends the
+retrying** as running out of retries does, rather than being capped
+(`rust-checked-arithmetic` RCA-DECL-3); `backoff_before` returns `None`. A
+chunk size in a chunked answer is read off the network and never added to; one
+that runs past the data is `the chunked answer was truncated`. A value that is set and
 unparseable is a startup configuration error, reported with the others
 (`02-configuration.md` §1.4).
 

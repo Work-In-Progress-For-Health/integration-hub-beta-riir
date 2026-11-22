@@ -57,6 +57,10 @@ const RETRYABLE_STATUSES: [u16; 4] = [429, 502, 503, 504];
 /// nobody.
 const MAX_BODY: u64 = 64 * 1024;
 
+/// How much is read before giving up: the body limit plus headroom for the
+/// headers (`RCA-EXC-1`: a constant expression).
+const MAX_READ: u64 = MAX_BODY + 8192;
+
 /// Which code system a lookup is in (`§5.10`).
 ///
 /// Each variant names the `PID` field it translates; the same variant picks
@@ -353,7 +357,9 @@ impl LookupClient {
             format!("/{prefix}{target}")
         };
 
-        let deadline = Instant::now() + self.config.timeout;
+        let deadline = Instant::now()
+            .checked_add(self.config.timeout)
+            .ok_or_else(|| "the timeout is out of range".to_owned())?;
         let address = (host, port)
             .to_socket_addrs()
             .map_err(|_| "the host could not be resolved".to_owned())?
@@ -417,8 +423,11 @@ fn exchange<S: Read + Write>(
         match stream.read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => {
-                raw.extend_from_slice(&chunk[..n]);
-                if raw.len() as u64 > MAX_BODY + 8192 {
+                let read = chunk
+                    .get(..n)
+                    .ok_or_else(|| "the answer could not be read".to_owned())?;
+                raw.extend_from_slice(read);
+                if u64::try_from(raw.len()).is_ok_and(|length| length > MAX_READ) {
                     break;
                 }
             }
@@ -438,11 +447,9 @@ fn exchange<S: Read + Write>(
 ///
 /// A description with no values in it.
 fn parse_response(raw: &[u8]) -> Result<(u16, Vec<u8>), String> {
-    let split = raw
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .ok_or_else(|| "the answer was incomplete".to_owned())?;
-    let head = String::from_utf8_lossy(&raw[..split]).into_owned();
+    let (head_bytes, body) =
+        split_at_needle(raw, b"\r\n\r\n").ok_or_else(|| "the answer was incomplete".to_owned())?;
+    let head = String::from_utf8_lossy(head_bytes).into_owned();
     let mut lines = head.split("\r\n");
     let status = lines
         .next()
@@ -453,34 +460,39 @@ fn parse_response(raw: &[u8]) -> Result<(u16, Vec<u8>), String> {
         let line = line.to_ascii_lowercase();
         line.starts_with("transfer-encoding:") && line.contains("chunked")
     });
-    let body = &raw[split + 4..];
     if !chunked {
         return Ok((status, body.to_vec()));
     }
 
     // uvicorn answers `Connection: close` with a content-length, but a
     // proxy in front of it may chunk; handle it rather than assume.
+    let malformed = || "the chunked answer was malformed".to_owned();
+    let truncated = || "the chunked answer was truncated".to_owned();
     let mut out = Vec::new();
     let mut rest = body;
     loop {
-        let end = rest
-            .windows(2)
-            .position(|w| w == b"\r\n")
-            .ok_or_else(|| "the chunked answer was malformed".to_owned())?;
-        let size = std::str::from_utf8(&rest[..end])
+        let (size_line, after_line) = split_at_needle(rest, b"\r\n").ok_or_else(malformed)?;
+        let size = std::str::from_utf8(size_line)
             .ok()
             .and_then(|s| usize::from_str_radix(s.split(';').next().unwrap_or("").trim(), 16).ok())
-            .ok_or_else(|| "the chunked answer was malformed".to_owned())?;
-        rest = &rest[end + 2..];
+            .ok_or_else(malformed)?;
         if size == 0 {
             return Ok((status, out));
         }
-        if rest.len() < size + 2 {
-            return Err("the chunked answer was truncated".to_owned());
-        }
-        out.extend_from_slice(&rest[..size]);
-        rest = &rest[size + 2..];
+        // The size came off the network: never added to (RCA-LEN-3).
+        let (data, after_data) = after_line.split_at_checked(size).ok_or_else(truncated)?;
+        out.extend_from_slice(data);
+        rest = after_data.strip_prefix(b"\r\n").ok_or_else(truncated)?;
     }
+}
+
+/// What comes before and after the first `needle` in `haystack`.
+fn split_at_needle<'a>(haystack: &'a [u8], needle: &[u8]) -> Option<(&'a [u8], &'a [u8])> {
+    let at = haystack
+        .windows(needle.len())
+        .position(|window| window == needle)?;
+    let (before, from_needle) = haystack.split_at_checked(at)?;
+    Some((before, from_needle.get(needle.len()..)?))
 }
 
 /// Seconds to sleep before retry number `retry` (1-based): none before the
@@ -492,17 +504,22 @@ fn parse_response(raw: &[u8]) -> Result<(u16, Vec<u8>), String> {
 /// ```
 /// use hl7_pims_transformer::reference_data::backoff_before;
 ///
-/// assert_eq!(backoff_before(1, 0.5), 0.0);
-/// assert_eq!(backoff_before(2, 0.5), 1.0);
-/// assert_eq!(backoff_before(3, 0.5), 2.0);
+/// assert_eq!(backoff_before(1, 0.5), Some(0.0));
+/// assert_eq!(backoff_before(2, 0.5), Some(1.0));
+/// assert_eq!(backoff_before(3, 0.5), Some(2.0));
+/// // 2^40 does not fit a `u32`: there is no delay to name, so no retry.
+/// assert_eq!(backoff_before(41, 0.5), None);
 /// ```
+///
+/// `None` when the delay cannot be computed; no ceiling is declared for it
+/// (`§5.10.5`), so none is invented, and the caller stops retrying.
 #[must_use]
-pub fn backoff_before(retry: u32, backoff_seconds: f64) -> f64 {
+pub fn backoff_before(retry: u32, backoff_seconds: f64) -> Option<f64> {
     if retry <= 1 {
-        0.0
-    } else {
-        backoff_seconds * f64::from(2_u32.saturating_pow(retry - 1))
+        return Some(0.0);
     }
+    let factor = 2_u32.checked_pow(retry.checked_sub(1)?)?;
+    Some(backoff_seconds * f64::from(factor))
 }
 
 impl LookupClient {
@@ -528,18 +545,26 @@ impl LookupClient {
                 Ok((status, _)) => RETRYABLE_STATUSES.contains(status),
                 Err(_) => true,
             };
-            if !retryable || retry >= self.config.max_retries {
-                break outcome.map_err(|reason| {
-                    LookupError(format!(
-                        "Reference-data API request failed for dataset '{name}': {reason}"
-                    ))
-                })?;
+            // The next retry and the wait before it; either that cannot be
+            // computed (or a negative wait) ends the retrying here, as running
+            // out of retries does (`§5.10.5`).
+            let next = retry.checked_add(1);
+            let wait = next
+                .and_then(|next| backoff_before(next, self.config.backoff_seconds))
+                .and_then(|seconds| Duration::try_from_secs_f64(seconds).ok());
+            match (retryable && retry < self.config.max_retries, next, wait) {
+                (true, Some(next), Some(wait)) => {
+                    retry = next;
+                    std::thread::sleep(wait);
+                }
+                _ => {
+                    break outcome.map_err(|reason| {
+                        LookupError(format!(
+                            "Reference-data API request failed for dataset '{name}': {reason}"
+                        ))
+                    })?;
+                }
             }
-            retry += 1;
-            std::thread::sleep(Duration::from_secs_f64(backoff_before(
-                retry,
-                self.config.backoff_seconds,
-            )));
         };
         interpret(dataset, status, &body)
     }
@@ -620,6 +645,56 @@ impl ReferenceData for LookupClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn answer(extra: &str, body: &[u8]) -> Vec<u8> {
+        let mut raw = format!("HTTP/1.1 200 OK\r\n{extra}\r\n").into_bytes();
+        raw.extend_from_slice(body);
+        raw
+    }
+
+    /// RCA-LEN-3: a chunk size off the network is never added to.
+    #[test]
+    fn a_huge_chunk_size_is_refused_not_a_panic() {
+        for size in ["ffffffffffffffff", "fffffffffffffffe", "7fffffffffffffff"] {
+            let raw = answer(
+                "Transfer-Encoding: chunked\r\n",
+                format!("{size}\r\nabc\r\n0\r\n\r\n").as_bytes(),
+            );
+            assert_eq!(
+                parse_response(&raw),
+                Err("the chunked answer was truncated".to_owned()),
+                "{size}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_chunked_body_is_reassembled_and_broken_framing_is_an_error() {
+        let ok = answer(
+            "transfer-encoding: Chunked\r\n",
+            b"4\r\nabcd\r\n3\r\nefg\r\n0\r\n\r\n",
+        );
+        assert_eq!(parse_response(&ok), Ok((200, b"abcdefg".to_vec())));
+        let bad = answer("transfer-encoding: chunked\r\n", b"zz\r\nabc\r\n");
+        assert_eq!(
+            parse_response(&bad),
+            Err("the chunked answer was malformed".to_owned())
+        );
+        assert_eq!(
+            parse_response(&answer("transfer-encoding: chunked\r\n", b"3\r\nabcXX")),
+            Err("the chunked answer was truncated".to_owned()),
+            "no CRLF after the data"
+        );
+    }
+
+    /// `§5.10.5`: a delay that cannot be computed is no delay, not a cap.
+    #[test]
+    fn a_backoff_that_overflows_is_none() {
+        assert_eq!(backoff_before(33, 1.0), None);
+        assert_eq!(backoff_before(32, 1.0), Some(f64::from(1_u32 << 31)));
+        assert_eq!(backoff_before(0, 1.0), Some(0.0));
+    }
+
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -870,7 +945,7 @@ mod tests {
     #[test]
     fn the_backoff_schedule_matches_urllib3() {
         // spec/09-transformers.md §5.10.5.
-        assert_eq!(backoff_before(1, 0.5), 0.0);
-        assert!((backoff_before(4, 0.5) - 4.0).abs() < f64::EPSILON);
+        assert_eq!(backoff_before(1, 0.5), Some(0.0));
+        assert_eq!(backoff_before(4, 0.5), Some(4.0));
     }
 }

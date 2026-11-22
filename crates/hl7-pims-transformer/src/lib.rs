@@ -1,5 +1,18 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
+// Checked arithmetic (`rust-checked-arithmetic`, RCA-ENF-3): denied for the whole
+// crate. Tests may use plain operators and indexing (RCA-EXC-5).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::integer_division,
+        clippy::unreachable
+    )
+)]
 //! PIMS → MPI.
 //!
 //! Implements `spec/09-transformers.md` §5.
@@ -421,7 +434,13 @@ fn map_pid(source: &Message, target: &mut Message) -> Result<(), TransformError>
             continue;
         }
 
-        written += 1;
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "RCA-EXC-2: the loop runs over a two-element array, so `written` is at most 2"
+        )]
+        {
+            written += 1;
+        }
         set(target, &format!("PID-3[{written}].1"), value)?;
         set(target, &format!("PID-3[{written}].4.1"), authority)?;
         set(target, &format!("PID-3[{written}].5"), mapped_type)?;

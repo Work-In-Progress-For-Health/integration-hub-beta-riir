@@ -19,7 +19,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `dashboard` | **0** (was 32) | | | | | | |
 | `ultra7` | **0** (was 20) | | | | | | |
 | `hl7-soap-server` | **0** (was 17) | | | | | | |
-| `hl7-pims-transformer` | 16 | 8 |  | 7 | 1 |  |  |
+| `hl7-pims-transformer` | **0** (was 16) | | | | | | |
 | `ihb-validation` | 13 | 6 | 5 | 2 |  |  |  |
 | `http-mock-receiver` | 11 | 4 | 7 |  |  |  |  |
 | `ihb-bus` | 8 | 7 |  | 1 |  |  |  |
@@ -44,7 +44,8 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
-**Done:** `hl7-soap-server` (`payload::extract` on `get`/`checked_*`; compared with the
+**Done:** `hl7-pims-transformer` (a network-supplied chunk size was added to unchecked, as in
+`lookup-service`; the retry back-off now ends retrying instead of saturating), `hl7-soap-server` (`payload::extract` on `get`/`checked_*`; compared with the
 offset version on 800,000 generated texts), `ultra7` (its stale-range and lenient-chunk fallbacks are kept and listed under
 decisions below), `dashboard` (§7.4 of its spec; 32 findings and the saturating/clamp uses
 except the three decisions listed there), `lookup-service` (denied at the crate root; `jwks.rs` had a network-reachable
@@ -60,7 +61,7 @@ code (2026-11-22):
 
 | Where | What | Needs |
 |---|---|---|
-| `hl7-pims-transformer/src/reference_data.rs:504` | `2_u32.saturating_pow(retry - 1)` | declared back-off ceiling, `checked_pow` + `unwrap_or` |
+| `hl7-pims-transformer/src/reference_data.rs:504` | `2_u32.saturating_pow(retry - 1)` | done: `backoff_before` is `Option`, retrying ends |
 | `ultra7/src/iteration.rs:65-66` | `saturating_mul`, `saturating_add`, `try_from(..).unwrap_or(0)` | done: checked, original unchanged on overflow |
 | `hl7-rest-server/src/http.rs:120` | `limit.saturating_mul(6).saturating_add(1024)` | checked, refuse on overflow |
 | `dashboard/src/contacts.rs:454` | `(page.max(1) - 1).saturating_mul(per_page)` | **decision**: `page=0` is invalid input (RCA-IN-2) |
@@ -115,22 +116,6 @@ crates/fhir-sender/src/client.rs:490 string_slice
 crates/fhir-sender/src/client.rs:494 string_slice
 crates/hl7-lims-wrrs-transformer/src/classifier.rs:93 string_slice
 crates/hl7-mock-receiver/src/server.rs:117 indexing_slicing
-crates/hl7-pims-transformer/src/lib.rs:424 arithmetic_side_effects
-crates/hl7-pims-transformer/src/reference_data.rs:356 arithmetic_side_effects
-crates/hl7-pims-transformer/src/reference_data.rs:420 indexing_slicing
-crates/hl7-pims-transformer/src/reference_data.rs:421 as_conversions
-crates/hl7-pims-transformer/src/reference_data.rs:445 indexing_slicing
-crates/hl7-pims-transformer/src/reference_data.rs:456 arithmetic_side_effects
-crates/hl7-pims-transformer/src/reference_data.rs:456 indexing_slicing
-crates/hl7-pims-transformer/src/reference_data.rs:470 indexing_slicing
-crates/hl7-pims-transformer/src/reference_data.rs:474 arithmetic_side_effects
-crates/hl7-pims-transformer/src/reference_data.rs:474 indexing_slicing
-crates/hl7-pims-transformer/src/reference_data.rs:478 arithmetic_side_effects
-crates/hl7-pims-transformer/src/reference_data.rs:481 indexing_slicing
-crates/hl7-pims-transformer/src/reference_data.rs:482 arithmetic_side_effects
-crates/hl7-pims-transformer/src/reference_data.rs:482 indexing_slicing
-crates/hl7-pims-transformer/src/reference_data.rs:504 arithmetic_side_effects
-crates/hl7-pims-transformer/src/reference_data.rs:538 arithmetic_side_effects
 crates/hl7-rest-server/src/ack.rs:124 string_slice
 crates/hl7-sender/src/client.rs:220 indexing_slicing
 crates/hl7-server/src/ack.rs:241 string_slice
