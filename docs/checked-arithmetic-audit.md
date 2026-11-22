@@ -15,7 +15,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | Crate | Total | arithmetic_side_effects | string_slice | indexing_slicing | as_conversions | integer_division | unreachable |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `lookup-service` | 64 | 37 |  | 19 | 4 | 4 |  |
-| `db-sender` | 62 | 27 | 31 | 3 |  |  | 1 |
+| `db-sender` | **0** (was 62) | | | | | | |
 | `dashboard` | 32 | 24 | 2 |  | 6 |  |  |
 | `ultra7` | 20 | 9 |  | 10 | 1 |  |  |
 | `hl7-soap-server` | 17 | 8 | 9 |  |  |  |  |
@@ -43,6 +43,9 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-sender` | 1 |  |  | 1 |  |  |  |
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
+
+**Done:** `db-sender` (denied at the crate root; `sanitize.rs` rewritten on remainder
+slices, `msh.rs` salvage dropped, spec/10 §7.4 and §7.5).
 
 ## Plan (RCA-ENF-3: one module at a time, then deny at the crate root)
 
@@ -101,68 +104,6 @@ crates/dashboard/src/network_test.rs:352 arithmetic_side_effects
 crates/dashboard/src/pages/contacts.rs:153 arithmetic_side_effects
 crates/dashboard/src/period.rs:111 arithmetic_side_effects
 crates/dashboard/src/topics.rs:143 arithmetic_side_effects
-crates/db-sender/src/db.rs:382 unreachable
-crates/db-sender/src/ids.rs:131 indexing_slicing
-crates/db-sender/src/msh.rs:54 indexing_slicing
-crates/db-sender/src/msh.rs:141 string_slice
-crates/db-sender/src/msh.rs:191 arithmetic_side_effects
-crates/db-sender/src/msh.rs:191 string_slice
-crates/db-sender/src/msh.rs:192 string_slice
-crates/db-sender/src/msh.rs:212 arithmetic_side_effects
-crates/db-sender/src/msh.rs:212 string_slice
-crates/db-sender/src/msh.rs:213 string_slice
-crates/db-sender/src/msh.rs:214 arithmetic_side_effects
-crates/db-sender/src/msh.rs:214 string_slice
-crates/db-sender/src/msh.rs:216 string_slice
-crates/db-sender/src/sanitize.rs:49 string_slice
-crates/db-sender/src/sanitize.rs:50 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:51 string_slice
-crates/db-sender/src/sanitize.rs:52 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:54 string_slice
-crates/db-sender/src/sanitize.rs:55 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:55 string_slice
-crates/db-sender/src/sanitize.rs:57 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:57 string_slice
-crates/db-sender/src/sanitize.rs:59 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:62 string_slice
-crates/db-sender/src/sanitize.rs:65 string_slice
-crates/db-sender/src/sanitize.rs:75 string_slice
-crates/db-sender/src/sanitize.rs:76 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:77 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:77 string_slice
-crates/db-sender/src/sanitize.rs:78 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:78 string_slice
-crates/db-sender/src/sanitize.rs:79 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:79 string_slice
-crates/db-sender/src/sanitize.rs:83 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:85 string_slice
-crates/db-sender/src/sanitize.rs:89 string_slice
-crates/db-sender/src/sanitize.rs:104 string_slice
-crates/db-sender/src/sanitize.rs:105 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:106 string_slice
-crates/db-sender/src/sanitize.rs:107 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:108 string_slice
-crates/db-sender/src/sanitize.rs:109 string_slice
-crates/db-sender/src/sanitize.rs:113 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:117 string_slice
-crates/db-sender/src/sanitize.rs:120 string_slice
-crates/db-sender/src/sanitize.rs:133 string_slice
-crates/db-sender/src/sanitize.rs:134 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:139 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:140 string_slice
-crates/db-sender/src/sanitize.rs:142 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:146 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:146 string_slice
-crates/db-sender/src/sanitize.rs:147 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:155 string_slice
-crates/db-sender/src/sanitize.rs:156 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:157 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:157 string_slice
-crates/db-sender/src/sanitize.rs:173 indexing_slicing
-crates/db-sender/src/sanitize.rs:174 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:175 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:178 arithmetic_side_effects
-crates/db-sender/src/sanitize.rs:180 arithmetic_side_effects
 crates/fhir-sender/src/client.rs:283 arithmetic_side_effects
 crates/fhir-sender/src/client.rs:303 arithmetic_side_effects
 crates/fhir-sender/src/client.rs:316 arithmetic_side_effects

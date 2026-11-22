@@ -20,18 +20,6 @@
 //! Two shapes of message arrive, pipe-delimited ER7 and HL7 v2 XML, as for
 //! `ids`.
 
-// New module: the checked-arithmetic lints are denied from the start
-// (RCA-ENF-3). Tests may use plain operators and indexing (RCA-EXC-5).
-#![cfg_attr(
-    not(test),
-    deny(
-        clippy::arithmetic_side_effects,
-        clippy::as_conversions,
-        clippy::indexing_slicing,
-        clippy::string_slice
-    )
-)]
-
 use crate::idupdate::Rejected;
 
 /// Dead-letter reason for every message the mapping cannot use.

@@ -377,11 +377,18 @@ impl SqlRunner {
                 // is transient: the identity endpoint can be briefly down at
                 // start-up, and the message must be abandoned for redelivery,
                 // never dead-lettered for a fault that is not in it.
-                let token = match &self.identity {
-                    Some(identity) => identity.sql_token().await,
-                    None => unreachable!("a managed-identity config always builds an identity"),
-                }
-                .map_err(|error| {
+                // A managed-identity config always builds an identity; if one
+                // is missing, that is a start-up defect, not a fault in the
+                // message, so it is abandoned like any token failure and not
+                // asserted away (RCA-P-1: no panic).
+                let Some(identity) = &self.identity else {
+                    return Err(DatabaseError::new(
+                        FailureKind::Transient,
+                        0,
+                        "managed identity configured but no identity source was built",
+                    ));
+                };
+                let token = identity.sql_token().await.map_err(|error| {
                     DatabaseError::new(FailureKind::Transient, 0, &error.to_string())
                 })?;
                 config.authentication(AuthMethod::aad_token(token));

@@ -46,12 +46,16 @@ fn trigger_from_message_type(message_type: &str) -> String {
     if message_type.is_empty() || message_type == UNKNOWN {
         return UNKNOWN.to_string();
     }
-    let parts: Vec<&str> = message_type.split('^').collect();
-    parts
-        .get(1)
-        .map(|p| p.trim())
-        .filter(|p| !p.is_empty())
-        .map_or_else(|| parts[0].trim().to_string(), str::to_string)
+    // No `^` means the whole value is the first component and there is no
+    // second one: that is the shape of the value, not a fallback.
+    let (first, rest) = message_type.split_once('^').unwrap_or((message_type, ""));
+    let second = rest.split_once('^').map_or(rest, |(second, _)| second);
+    let second = second.trim();
+    if second.is_empty() {
+        first.trim().to_string()
+    } else {
+        second.to_string()
+    }
 }
 
 /// Extract the MSH of `body` (`§7.5`).
@@ -87,7 +91,11 @@ pub fn extract_msh_for_logging(body: &str) -> MshInfo {
         let line = line.trim();
         if line.starts_with("MSH") {
             // MSH-1 is the character after the name, so it is the separator.
-            let separator = line.chars().nth(3).unwrap_or('|');
+            // A line with no character there is not an MSH segment (RCA-DECL-6:
+            // no assumed `|`); look for another.
+            let Some(separator) = line.chars().nth(3) else {
+                continue;
+            };
             let fields: Vec<&str> = line.split(separator).collect();
             // fields[0] is "MSH" and MSH-1 is the separator itself, so
             // fields[8] is MSH-9 and fields[9] is MSH-10.
@@ -104,10 +112,10 @@ pub fn extract_msh_for_logging(body: &str) -> MshInfo {
                 control_id: pick(9),
                 trigger_event: trigger_from_message_type(&message_type),
                 // MSH-3.1: the first component of the field.
+                // Absent is empty, as `sending_app` declares (`§7.5`).
                 sending_app: fields
                     .get(2)
-                    .and_then(|f| f.split('^').next())
-                    .unwrap_or_default()
+                    .map_or("", |f| f.split('^').next().unwrap_or(f))
                     .to_string(),
                 message_type,
             };
@@ -119,37 +127,43 @@ pub fn extract_msh_for_logging(body: &str) -> MshInfo {
 
 /// The XML half of [`extract_msh_for_logging`].
 fn extract_xml(cleaned: &str) -> MshInfo {
-    if let Ok(document) = roxmltree::Document::parse(cleaned) {
-        // `tag.endswith("MSH")`: the root of a bare MSH document, or the
-        // first descendant, namespaced or not.
-        let found = document
-            .root()
-            .descendants()
-            .find(|n| n.is_element() && n.tag_name().name().ends_with("MSH"));
-        if let Some(msh) = found {
-            let control_id =
-                text_of(msh, &["MSH.10.1", "MSH.10"]).unwrap_or_else(|| UNKNOWN.into());
-            let message_type = message_type(msh).unwrap_or_else(|| UNKNOWN.into());
-            let trigger_event = text_of(msh, &["MSG.2", "MSH.9.2"])
-                .unwrap_or_else(|| trigger_from_message_type(&message_type));
-            let sending_app = text_of(msh, &["HD.1", "MSH.3.1", "MSH.3"]).unwrap_or_default();
-            return MshInfo {
-                trigger_event,
-                sending_app,
-                // The source slice rather than a re-serialisation: it is
-                // exactly the MSH element and cannot include a sibling.
-                msh_text: cleaned[msh.range()].trim().to_string(),
-                control_id,
-                message_type,
-            };
-        }
-    } else if let Some(info) = salvage_partial_xml(cleaned) {
-        // Upstream's regex fallback for a document that does not parse but
-        // still holds a closed <MSH>..</MSH>.
-        return info;
+    // Not well-formed XML is invalid data and is not guessed at: upstream's
+    // regex salvage of a closed `<MSH>` is not ported (`§7.5`, RCA-DECL-6).
+    let Ok(document) = roxmltree::Document::parse(cleaned) else {
+        return MshInfo::placeholder(XML_FAILED);
+    };
+    // `tag.endswith("MSH")`: the root of a bare MSH document, or the first
+    // descendant, namespaced or not.
+    let found = document
+        .root()
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name().ends_with("MSH"));
+    // The source slice rather than a re-serialisation: it is exactly the MSH
+    // element and cannot include a sibling.
+    let Some((msh, source)) = found.and_then(|msh| Some((msh, cleaned.get(msh.range())?))) else {
+        return MshInfo::placeholder(XML_FAILED);
+    };
+    let control_id = text_of(msh, &["MSH.10.1", "MSH.10"]).unwrap_or_else(|| UNKNOWN.into());
+    let message_type = message_type(msh).unwrap_or_else(|| UNKNOWN.into());
+    let trigger_event = text_of(msh, &["MSG.2", "MSH.9.2"])
+        .unwrap_or_else(|| trigger_from_message_type(&message_type));
+    // Absent is empty, as `sending_app` declares (`§7.5`).
+    #[expect(
+        clippy::unwrap_or_default,
+        reason = "RCA-NONE-3: `§7.5` declares an absent sending_app empty"
+    )]
+    let sending_app = text_of(msh, &["HD.1", "MSH.3.1", "MSH.3"]).unwrap_or_else(String::new);
+    MshInfo {
+        trigger_event,
+        sending_app,
+        msh_text: source.trim().to_string(),
+        control_id,
+        message_type,
     }
-    MshInfo::placeholder("[XML MSH extraction failed - structure malformed]")
 }
+
+/// The placeholder for XML with no readable MSH.
+const XML_FAILED: &str = "[XML MSH extraction failed - structure malformed]";
 
 /// `MSH-9` as `MSG.1^MSG.2^MSG.3`, or the element's own text.
 fn message_type(msh: roxmltree::Node<'_, '_>) -> Option<String> {
@@ -182,39 +196,6 @@ fn text_of(root: roxmltree::Node<'_, '_>, names: &[&str]) -> Option<String> {
                     .map(str::to_string)
             })
     })
-}
-
-/// A closed `<MSH>..</MSH>` out of a document that does not parse.
-fn salvage_partial_xml(cleaned: &str) -> Option<MshInfo> {
-    let lower = cleaned.to_ascii_lowercase();
-    let start = lower.find("<msh")?;
-    let end = start + lower[start..].find("</msh>")? + "</msh>".len();
-    let raw = cleaned[start..end].trim();
-
-    let control_id = salvage_text(raw, "<MSH.10").unwrap_or_else(|| UNKNOWN.into());
-    let trigger_event = salvage_text(raw, "<MSG.2")
-        .or_else(|| salvage_text(raw, "<MSH.9.2"))
-        .unwrap_or_else(|| UNKNOWN.into());
-
-    Some(MshInfo {
-        msh_text: raw.to_string(),
-        control_id,
-        message_type: UNKNOWN.into(),
-        trigger_event,
-        sending_app: salvage_text(raw, "<MSH.3").unwrap_or_default(),
-    })
-}
-
-/// The text after `<tag ...>` and any nested opening tags, in a fragment
-/// that does not parse (upstream's regex `<tag[^>]*>(?:<[^>]+>)*([^<]+)`).
-fn salvage_text(raw: &str, tag: &str) -> Option<String> {
-    let mut cursor = raw.find(tag)?;
-    cursor += raw[cursor..].find('>')? + 1;
-    while raw[cursor..].starts_with('<') {
-        cursor += raw[cursor..].find('>')? + 1;
-    }
-    let text = raw[cursor..].split('<').next()?.trim();
-    (!text.is_empty()).then(|| text.to_string())
 }
 
 #[cfg(test)]
@@ -315,8 +296,9 @@ mod tests {
         let partial = extract_msh_for_logging(
             "<ADT><MSH><MSH.3><HD.1>349</HD.1></MSH.3><MSH.9><MSG.2>A31</MSG.2></MSH.9></MSH><PID><oops>SECRET",
         );
-        assert_eq!(partial.trigger_event, "A31");
-        assert_eq!(partial.sending_app, "349");
+        // Not salvaged (`§7.5`, RCA-DECL-6): malformed XML is read for nothing.
+        assert_eq!(partial.trigger_event, UNKNOWN);
+        assert_eq!(partial.sending_app, "");
 
         // A bare message code with no trigger falls back to its first component.
         let bare = extract_msh_for_logging("MSH|^~\\&|a|b|c|d|e||ACK|M|P|2.5");
@@ -336,13 +318,32 @@ mod tests {
     }
 
     #[test]
-    fn a_partial_xml_document_is_salvaged_without_the_rest() {
-        // Upstream's regex fallback.
+    fn a_partial_xml_document_is_not_salvaged() {
+        // Deviation from upstream's regex fallback (`§7.5`, RCA-DECL-6):
+        // malformed XML is invalid data, so nothing is guessed from it and
+        // nothing of it is logged.
         let partial =
             "<ADT_A39><MSH><MSH.10><MSH.10.1>MSG-9</MSH.10.1></MSH.10></MSH><PID><oops>SECRET";
         let info = extract_msh_for_logging(partial);
-        assert_eq!(info.control_id, "MSG-9");
-        assert!(!info.msh_text.contains("SECRET"));
+        assert_eq!(info.msh_text, XML_FAILED);
+        assert_eq!(info.control_id, UNKNOWN);
+    }
+
+    #[test]
+    fn a_line_with_no_separator_is_not_an_msh() {
+        assert_eq!(
+            extract_msh_for_logging("MSH").msh_text,
+            "[No MSH segment identified]"
+        );
+    }
+
+    #[test]
+    fn the_trigger_is_the_second_component_else_the_first() {
+        assert_eq!(trigger_from_message_type("ADT^A40^ADT_A39"), "A40");
+        assert_eq!(trigger_from_message_type("ADT^ ^X"), "ADT");
+        assert_eq!(trigger_from_message_type("ADT"), "ADT");
+        assert_eq!(trigger_from_message_type("ADT^A01"), "A01");
+        assert_eq!(trigger_from_message_type(""), UNKNOWN);
     }
 
     #[test]

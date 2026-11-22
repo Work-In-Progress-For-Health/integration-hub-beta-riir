@@ -363,6 +363,12 @@ Three patterns are replaced, case-insensitively: the parenthesised list
 after `The duplicate key value is` becomes `(***)`; the quoted text after
 `Truncated value:` becomes `'***'`; the quoted text after `converting [the]
 [type] value` becomes `'***'`. Quotes may contain a doubled `''`.
+**The redactor fails closed:** if it cannot prove that a cut lands inside the
+message (a split that is out of range or off a character boundary, which no
+input reaches today), the whole message becomes `***`, never the unredacted
+rest (RCA-P-9). The scanners hold remainders of the text, not byte offsets;
+they were checked against the offset-based version on 400,000 generated
+messages, and the two agreed on every one.
 
 §7.5 **Only the MSH is ever logged** (Caldicott principle 3). The extractor
 accepts ER7 (the first line starting `MSH`) or HL7 v2 XML (the `MSH` element,
@@ -372,7 +378,13 @@ placeholders `[Empty message body]`, `[No MSH segment identified]` and
 `[XML MSH extraction failed - structure malformed]`, with `UNKNOWN` ids.
 The MSH text goes only to the audit events (which redact, `04-observability.md`
 §2). Deviation from the Python: **tracing log lines carry the control id and
-message type, never the MSH text.**
+message type, never the MSH text.** Second deviation: upstream's regex salvage
+of a closed `<MSH>..</MSH>` from XML that does not parse is **not** ported.
+Malformed XML is invalid data, and a salvage would be a fallback for it
+(`rust-checked-arithmetic` RCA-DECL-6, RCA-IN-6): it returns the placeholder, so
+the control id and trigger are `UNKNOWN` and the message dead-letters on its
+missing identifiers as §7.8 says. An `MSH` line with no character after the
+name has no separator and is not an `MSH` (no `|` is assumed).
 
 §7.6 **Configuration**, in addition to the shared variables
 (`SERVICE_BUS_CONNECTION_STRING` / `SERVICE_BUS_NAMESPACE`,

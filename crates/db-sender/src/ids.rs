@@ -128,7 +128,7 @@ fn nonblank(text: &str) -> Option<String> {
 /// One repetition of a CX field, in either layout.
 fn parse_cx(repetition: &str) -> Cx {
     let components: Vec<&str> = repetition.split('^').collect();
-    let id = nonblank(components[0]);
+    let id = components.first().copied().and_then(nonblank);
     let authority_of = |component: &str| nonblank(component.split('&').next().unwrap_or(""));
     let authority = if components.len() > 3 {
         components.get(3).and_then(|c| authority_of(c))

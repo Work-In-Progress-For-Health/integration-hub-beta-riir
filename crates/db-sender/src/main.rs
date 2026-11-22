@@ -5,6 +5,19 @@
 
 // See `main_loop.rs`: `azservicebus` futures are large and one-per-process.
 #![allow(clippy::large_futures)]
+// Checked arithmetic (`rust-checked-arithmetic`, RCA-ENF-3): denied for the
+// whole crate. Tests may use plain operators and indexing (RCA-EXC-5).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::integer_division,
+        clippy::unreachable
+    )
+)]
 
 use std::process::ExitCode;
 
