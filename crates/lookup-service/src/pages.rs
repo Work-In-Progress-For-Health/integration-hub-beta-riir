@@ -455,12 +455,18 @@ async fn render_table<S: TableStore>(
     let detail: TableDetail = resolver.detail(table)?;
     let definition = resolver.definition(table)?;
     let page_number = extras.page.max(1);
+    // `page_number >= 1` above, so this cannot underflow; an offset that
+    // overflows is a page that does not exist, refused as an invalid request.
+    let offset = page_number
+        .checked_sub(1)
+        .and_then(|before| before.checked_mul(PAGE_SIZE))
+        .ok_or_else(|| LookupError::invalid_request("page is out of range"))?;
     let (rows, total) = resolver
         .store()
         .query_rows(
             table,
             Some(extras.search.as_str()).filter(|s| !s.is_empty()),
-            (page_number - 1) * PAGE_SIZE,
+            offset,
             PAGE_SIZE,
         )
         .await?;
@@ -577,8 +583,14 @@ async fn render_table<S: TableStore>(
         total,
         page: page_number,
         pages,
-        previous_href: (page_number > 1).then(|| href(page_number - 1)),
-        next_href: (page_number < pages).then(|| href(page_number + 1)),
+        previous_href: page_number
+            .checked_sub(1)
+            .filter(|previous| *previous >= 1)
+            .map(href),
+        next_href: page_number
+            .checked_add(1)
+            .filter(|next| *next <= pages)
+            .map(href),
         t,
     };
     Ok(render(&page, status))

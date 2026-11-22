@@ -79,7 +79,7 @@ fn parse_records(text: &str) -> Vec<(usize, Vec<String>)> {
                         chars.next();
                         field.push('\n');
                     }
-                    lines += 1;
+                    lines = next_line(lines);
                 }
                 _ => field.push(ch),
             }
@@ -100,7 +100,7 @@ fn parse_records(text: &str) -> Vec<(usize, Vec<String>)> {
                 if ch == '\r' && chars.peek() == Some(&'\n') {
                     chars.next();
                 }
-                lines += 1;
+                lines = next_line(lines);
                 if touched {
                     fields.push(std::mem::take(&mut field));
                 }
@@ -117,9 +117,19 @@ fn parse_records(text: &str) -> Vec<(usize, Vec<String>)> {
     }
     if touched {
         fields.push(field);
-        records.push((lines + 1, fields));
+        records.push((next_line(lines), fields));
     }
     records
+}
+
+/// The line after `line`, holding at `usize::MAX` (`spec/20-lookup-service.md`
+/// §7): line numbers only label messages, and a file with that many lines
+/// cannot be held in memory, so the hold is unreachable, not a wrong answer.
+const fn next_line(line: usize) -> usize {
+    match line.checked_add(1) {
+        Some(next) => next,
+        None => usize::MAX, // §7
+    }
 }
 
 /// Parse CSV text. Blank lines are skipped; ragged rows and header problems

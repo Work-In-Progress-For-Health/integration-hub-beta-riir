@@ -68,7 +68,7 @@ mod config {
             ("lookup-rows", "lookup-config")
         );
         assert_eq!(config.default_ttl_seconds, 300);
-        assert_eq!(config.max_upload_bytes(), 50 * 1024 * 1024);
+        assert_eq!(config.max_upload_bytes(), Some(50 * 1024 * 1024));
     }
 
     #[test]
@@ -140,6 +140,17 @@ mod config {
         assert!(errors.contains("PORT"), "{errors}");
         assert!(errors.contains("LOOKUP_DEFAULT_TTL_SECONDS"), "{errors}");
         assert!(errors.contains(">= 1"), "{errors}");
+    }
+
+    /// §2.6, §5.3: a size whose byte count overflows is invalid, not unlimited.
+    #[test]
+    fn an_upload_limit_that_overflows_is_a_startup_failure() {
+        // Over `usize::MAX / 2^20` on a 64-bit target (and unparseable on a
+        // 32-bit one): invalid either way.
+        let errors = with_auth(&[("LOOKUP_MAX_UPLOAD_MB", "17592186044417")])
+            .unwrap_err()
+            .to_string();
+        assert!(errors.contains("LOOKUP_MAX_UPLOAD_MB"), "{errors}");
     }
 
     /// §2.4.
@@ -499,6 +510,15 @@ mod ttl {
         ] {
             let error = ttl_to_seconds(value, unit, None).unwrap_err();
             assert_eq!(error.kind.code(), "invalid_settings", "{value} {unit}");
+        }
+    }
+
+    /// §2.6: a product that overflows is out of range, not clamped to a limit.
+    #[test]
+    fn a_ttl_that_overflows_is_rejected() {
+        for unit in ["seconds", "minutes", "hours", "days"] {
+            let error = ttl_to_seconds(i64::MAX, unit, None).unwrap_err();
+            assert_eq!(error.kind.code(), "invalid_settings", "{unit}");
         }
     }
 

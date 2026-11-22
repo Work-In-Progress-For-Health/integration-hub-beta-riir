@@ -63,10 +63,10 @@ impl<S: TableStore> AppState<S> {
     /// `503 not_ready` until [`AppState::start`] completes (§5.1).
     #[must_use]
     pub fn new(config: Config, store: S) -> Self {
-        let keys = config
+        let keys: Option<Arc<dyn SigningKeys>> = config
             .auth_tenant_id
             .as_deref()
-            .map(|tenant| Arc::new(JwksKeys::for_tenant(tenant)) as Arc<dyn SigningKeys>);
+            .map(|tenant| -> Arc<dyn SigningKeys> { Arc::new(JwksKeys::for_tenant(tenant)) });
         Self::with_signing_keys(config, store, keys)
     }
 
@@ -446,13 +446,19 @@ pub async fn read_multipart(
         .to_owned();
     let boundary = boundary_of(&content_type)
         .ok_or_else(|| LookupError::invalid_request("The request must be multipart/form-data"))?;
-    let limit = config.max_upload_bytes() + MULTIPART_OVERHEAD;
+    // An unrepresentable limit refuses the upload; it is never "no limit".
+    let Some(max_bytes) = config.max_upload_bytes() else {
+        return Err(too_large(config));
+    };
+    let limit = max_bytes
+        .checked_add(MULTIPART_OVERHEAD)
+        .ok_or_else(|| too_large(config))?;
     let bytes = axum::body::to_bytes(request.into_body(), limit)
         .await
         .map_err(|_| too_large(config))?;
     let parts = parse_multipart(&bytes, &boundary).map_err(LookupError::invalid_request)?;
     if let Some(file) = parts.iter().find(|p| p.file_name.is_some())
-        && file.data.len() > config.max_upload_bytes()
+        && file.data.len() > max_bytes
     {
         return Err(too_large(config));
     }

@@ -44,8 +44,39 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
+**In progress:** `lookup-service` (`cache`, `config`, `file_store`, `import`, `pages`,
+`ttl`, `web`, `admin` done; `form.rs`, `jwks.rs`, `security.rs` left, 44 findings).
+
 **Done:** `db-sender` (denied at the crate root; `sanitize.rs` rewritten on remainder
 slices, `msh.rs` salvage dropped, spec/10 §7.4 and §7.5).
+
+## Found by grep, not by Clippy (RCA-ENF-5)
+
+`saturating_*`, `wrapping_*`, `overflowing_*` and `clamp` are forbidden outright
+(RCA-INT-4, RCA-EXC-4) but are not lints, so the table above does not count them.
+`rg -w --type rust '(saturating|wrapping|overflowing)_\w+|\.clamp\('` on production
+code (2026-11-22):
+
+| Where | What | Needs |
+|---|---|---|
+| `hl7-pims-transformer/src/reference_data.rs:504` | `2_u32.saturating_pow(retry - 1)` | declared back-off ceiling, `checked_pow` + `unwrap_or` |
+| `ultra7/src/iteration.rs:65-66` | `saturating_mul`, `saturating_add`, `try_from(..).unwrap_or(0)` | error: an overflowing iteration is invalid |
+| `hl7-rest-server/src/http.rs:120` | `limit.saturating_mul(6).saturating_add(1024)` | checked, refuse on overflow |
+| `dashboard/src/contacts.rs:454` | `(page.max(1) - 1).saturating_mul(per_page)` | **decision**: `page=0` is invalid input (RCA-IN-2) |
+| `dashboard/src/azure/token.rs:195` | `Instant::now() + expires_in.saturating_sub(..)` | `checked_*`, declared fallback |
+| `dashboard/src/web.rs:444` | `.clamp(1, MAX_THROUGHPUT_HOURS)` | **decision**: an out-of-range query parameter is an error |
+| `ihb-sender/src/main_loop.rs:85`, `throttle.rs:158,166` | `saturating_sub`, `allowable.clamp(1, ..)` | declared floor, or error |
+| `dashboard/src/azure/email.rs:164` | `backoff * 2_u32.saturating_pow(attempt)` | declared ceiling |
+| `hl7-server/src/listener.rs:199` | `len().saturating_sub(buffered())` | `checked_sub`, the invariant is the point |
+| `lookup-service/src/security.rs:753` | `len().saturating_sub(1)` | `lookup-service` pass, below |
+
+## Decisions needed (rejection currently becomes a substitute, RCA-IN-2 / RCA-IN-7)
+
+Changing these alters behaviour, so they need a spec decision first and are
+**not** changed by the arithmetic pass:
+
+- `lookup-service/src/pages.rs`: `extras.page.max(1)` turns page `0` into page 1.
+- `dashboard/src/contacts.rs`, `dashboard/src/web.rs`: as in the table above.
 
 ## Plan (RCA-ENF-3: one module at a time, then deny at the crate root)
 

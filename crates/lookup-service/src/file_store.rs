@@ -28,6 +28,10 @@ pub const MANIFEST_NAME: &str = "tables.json";
 /// The largest seed file, in bytes (§7.2).
 pub const MAX_SEED_FILE_BYTES: u64 = 50 * 1024 * 1024;
 
+/// The same limit in megabytes, for messages (`RCA-EXC-1`: a constant).
+#[expect(clippy::integer_division, reason = "RCA-EXC-1: constant expression")]
+const MAX_SEED_FILE_MB: u64 = MAX_SEED_FILE_BYTES / (1024 * 1024);
+
 /// The uploader recorded for seed data (§7.3).
 pub const SEED_ACTOR: &str = "seed";
 
@@ -88,11 +92,13 @@ impl SeedSource {
             let stem = path
                 .file_stem()
                 .map_or_default(|n| n.to_string_lossy().into_owned());
-            let size = std::fs::metadata(&path).map_or(0, |m| m.len());
+            // An unreadable size is an error, not a size of zero (RCA-P-3).
+            let size = std::fs::metadata(&path)
+                .map_err(|error| SeedDataError(format!("{file_name}: could not be read: {error}")))?
+                .len();
             if size > MAX_SEED_FILE_BYTES {
                 return Err(SeedDataError(format!(
-                    "{file_name}: exceeds the {} MB seed file limit",
-                    MAX_SEED_FILE_BYTES / (1024 * 1024)
+                    "{file_name}: exceeds the {MAX_SEED_FILE_MB} MB seed file limit"
                 )));
             }
             let bytes = std::fs::read(&path).map_err(|error| {
@@ -234,10 +240,9 @@ fn load_csv_table(
     bytes: &[u8],
     entry: &Map<String, Value>,
 ) -> Result<LoadedTable, SeedDataError> {
-    if bytes.len() as u64 > MAX_SEED_FILE_BYTES {
+    if !u64::try_from(bytes.len()).is_ok_and(|length| length <= MAX_SEED_FILE_BYTES) {
         return Err(SeedDataError(format!(
-            "{file_name}: exceeds the {} MB seed file limit",
-            MAX_SEED_FILE_BYTES / (1024 * 1024)
+            "{file_name}: exceeds the {MAX_SEED_FILE_MB} MB seed file limit"
         )));
     }
     validate_manifest_entry(stem, entry)?;
@@ -326,10 +331,25 @@ impl TableStore for FileTableStore {
     }
 
     async fn get_row(&self, table: &str, key: &[String]) -> Result<Option<Row>, LookupError> {
-        Ok(self
-            .tables
-            .get(table)
-            .and_then(|t| t.index.get(key).map(|i| t.rows[*i].clone())))
+        let Some(loaded) = self.tables.get(table) else {
+            return Ok(None);
+        };
+        let Some(position) = loaded.index.get(key) else {
+            return Ok(None);
+        };
+        // An index entry with no row is a corrupt seed table (RCA-IN-6): an
+        // error, not a miss.
+        loaded
+            .rows
+            .get(*position)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| {
+                LookupError::backend_unavailable(
+                    "seed table index points past its rows",
+                    Some(table),
+                )
+            })
     }
 
     async fn load_rows(&self, table: &str) -> Result<Vec<Row>, LookupError> {

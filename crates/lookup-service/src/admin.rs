@@ -98,7 +98,10 @@ pub async fn replace_table_from_csv<S: TableStore>(
             "Invalid table name; must match {TABLE_NAME_PATTERN}"
         )));
     }
-    if request.data.len() > config.max_upload_bytes() {
+    if config
+        .max_upload_bytes()
+        .is_none_or(|max_bytes| request.data.len() > max_bytes)
+    {
         return Err(LookupError::new(
             Kind::UploadTooLarge,
             format!("File exceeds the {} MB upload limit", config.max_upload_mb),

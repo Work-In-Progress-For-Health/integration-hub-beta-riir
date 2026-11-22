@@ -188,6 +188,13 @@ cache, then store point read, then cache.
 §5.3 The TTL is the table's `ttl_seconds`, else `LOOKUP_DEFAULT_TTL_SECONDS`.
 A cache holds at most `LOOKUP_CACHE_MAX_ENTRIES` rows, evicting expired
 entries first and then the least recently used. It counts hits and misses.
+The hit and miss counts and the recency tick are `u64` and **hold at
+`u64::MAX`** rather than wrap or fail (declared fallback, `rust-checked-arithmetic`
+RCA-DECL-4: a statistic that cannot go higher is still correct as a lower bound,
+and reaching it takes 2^64 lookups). A TTL whose seconds overflow `i64` is out
+of range and rejected as any TTL over seven days is (§2.6); an upload limit
+whose byte count overflows is a startup failure, and `max_upload_bytes()` is
+`None` (uploads refused), never "unlimited".
 Only found rows are cached (§1.1, Phase 4). `cached` in a response is `false`
 only when the row was read from the store for that request; a preloaded
 table's answer is always `true`.

@@ -20,6 +20,18 @@ pub fn monotonic_timer() -> Timer {
     Arc::new(move || start.elapsed().as_secs_f64())
 }
 
+/// One more than `count`, holding at `u64::MAX` (`spec/20-lookup-service.md`
+/// §5.3). The hit and miss counts are statistics and `tick` only orders
+/// recency, so a count that cannot go higher is not an error: it stays put.
+/// Reaching it takes 2^64 lookups.
+#[expect(
+    clippy::manual_saturating_arithmetic,
+    reason = "RCA-INT-4: written as checked_add plus the declared fallback, not saturating_add"
+)]
+fn counted(count: u64) -> u64 {
+    count.checked_add(1).unwrap_or(u64::MAX) // §5.3
+}
+
 /// One cached row.
 struct Entry {
     /// The row.
@@ -99,21 +111,21 @@ impl TableCache {
     /// row may be, however often it is read.
     pub fn get(&mut self, key: &[String]) -> Option<Row> {
         let now = (self.timer)();
-        self.tick += 1;
+        self.tick = counted(self.tick);
         let tick = self.tick;
         match self.entries.get_mut(key) {
             Some(entry) if entry.expires_at > now => {
                 entry.used = tick;
-                self.hits += 1;
+                self.hits = counted(self.hits);
                 Some(entry.row.clone())
             }
             Some(_) => {
                 self.entries.remove(key);
-                self.misses += 1;
+                self.misses = counted(self.misses);
                 None
             }
             None => {
-                self.misses += 1;
+                self.misses = counted(self.misses);
                 None
             }
         }
@@ -126,7 +138,7 @@ impl TableCache {
     /// replaces it and restarts its TTL without evicting anything.
     pub fn put(&mut self, key: Vec<String>, row: Row) {
         let now = (self.timer)();
-        self.tick += 1;
+        self.tick = counted(self.tick);
         if !self.entries.contains_key(&key) && self.entries.len() >= self.max_entries {
             self.entries.retain(|_, entry| entry.expires_at > now);
             if self.entries.len() >= self.max_entries

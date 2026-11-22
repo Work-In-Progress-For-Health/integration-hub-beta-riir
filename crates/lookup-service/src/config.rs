@@ -154,8 +154,12 @@ impl Config {
 
     /// The upload size limit in bytes.
     #[must_use]
-    pub const fn max_upload_bytes(&self) -> usize {
-        self.max_upload_mb * 1024 * 1024
+    ///
+    /// `None` when the megabyte setting does not fit a `usize` in bytes; startup
+    /// refuses such a setting (§2.6), so callers treat `None` as "refuse the
+    /// upload" and never as "no limit".
+    pub const fn max_upload_bytes(&self) -> Option<usize> {
+        self.max_upload_mb.checked_mul(BYTES_PER_MB)
     }
 
     /// Read from the process environment.
@@ -211,6 +215,14 @@ impl Config {
         let default_ttl_seconds = at_least_one(reader, "LOOKUP_DEFAULT_TTL_SECONDS", 300_u32);
         let cache_max_entries = at_least_one(reader, "LOOKUP_CACHE_MAX_ENTRIES", 10_000_usize);
         let max_upload_mb = at_least_one(reader, "LOOKUP_MAX_UPLOAD_MB", 50_usize);
+        if max_upload_mb.checked_mul(BYTES_PER_MB).is_none() {
+            // A size whose byte count overflows is invalid, not "unlimited" (§2.6).
+            reader.invalid(
+                "LOOKUP_MAX_UPLOAD_MB",
+                "a size whose byte count fits in memory",
+                max_upload_mb.to_string(),
+            );
+        }
         let upload_concurrency = at_least_one(reader, "LOOKUP_UPLOAD_CONCURRENCY", 32_usize);
         let auth_tenant_id = reader.optional_string("LOOKUP_AUTH_TENANT_ID");
         let auth_audience = reader.optional_string("LOOKUP_AUTH_AUDIENCE");
@@ -307,6 +319,9 @@ fn auth_flag(reader: &mut Reader, name: &str) -> bool {
         }
     }
 }
+
+/// Bytes in a megabyte (`RCA-EXC-1`: a constant expression).
+const BYTES_PER_MB: usize = 1024 * 1024;
 
 /// An integer that must be a whole number of at least 1 (§2.6).
 fn at_least_one<T>(reader: &mut Reader, name: &str, default: T) -> T
