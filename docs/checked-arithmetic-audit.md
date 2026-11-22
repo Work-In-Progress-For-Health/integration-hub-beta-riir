@@ -21,7 +21,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-soap-server` | **0** (was 17) | | | | | | |
 | `hl7-pims-transformer` | **0** (was 16) | | | | | | |
 | `ihb-validation` | **0** (was 13) | | | | | | |
-| `http-mock-receiver` | 11 | 4 | 7 |  |  |  |  |
+| `http-mock-receiver` | **0** (was 11) | | | | | | |
 | `ihb-bus` | 8 | 7 |  | 1 |  |  |  |
 | `hl7-server` | 7 |  | 4 | 3 |  |  |  |
 | `soap-sender` | 7 | 2 | 5 |  |  |  |  |
@@ -44,7 +44,8 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
-**Done:** `ihb-validation` (`drop_empty_elements` compared with the offset version on 400,000
+**Done:** `http-mock-receiver` (`soap::extract_payload` on remainders; identical to the offset version
+on 400,000 generated texts), `ihb-validation` (`drop_empty_elements` compared with the offset version on 400,000
 generated texts; `insertion_point` counts from the end instead of `+ 1`), `hl7-pims-transformer` (a network-supplied chunk size was added to unchecked, as in
 `lookup-service`; the retry back-off now ends retrying instead of saturating), `hl7-soap-server` (`payload::extract` on `get`/`checked_*`; compared with the
 offset version on 800,000 generated texts), `ultra7` (its stale-range and lenient-chunk fallbacks are kept and listed under
@@ -126,17 +127,6 @@ crates/hl7-server/src/listener.rs:346 indexing_slicing
 crates/hl7-server/src/validate.rs:222 string_slice
 crates/hl7-server/src/validate.rs:223 string_slice
 crates/hl7-server/src/validate.rs:224 string_slice
-crates/http-mock-receiver/src/fhir.rs:234 arithmetic_side_effects
-crates/http-mock-receiver/src/soap.rs:128 arithmetic_side_effects
-crates/http-mock-receiver/src/soap.rs:128 string_slice
-crates/http-mock-receiver/src/soap.rs:130 string_slice
-crates/http-mock-receiver/src/soap.rs:150 string_slice
-crates/http-mock-receiver/src/soap.rs:151 arithmetic_side_effects
-crates/http-mock-receiver/src/soap.rs:151 string_slice
-crates/http-mock-receiver/src/soap.rs:162 string_slice
-crates/http-mock-receiver/src/soap.rs:166 arithmetic_side_effects
-crates/http-mock-receiver/src/soap.rs:166 string_slice
-crates/http-mock-receiver/src/soap.rs:168 string_slice
 crates/ihb-bus/src/fake.rs:106 arithmetic_side_effects
 crates/ihb-bus/src/fake.rs:227 arithmetic_side_effects
 crates/ihb-bus/src/fake.rs:328 indexing_slicing

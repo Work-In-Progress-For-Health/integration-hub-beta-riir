@@ -230,8 +230,8 @@ impl FhirMock {
                 Some(operation_outcome("error", "not-found", "Unknown status id")),
             );
         };
-        if job.polls_remaining > 0 {
-            job.polls_remaining -= 1;
+        if let Some(remaining) = job.polls_remaining.checked_sub(1) {
+            job.polls_remaining = remaining;
             return MockResponse::new(202, None)
                 .with_header("X-Progress", "Processing")
                 .with_header("Retry-After", RETRY_AFTER_SECONDS);

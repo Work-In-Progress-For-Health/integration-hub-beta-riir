@@ -9,6 +9,18 @@
 //! reject/error distinction to drive.
 
 #![allow(clippy::large_futures)]
+// Checked arithmetic (`rust-checked-arithmetic`, RCA-ENF-3): see `lib.rs`.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::integer_division,
+        clippy::unreachable
+    )
+)]
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::process::ExitCode;

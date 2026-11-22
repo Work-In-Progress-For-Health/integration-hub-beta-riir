@@ -124,10 +124,8 @@ pub fn extract_payload(body: &str) -> Option<String> {
 
     // Step 2: any element whose trimmed text starts with `MSH`.
     let mut rest = body;
-    while let Some(close) = rest.find('>') {
-        let after = &rest[close + 1..];
-        let end = after.find('<').unwrap_or(after.len());
-        let text = after[..end].trim();
+    while let Some((_, after)) = rest.split_once('>') {
+        let text = after.split_once('<').map_or(after, |(text, _)| text).trim();
         if text.starts_with("MSH") {
             return Some(unescape(text));
         }
@@ -144,11 +142,19 @@ pub fn extract_payload(body: &str) -> Option<String> {
 /// element holds. Hand-rolled because the mock must work on bodies that are
 /// not well-formed (§3.2).
 fn element_text<'a>(body: &'a str, name: &str) -> Option<&'a str> {
+    // An empty name matches everywhere and would never advance.
+    if name.is_empty() {
+        return None;
+    }
     let mut rest = body;
 
     while let Some(at) = rest.find(name) {
-        let before = &rest[..at];
-        let after = &rest[at + name.len()..];
+        let Some((before, from_name)) = rest.split_at_checked(at) else {
+            break;
+        };
+        let Some(after) = from_name.strip_prefix(name) else {
+            break;
+        };
         rest = after;
 
         // The name must be a whole element name: `<name>` or `<p:name>`,
@@ -156,16 +162,14 @@ fn element_text<'a>(body: &'a str, name: &str) -> Option<&'a str> {
         if !before.ends_with('<') && !before.ends_with(':') {
             continue;
         }
-        let Some(close) = after.find('>') else {
+        let Some((attributes, text)) = after.split_once('>') else {
             continue;
         };
-        if !after[..close].trim().is_empty() && !after[..close].starts_with(' ') {
+        if !attributes.trim().is_empty() && !attributes.starts_with(' ') {
             continue;
         }
 
-        let text = &after[close + 1..];
-        let end = text.find('<')?;
-        return Some(&text[..end]);
+        return text.split_once('<').map(|(text, _)| text);
     }
 
     None
