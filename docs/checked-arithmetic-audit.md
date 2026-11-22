@@ -18,7 +18,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `db-sender` | **0** (was 62) | | | | | | |
 | `dashboard` | **0** (was 32) | | | | | | |
 | `ultra7` | **0** (was 20) | | | | | | |
-| `hl7-soap-server` | 17 | 8 | 9 |  |  |  |  |
+| `hl7-soap-server` | **0** (was 17) | | | | | | |
 | `hl7-pims-transformer` | 16 | 8 |  | 7 | 1 |  |  |
 | `ihb-validation` | 13 | 6 | 5 | 2 |  |  |  |
 | `http-mock-receiver` | 11 | 4 | 7 |  |  |  |  |
@@ -44,7 +44,8 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
-**Done:** `ultra7` (its stale-range and lenient-chunk fallbacks are kept and listed under
+**Done:** `hl7-soap-server` (`payload::extract` on `get`/`checked_*`; compared with the
+offset version on 800,000 generated texts), `ultra7` (its stale-range and lenient-chunk fallbacks are kept and listed under
 decisions below), `dashboard` (§7.4 of its spec; 32 findings and the saturating/clamp uses
 except the three decisions listed there), `lookup-service` (denied at the crate root; `jwks.rs` had a network-reachable
 overflow in the chunk-size arithmetic, fixed with tests) and `db-sender` (denied at the crate root; `sanitize.rs` rewritten on remainder
@@ -139,23 +140,6 @@ crates/hl7-server/src/listener.rs:346 indexing_slicing
 crates/hl7-server/src/validate.rs:222 string_slice
 crates/hl7-server/src/validate.rs:223 string_slice
 crates/hl7-server/src/validate.rs:224 string_slice
-crates/hl7-soap-server/src/payload.rs:68 string_slice
-crates/hl7-soap-server/src/payload.rs:72 string_slice
-crates/hl7-soap-server/src/payload.rs:83 arithmetic_side_effects
-crates/hl7-soap-server/src/payload.rs:83 string_slice
-crates/hl7-soap-server/src/payload.rs:89 arithmetic_side_effects
-crates/hl7-soap-server/src/payload.rs:93 arithmetic_side_effects
-crates/hl7-soap-server/src/payload.rs:94 arithmetic_side_effects
-crates/hl7-soap-server/src/payload.rs:103 string_slice
-crates/hl7-soap-server/src/payload.rs:113 string_slice
-crates/hl7-soap-server/src/payload.rs:114 arithmetic_side_effects
-crates/hl7-soap-server/src/payload.rs:115 arithmetic_side_effects
-crates/hl7-soap-server/src/payload.rs:119 string_slice
-crates/hl7-soap-server/src/payload.rs:128 string_slice
-crates/hl7-soap-server/src/payload.rs:131 arithmetic_side_effects
-crates/hl7-soap-server/src/payload.rs:139 string_slice
-crates/hl7-soap-server/src/payload.rs:156 arithmetic_side_effects
-crates/hl7-soap-server/src/payload.rs:156 string_slice
 crates/http-mock-receiver/src/fhir.rs:234 arithmetic_side_effects
 crates/http-mock-receiver/src/soap.rs:128 arithmetic_side_effects
 crates/http-mock-receiver/src/soap.rs:128 string_slice

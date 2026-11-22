@@ -65,11 +65,9 @@ pub fn extract<'a>(request: &'a str, local_name: &str) -> Option<&'a str> {
 
     // A self-closing payload — `<ADT_A05/>` — has no closing tag to find.
     let open_end = tag_end(request, start)?;
-    if request[start..open_end]
-        .trim_end_matches('>')
-        .ends_with('/')
-    {
-        return Some(&request[start..open_end]);
+    let open_tag = request.get(start..open_end)?;
+    if open_tag.trim_end_matches('>').ends_with('/') {
+        return Some(open_tag);
     }
 
     let close = format!("</{qualified}>");
@@ -80,18 +78,21 @@ pub fn extract<'a>(request: &'a str, local_name: &str) -> Option<&'a str> {
         let next_open = find_open_tag(request, local_name, cursor)
             .filter(|(_, name)| name == &qualified)
             .map(|(at, _)| at);
-        let next_close = request[cursor..].find(&close).map(|at| at + cursor);
+        let next_close = request
+            .get(cursor..)?
+            .find(&close)
+            .and_then(|at| at.checked_add(cursor));
 
         match (next_open, next_close) {
             // An element of the same name opening before the close belongs
             // to this one, so the close after it is not ours.
             (Some(open), Some(closing)) if open < closing => {
-                depth += 1;
+                depth = depth.checked_add(1)?;
                 cursor = tag_end(request, open)?;
             }
             (_, Some(closing)) => {
-                depth -= 1;
-                cursor = closing + close.len();
+                depth = depth.checked_sub(1)?;
+                cursor = closing.checked_add(close.len())?;
             }
             // The document ends without closing what it opened. Malformed,
             // and `hl7-2-soap` will already have refused it; returning
@@ -100,7 +101,7 @@ pub fn extract<'a>(request: &'a str, local_name: &str) -> Option<&'a str> {
         }
     }
 
-    Some(&request[start..cursor])
+    request.get(start..cursor)
 }
 
 /// Find `<`, optional prefix, then `local_name` at a tag boundary.
@@ -108,15 +109,20 @@ pub fn extract<'a>(request: &'a str, local_name: &str) -> Option<&'a str> {
 /// Returns where the `<` is and the qualified name as written, so the
 /// closing tag can be matched on the same spelling.
 fn find_open_tag<'a>(request: &'a str, local_name: &str, from: usize) -> Option<(usize, &'a str)> {
+    // An empty name matches everywhere and would never advance.
+    if local_name.is_empty() {
+        return None;
+    }
     let mut cursor = from;
 
-    while let Some(offset) = request[cursor..].find(local_name) {
-        let at = cursor + offset;
-        cursor = at + local_name.len();
+    while let Some(offset) = request.get(cursor..)?.find(local_name) {
+        let at = cursor.checked_add(offset)?;
+        cursor = at.checked_add(local_name.len())?;
 
         // What follows must end the name: `ADT_A05` must not match inside
         // `ADT_A05X`, and `MSH` must not match inside `MSH.10`.
-        let after_ends_name = request[cursor..]
+        let after_ends_name = request
+            .get(cursor..)?
             .chars()
             .next()
             .is_none_or(|c| c == '>' || c == '/' || c.is_whitespace());
@@ -125,10 +131,11 @@ fn find_open_tag<'a>(request: &'a str, local_name: &str, from: usize) -> Option<
         }
 
         // Walk back over an optional `prefix:` to the `<`.
-        let before = &request[..at];
-        let name_start = before
-            .rfind(|c: char| c == '<' || c == '>' || c.is_whitespace())
-            .map_or(0, |at| at + 1);
+        let before = request.get(..at)?;
+        let name_start = match before.rfind(|c: char| c == '<' || c == '>' || c.is_whitespace()) {
+            Some(delimiter) => delimiter.checked_add(1)?,
+            None => 0,
+        };
         let Some(open) = name_start.checked_sub(1) else {
             continue;
         };
@@ -136,7 +143,9 @@ fn find_open_tag<'a>(request: &'a str, local_name: &str, from: usize) -> Option<
             continue;
         }
 
-        let qualified = &request[name_start..cursor];
+        let Some(qualified) = request.get(name_start..cursor) else {
+            continue;
+        };
         // A prefix, if present, is everything before a single colon.
         if qualified.matches(':').count() > 1 {
             continue;
@@ -153,7 +162,8 @@ fn find_open_tag<'a>(request: &'a str, local_name: &str, from: usize) -> Option<
 
 /// One past the `>` that ends the tag beginning at `start`.
 fn tag_end(request: &str, start: usize) -> Option<usize> {
-    request[start..].find('>').map(|at| start + at + 1)
+    let at = request.get(start..)?.find('>')?;
+    start.checked_add(at)?.checked_add(1)
 }
 
 #[cfg(test)]

@@ -97,6 +97,14 @@ any value `hyper` admits. See
 | XML → ER7 conversion failed | 400 | `Client.Validation` | `Unable to convert XML payload to ER7 format.` |
 | Anything else | 500 | `Server` | `Unexpected server error while processing SOAP request.` |
 
+§3.1a **Checked arithmetic** (`rust-checked-arithmetic`): the crate denies
+`arithmetic_side_effects`, `as_conversions`, `indexing_slicing`, `string_slice`,
+`integer_division` and `unreachable`. `payload::extract` locates the payload
+with `str::get` and `checked_*`, and an empty local name matches nothing (it
+would otherwise never advance). Nothing in this crate substitutes a value for
+invalid input: a payload that cannot be located is `None`, and `hl7-2-soap`
+refuses the message.
+
 §3.2 Element matching is on **local name only**. The same envelope arrives
 as `soapenv:`, `soap:`, `SOAP-ENV:` or unprefixed depending on the sending
 stack, and all four MUST be read alike.
