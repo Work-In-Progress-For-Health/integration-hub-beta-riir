@@ -245,8 +245,7 @@ impl Observatory for LiveObservatory {
                 timestamp: logs::text(row, "timestamp").unwrap_or_default(),
                 kind: logs::text(row, "type").unwrap_or_default(),
                 outer_message: logs::text(row, "outerMessage").unwrap_or_default(),
-                #[allow(clippy::cast_possible_truncation)]
-                severity_level: logs::number(row, "severityLevel").map(|n| n as i64),
+                severity_level: logs::integer(row, "severityLevel"),
                 app_name: logs::text(row, "appName").unwrap_or_default(),
                 operation_id: logs::text(row, "operation_Id").unwrap_or_default(),
             })
@@ -394,8 +393,9 @@ impl Observatory for LiveObservatory {
             rows.iter()
                 .filter_map(|row| {
                     let workflow_id = logs::text(row, "workflow_id")?;
-                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                    let total = logs::number(row, "Total").unwrap_or_default() as u64;
+                    // A missing or malformed `Total` is unknown, so the row is
+                    // left out, not counted as zero (RCA-P-3).
+                    let total = logs::count(row, "Total")?;
                     Some((workflow_id, total))
                 })
                 .collect(),

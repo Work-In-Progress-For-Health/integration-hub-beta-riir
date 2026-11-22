@@ -190,9 +190,19 @@ fn parse(document: &serde_json::Value) -> Result<Held, HttpError> {
     let token = azure_token_lite::parse_response(&document.to_string())
         .map_err(|error| HttpError::Body(error.to_string()))?;
 
+    // A token that lives no longer than the margin is already due for
+    // refresh: usable for zero time (declared above, `§4.6.3`). A lifetime
+    // `Instant` cannot represent is an invalid response, not a long one.
+    let usable_for = token
+        .expires_in
+        .checked_sub(EXPIRY_MARGIN)
+        .unwrap_or(std::time::Duration::ZERO); // §4.6.3
+    let usable_until = Instant::now()
+        .checked_add(usable_for)
+        .ok_or_else(|| HttpError::Body("token lifetime out of range".to_string()))?;
     Ok(Held {
         value: token.access_token,
-        usable_until: Instant::now() + token.expires_in.saturating_sub(EXPIRY_MARGIN),
+        usable_until,
     })
 }
 

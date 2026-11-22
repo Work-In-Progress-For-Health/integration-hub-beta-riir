@@ -142,6 +142,33 @@ pub fn number(row: &Row, column: &str) -> Option<f64> {
     }
 }
 
+/// A row's value as a whole number that is exact in an `i64`, else `None`.
+#[must_use]
+pub fn integer(row: &Row, column: &str) -> Option<i64> {
+    exact_i64(number(row, column)?)
+}
+
+/// A row's value as a non-negative whole number, else `None`.
+#[must_use]
+pub fn count(row: &Row, column: &str) -> Option<u64> {
+    u64::try_from(integer(row, column)?).ok()
+}
+
+/// `value` as an `i64` if it is finite, integral and in range (RCA-CONV-3).
+fn exact_i64(value: f64) -> Option<i64> {
+    // 2^63 is exactly representable; `i64::MAX as f64` rounds up to it.
+    const TWO_POW_63: f64 = 9_223_372_036_854_775_808.0;
+    if !(value.is_finite() && value.fract() == 0.0 && (-TWO_POW_63..TWO_POW_63).contains(&value)) {
+        return None;
+    }
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "RCA-CONV-3: finite, integral and in range, checked above"
+    )]
+    Some(value as i64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,5 +324,25 @@ mod tests {
         let rows = parse(&document);
 
         assert_eq!(number(&rows[0], "Total"), Some(0.0));
+    }
+
+    #[test]
+    fn whole_numbers_are_exact_or_nothing() {
+        let row = |value: serde_json::Value| {
+            let mut row = Row::new();
+            row.insert("n".into(), value);
+            row
+        };
+        assert_eq!(integer(&row(serde_json::json!(3)), "n"), Some(3));
+        assert_eq!(integer(&row(serde_json::json!("7")), "n"), Some(7));
+        assert_eq!(integer(&row(serde_json::json!(2.5)), "n"), None);
+        assert_eq!(integer(&row(serde_json::json!(1e300)), "n"), None);
+        assert_eq!(
+            count(&row(serde_json::json!(-1)), "n"),
+            None,
+            "no negative count"
+        );
+        assert_eq!(count(&row(serde_json::json!(12)), "n"), Some(12));
+        assert_eq!(count(&Row::new(), "n"), None, "absent is not zero");
     }
 }

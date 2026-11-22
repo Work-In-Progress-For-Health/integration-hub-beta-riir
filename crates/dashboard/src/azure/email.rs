@@ -158,13 +158,21 @@ impl Mailer {
                 Ok(()) => return true,
                 Err(error) => {
                     let retryable = matches!(error, HttpError::Status { code: 429, .. });
-                    if retryable && attempt < self.max_retries {
-                        // §5.8.4 — the sandbox quota is low and several
-                        // alarms firing in one cycle reach it easily.
-                        let wait = self.backoff * 2_u32.saturating_pow(attempt);
+                    // §5.8.4 — the sandbox quota is low and several alarms
+                    // firing in one cycle reach it easily. The wait doubles
+                    // each time; one that cannot be computed is not
+                    // invented (no ceiling is declared), so the send gives
+                    // up as it does when the retries run out (RCA-INT-4).
+                    let wait = 2_u32
+                        .checked_pow(attempt)
+                        .and_then(|factor| self.backoff.checked_mul(factor));
+                    if retryable
+                        && attempt < self.max_retries
+                        && let (Some(wait), Some(next)) = (wait, attempt.checked_add(1))
+                    {
                         tracing::warn!(
                             %error,
-                            attempt = attempt + 1,
+                            attempt = next,
                             wait_seconds = wait.as_secs(),
                             "ACS throttled the alert e-mail; retrying"
                         );
