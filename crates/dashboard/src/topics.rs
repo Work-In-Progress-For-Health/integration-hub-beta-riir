@@ -140,11 +140,13 @@ pub struct Kpis {
 #[must_use]
 pub fn kpis(topics: &[Topic]) -> Kpis {
     let subscriptions: Vec<&Subscription> = topics.iter().flat_map(|t| &t.subscriptions).collect();
-    let unknown = topics.iter().filter(|t| !t.depths.is_known()).count()
-        + subscriptions
-            .iter()
-            .filter(|s| !s.depths.is_known())
-            .count();
+    // One count over both kinds, so no addition of two counts is needed.
+    let unknown = topics
+        .iter()
+        .map(|t| &t.depths)
+        .chain(subscriptions.iter().map(|s| &s.depths))
+        .filter(|depths| !depths.is_known())
+        .count();
 
     Kpis {
         topic_count: topics.len(),

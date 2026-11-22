@@ -150,7 +150,9 @@ async fn purge_if_due<O: Observatory, S: AlarmStore>(state: &AppState<O, S>) {
         .contacts_purged_at
         .lock()
         .is_ok_and(|mut last| match *last {
-            Some(at) if now - at < PURGE_INTERVAL => false,
+            // Not due again until a day after the last purge; a due time that
+            // cannot be represented is never reached (RCA-TIME-3).
+            Some(at) if at.checked_add(PURGE_INTERVAL).is_none_or(|due| now < due) => false,
             _ => {
                 *last = Some(now);
                 true

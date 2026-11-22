@@ -16,7 +16,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `lookup-service` | **0** (was 64) | | | | | | |
 | `db-sender` | **0** (was 62) | | | | | | |
-| `dashboard` | 32 | 24 | 2 |  | 6 |  |  |
+| `dashboard` | **0** (was 32) | | | | | | |
 | `ultra7` | 20 | 9 |  | 10 | 1 |  |  |
 | `hl7-soap-server` | 17 | 8 | 9 |  |  |  |  |
 | `hl7-pims-transformer` | 16 | 8 |  | 7 | 1 |  |  |
@@ -44,7 +44,8 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
-**Done:** `lookup-service` (denied at the crate root; `jwks.rs` had a network-reachable
+**Done:** `dashboard` (§7.4 of its spec; 32 findings and the saturating/clamp uses
+except the three decisions listed there), `lookup-service` (denied at the crate root; `jwks.rs` had a network-reachable
 overflow in the chunk-size arithmetic, fixed with tests) and `db-sender` (denied at the crate root; `sanitize.rs` rewritten on remainder
 slices, `msh.rs` salvage dropped, spec/10 §7.4 and §7.5).
 
@@ -101,38 +102,6 @@ on `str::get`, `split_once`, `char_indices`), `lookup-service`, `dashboard`,
 crates/buswatch/src/live.rs:296 arithmetic_side_effects
 crates/buswatch/src/live.rs:333 arithmetic_side_effects
 crates/buswatch/src/render.rs:99 arithmetic_side_effects
-crates/dashboard/src/alarm/mod.rs:358 arithmetic_side_effects
-crates/dashboard/src/alarm/mod.rs:386 as_conversions
-crates/dashboard/src/alarm/pause.rs:450 arithmetic_side_effects
-crates/dashboard/src/alarm/pause.rs:531 arithmetic_side_effects
-crates/dashboard/src/alarm/pause.rs:565 arithmetic_side_effects
-crates/dashboard/src/alarm/pause.rs:734 arithmetic_side_effects
-crates/dashboard/src/alarm/pause.rs:737 arithmetic_side_effects
-crates/dashboard/src/alarm/pause.rs:782 arithmetic_side_effects
-crates/dashboard/src/alarm/pause.rs:867 arithmetic_side_effects
-crates/dashboard/src/alarm/rules.rs:129 arithmetic_side_effects
-crates/dashboard/src/azure/email.rs:164 arithmetic_side_effects
-crates/dashboard/src/azure/email.rs:167 arithmetic_side_effects
-crates/dashboard/src/azure/live.rs:249 as_conversions
-crates/dashboard/src/azure/live.rs:398 as_conversions
-crates/dashboard/src/azure/token.rs:195 arithmetic_side_effects
-crates/dashboard/src/contacts.rs:454 arithmetic_side_effects
-crates/dashboard/src/contacts.rs:650 arithmetic_side_effects
-crates/dashboard/src/contacts.rs:664 arithmetic_side_effects
-crates/dashboard/src/contacts.rs:719 arithmetic_side_effects
-crates/dashboard/src/contacts.rs:815 arithmetic_side_effects
-crates/dashboard/src/contacts.rs:817 arithmetic_side_effects
-crates/dashboard/src/flow_sources.rs:299 arithmetic_side_effects
-crates/dashboard/src/flow_sources.rs:339 arithmetic_side_effects
-crates/dashboard/src/language.rs:125 string_slice
-crates/dashboard/src/language.rs:133 string_slice
-crates/dashboard/src/network_test.rs:297 as_conversions
-crates/dashboard/src/network_test.rs:300 as_conversions
-crates/dashboard/src/network_test.rs:313 as_conversions
-crates/dashboard/src/network_test.rs:352 arithmetic_side_effects
-crates/dashboard/src/pages/contacts.rs:153 arithmetic_side_effects
-crates/dashboard/src/period.rs:111 arithmetic_side_effects
-crates/dashboard/src/topics.rs:143 arithmetic_side_effects
 crates/fhir-sender/src/client.rs:283 arithmetic_side_effects
 crates/fhir-sender/src/client.rs:303 arithmetic_side_effects
 crates/fhir-sender/src/client.rs:316 arithmetic_side_effects

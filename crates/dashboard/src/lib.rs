@@ -26,12 +26,26 @@
 //! carries an absent case, and it is not there for tidiness.
 
 #![forbid(unsafe_code)]
+// Checked arithmetic (`rust-checked-arithmetic`, RCA-ENF-3): denied for the
+// whole crate. Tests may use plain operators and indexing (RCA-EXC-5).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::integer_division,
+        clippy::unreachable
+    )
+)]
 
 pub mod alarm;
 pub mod azure;
 pub mod cache;
 pub mod config;
 pub mod contacts;
+pub mod counting;
 pub mod csv;
 pub mod flow_sources;
 pub mod flows;

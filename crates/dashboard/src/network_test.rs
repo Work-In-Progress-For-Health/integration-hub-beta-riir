@@ -49,6 +49,30 @@ impl std::fmt::Display for InvalidTarget {
     }
 }
 
+/// A count as an `f64`, only if it is exact (at most `u32::MAX`, RCA-CONV-4).
+fn count_f64(count: usize) -> Result<f64, InvalidTarget> {
+    u32::try_from(count)
+        .map(f64::from)
+        .map_err(|_| InvalidTarget)
+}
+
+/// Seconds since the epoch with a fraction, only if the whole seconds are
+/// exact in an `f64` (at most 2^53, RCA-CONV-4).
+fn epoch_seconds(at: OffsetDateTime) -> Result<f64, InvalidTarget> {
+    const EXACT_LIMIT: u64 = 1 << 53;
+    let seconds = at.unix_timestamp();
+    if seconds.unsigned_abs() > EXACT_LIMIT {
+        return Err(InvalidTarget);
+    }
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_precision_loss,
+        reason = "RCA-CONV-4: checked above, at most 2^53 is exact"
+    )]
+    let whole = seconds as f64;
+    Ok(whole + f64::from(at.nanosecond()) / 1e9)
+}
+
 /// Whether a label is a valid RFC 1123 hostname label.
 fn is_label(label: &str) -> bool {
     (1..=63).contains(&label.len())
@@ -292,12 +316,17 @@ pub async fn run(
     let failure_count = results.iter().filter(|a| !a.success).count();
     let round2 = |n: f64| (n * 100.0).round() / 100.0;
 
-    #[allow(clippy::cast_precision_loss)]
-    let loss_percent =
-        ((failure_count as f64 / results.len() as f64) * 100.0 * 10.0).round() / 10.0;
-    #[allow(clippy::cast_precision_loss)]
-    let average = (!latencies.is_empty())
-        .then(|| round2(latencies.iter().sum::<f64>() / latencies.len() as f64));
+    // `InvalidTarget` doubles as "this test cannot be run" here: a count
+    // that is not exact in an `f64` would make the percentages wrong (RCA-CONV-4).
+    let attempt_total = count_f64(results.len())?;
+    let loss_percent = ((count_f64(failure_count)? / attempt_total) * 100.0 * 10.0).round() / 10.0;
+    let average = if latencies.is_empty() {
+        None
+    } else {
+        Some(round2(
+            latencies.iter().sum::<f64>() / count_f64(latencies.len())?,
+        ))
+    };
 
     Ok(TestResult {
         host,
@@ -310,7 +339,7 @@ pub async fn run(
         avg_latency_ms: average,
         max_latency_ms: latencies.iter().copied().reduce(f64::max).map(round2),
         success: !latencies.is_empty(),
-        timestamp: now.unix_timestamp_nanos() as f64 / 1e9,
+        timestamp: epoch_seconds(now)?,
         attempts: results,
         history_warning: None,
     })
@@ -348,8 +377,8 @@ pub async fn save_sample<S: AlarmStore>(store: &S, result: &TestResult) -> Resul
         "max_latency_ms": result.max_latency_ms,
         "loss_percent": result.loss_percent,
     }));
-    if samples.len() > MAX_HISTORY_SAMPLES {
-        samples.drain(..samples.len() - MAX_HISTORY_SAMPLES);
+    if let Some(excess) = samples.len().checked_sub(MAX_HISTORY_SAMPLES) {
+        samples.drain(..excess);
     }
 
     store

@@ -451,7 +451,14 @@ pub fn select(mut contacts: Vec<Contact>, query: &Query) -> (Vec<Contact>, usize
 
     let total = contacts.len();
     let per_page = query.per_page.max(1);
-    let start = (query.page.max(1) - 1).saturating_mul(per_page);
+    // A page whose offset overflows is past the end of any list, and `skip`
+    // of `usize::MAX` is exactly that: empty (`§7`).
+    let start = query
+        .page
+        .max(1)
+        .checked_sub(1)
+        .and_then(|before| before.checked_mul(per_page))
+        .unwrap_or(usize::MAX); // §7
 
     (
         contacts.into_iter().skip(start).take(per_page).collect(),
@@ -647,7 +654,11 @@ pub async fn purge_expired<S: AlarmStore>(
     let Ok(contacts) = list_all(store).await else {
         return 0;
     };
-    let cutoff = now - time::Duration::days(i64::from(retention_days));
+    // A cutoff before the earliest representable date is earlier than every
+    // contact: nothing is expired (RCA-TIME-3).
+    let Some(cutoff) = now.checked_sub(time::Duration::days(i64::from(retention_days))) else {
+        return 0;
+    };
 
     let mut purged = 0;
     for contact in contacts.iter().filter(|c| c.deleted) {
@@ -661,7 +672,7 @@ pub async fn purge_expired<S: AlarmStore>(
         }
 
         match store.delete_document(PARTITION, &contact.id).await {
-            Ok(()) => purged += 1,
+            Ok(()) => purged = crate::counting::next(purged),
             Err(error) => {
                 tracing::warn!(%error, contact_id = %contact.id, "could not purge an expired contact");
             }
@@ -716,7 +727,7 @@ pub fn parse_csv(content: &str) -> (Vec<Fields>, Vec<String>) {
     let mut errors = Vec::new();
     for (index, row) in table.rows.iter().enumerate() {
         // Row 1 is the header.
-        let row_number = index + 2;
+        let row_number = crate::counting::row_number(index);
         let cell = |column: &str| row.get(column).cloned().unwrap_or_default();
         let flow_ids: Vec<Value> = cell("flow_ids")
             .split(';')
@@ -812,9 +823,9 @@ pub async fn import<S: AlarmStore>(store: &S, content: &str, now: OffsetDateTime
         match outcome {
             Ok((contact, created)) => {
                 if created {
-                    result.created += 1;
+                    result.created = crate::counting::next(result.created);
                 } else {
-                    result.updated += 1;
+                    result.updated = crate::counting::next(result.updated);
                 }
                 // So a later row with the same key updates this one instead
                 // of creating a duplicate.

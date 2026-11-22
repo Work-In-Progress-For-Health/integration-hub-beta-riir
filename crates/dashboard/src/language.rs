@@ -121,16 +121,16 @@ pub fn safe_redirect(referer: Option<&str>) -> String {
         without_scheme.strip_prefix("//").map_or_else(
             || without_scheme.to_string(),
             |rest| {
-                rest.find('/')
-                    .map_or_else(|| "/".to_string(), |at| rest[at..].to_string())
+                rest.split_once('/')
+                    .map_or_else(|| "/".to_string(), |(_, path)| format!("/{path}"))
             },
         )
     } else {
         // A scheme was present, so everything up to the next `/` is the
         // host.
         without_scheme
-            .find('/')
-            .map_or_else(|| "/".to_string(), |at| without_scheme[at..].to_string())
+            .split_once('/')
+            .map_or_else(|| "/".to_string(), |(_, path)| format!("/{path}"))
     };
 
     // Strip a fragment, which never reaches a server anyway, and refuse an

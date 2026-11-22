@@ -296,7 +296,7 @@ pub fn parse_csv(content: &str) -> (Vec<(String, String, u16)>, Vec<String>) {
     let mut seen: std::collections::BTreeMap<(String, u16), usize> =
         std::collections::BTreeMap::new();
     for (index, row) in table.rows.iter().enumerate() {
-        let number = index + 2;
+        let number = crate::counting::row_number(index);
         let cell = |c: &str| row.get(c).cloned().unwrap_or_default();
         match validated(
             &cell("description"),
@@ -336,7 +336,7 @@ pub async fn import<S: AlarmStore>(store: &S, content: &str) -> ImportResult {
     for (description, url, port) in rows {
         let label = format!("{description} ({url}:{port})");
         match add(store, &description, &url, &Value::from(port)).await {
-            Ok(_) => result.imported += 1,
+            Ok(_) => result.imported = crate::counting::next(result.imported),
             Err(SourceError::Invalid(m)) => errors.push(format!("{label}: {m}")),
             Err(SourceError::Persistence(m)) => {
                 errors.push(format!("{label}: {m}"));

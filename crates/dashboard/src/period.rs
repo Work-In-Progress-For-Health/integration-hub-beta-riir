@@ -24,11 +24,12 @@ fn london() -> &'static Tz {
     time_tz::timezones::db::europe::LONDON
 }
 
-/// The start of the working day, in minutes past midnight (09:00).
-const DAY_START: u16 = 9 * 60;
+/// The start of the working day as (hour, minute): 09:00. Pairs compare in
+/// clock order, so no minutes-past-midnight arithmetic is needed.
+const DAY_START: (u8, u8) = (9, 0);
 
-/// The end of the working day, in minutes past midnight (17:00).
-const DAY_END: u16 = 17 * 60;
+/// The end of the working day as (hour, minute): 17:00.
+const DAY_END: (u8, u8) = (17, 0);
 
 /// Which of §5.1.1's three windows a moment falls in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -108,7 +109,7 @@ impl Period {
 pub fn period_at(at: OffsetDateTime) -> Period {
     let local = at.to_timezone(london());
     let weekday = local.weekday();
-    let minutes = u16::from(local.hour()) * 60 + u16::from(local.minute());
+    let minutes = (local.hour(), local.minute());
 
     // §5.1.1's weekend window: Friday 17:00 → Monday 09:00. Tested before
     // the day window, because Friday 17:00 belongs to both descriptions and

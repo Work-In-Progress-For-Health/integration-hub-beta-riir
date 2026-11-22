@@ -594,6 +594,24 @@ originals, `reqwest` for the Azure REST calls.
 §7.3 `FLASK_SECRET_KEY` keeps its name and signs the session cookie, so a
 deployment's existing secret keeps working.
 
+§7.4 **Checked arithmetic** (`rust-checked-arithmetic`; the crate denies
+`arithmetic_side_effects`, `as_conversions`, `indexing_slicing`,
+`string_slice`, `integer_division` and `unreachable`). Declarations:
+tallies and spreadsheet row numbers (`counting::next`, `row_number`) **hold at
+`usize::MAX`**, which a file that fits in memory cannot reach; a list page
+whose offset overflows is **empty** (past the end); a time bound that cannot be
+represented (`checked_add`/`checked_sub` on a date) is one no value passes, so
+a start time is not "in the past", a pause is not "too far ahead", a contact
+is not expired and a pause is not purged; an ACS back-off that cannot be
+computed **gives up** instead of inventing a ceiling; a token that lives no
+longer than its refresh margin is usable for zero time (§4.6.3), and a
+lifetime `Instant` cannot hold is an invalid response; a KQL `Total` that is
+missing or not a whole number leaves its row out (never `0`). **Not changed,
+needs a decision** (rejection currently becomes a substitute, RCA-IN-2):
+`page=0` and `per_page=0` read as 1 (`contacts.rs`), the throughput-hours query
+is clamped (`web.rs`), and `NETWORK_TEST_ATTEMPTS=0` reads as 1
+(`network_test.rs`).
+
 ---
 
 ## §8 Tests
