@@ -8,6 +8,16 @@ use roxmltree::{Document, Node, NodeType};
 
 use crate::model::MessageFormat;
 
+/// A nesting depth one deeper, holding at `usize::MAX` (indentation only; a
+/// document nested `usize::MAX` deep does not fit in memory).
+#[must_use]
+pub const fn deeper(depth: usize) -> usize {
+    match depth.checked_add(1) {
+        Some(next) => next,
+        None => usize::MAX,
+    }
+}
+
 /// Best-effort format of raw text: JSON, then XML, else HL7 (`§5.1`).
 ///
 /// ER7 has no reliable leading marker once the field separator varies, so
@@ -172,7 +182,7 @@ fn write_element(node: Node<'_, '_>, depth: usize, pad: &str, out: &mut String) 
     } else {
         let _ = writeln!(out, "{open}>");
         for k in kids {
-            write_node(k, depth + 1, out);
+            write_node(k, crate::format::deeper(depth), out);
         }
         let _ = writeln!(out, "{pad}</{name}>");
     }

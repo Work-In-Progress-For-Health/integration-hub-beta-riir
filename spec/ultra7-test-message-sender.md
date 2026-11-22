@@ -79,6 +79,12 @@ both tools.
 
 §4.2 `apply_iteration(content, spec, index)` (`index` 0-based) returns
 `content` unchanged when the range is not `0 <= start < end <= len`.
+(A stale range in a hand-edited project file must not stop a run; this is a
+fallback for invalid input, `rust-checked-arithmetic` RCA-DECL-6, kept because
+Ultra7 is a tool for sending broken messages on purpose. **Raised for a
+decision**; see `docs/checked-arithmetic-audit.md`.) The `increment` arithmetic
+is checked in `i128`: a result that does not fit leaves the original unchanged,
+as a non-integer original does, and is never saturated.
 Otherwise it replaces the range:
 
 - `increment`: parse the original as an integer (surrounding whitespace

@@ -17,7 +17,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `lookup-service` | **0** (was 64) | | | | | | |
 | `db-sender` | **0** (was 62) | | | | | | |
 | `dashboard` | **0** (was 32) | | | | | | |
-| `ultra7` | 20 | 9 |  | 10 | 1 |  |  |
+| `ultra7` | **0** (was 20) | | | | | | |
 | `hl7-soap-server` | 17 | 8 | 9 |  |  |  |  |
 | `hl7-pims-transformer` | 16 | 8 |  | 7 | 1 |  |  |
 | `ihb-validation` | 13 | 6 | 5 | 2 |  |  |  |
@@ -44,7 +44,8 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
-**Done:** `dashboard` (§7.4 of its spec; 32 findings and the saturating/clamp uses
+**Done:** `ultra7` (its stale-range and lenient-chunk fallbacks are kept and listed under
+decisions below), `dashboard` (§7.4 of its spec; 32 findings and the saturating/clamp uses
 except the three decisions listed there), `lookup-service` (denied at the crate root; `jwks.rs` had a network-reachable
 overflow in the chunk-size arithmetic, fixed with tests) and `db-sender` (denied at the crate root; `sanitize.rs` rewritten on remainder
 slices, `msh.rs` salvage dropped, spec/10 §7.4 and §7.5).
@@ -59,7 +60,7 @@ code (2026-11-22):
 | Where | What | Needs |
 |---|---|---|
 | `hl7-pims-transformer/src/reference_data.rs:504` | `2_u32.saturating_pow(retry - 1)` | declared back-off ceiling, `checked_pow` + `unwrap_or` |
-| `ultra7/src/iteration.rs:65-66` | `saturating_mul`, `saturating_add`, `try_from(..).unwrap_or(0)` | error: an overflowing iteration is invalid |
+| `ultra7/src/iteration.rs:65-66` | `saturating_mul`, `saturating_add`, `try_from(..).unwrap_or(0)` | done: checked, original unchanged on overflow |
 | `hl7-rest-server/src/http.rs:120` | `limit.saturating_mul(6).saturating_add(1024)` | checked, refuse on overflow |
 | `dashboard/src/contacts.rs:454` | `(page.max(1) - 1).saturating_mul(per_page)` | **decision**: `page=0` is invalid input (RCA-IN-2) |
 | `dashboard/src/azure/token.rs:195` | `Instant::now() + expires_in.saturating_sub(..)` | `checked_*`, declared fallback |
@@ -74,6 +75,9 @@ code (2026-11-22):
 Changing these alters behaviour, so they need a spec decision first and are
 **not** changed by the arithmetic pass:
 
+- `ultra7/src/iteration.rs`, `ultra7/src/sender/http.rs`: an out-of-range iteration range
+  returns the content unchanged, and a damaged chunked reply is read leniently
+  (both on purpose for a tool that sends and reads broken messages; spec/ultra7 §4.2).
 - `lookup-service/src/pages.rs`: `extras.page.max(1)` turns page `0` into page 1.
 - `dashboard/src/contacts.rs`, `dashboard/src/web.rs`: as in the table above.
 
@@ -219,26 +223,6 @@ crates/soap-sender/src/envelope.rs:260 string_slice
 crates/soap-sender/src/envelope.rs:264 arithmetic_side_effects
 crates/soap-sender/src/envelope.rs:264 string_slice
 crates/soap-sender/src/envelope.rs:266 string_slice
-crates/ultra7/src/export.rs:75 arithmetic_side_effects
-crates/ultra7/src/format.rs:175 arithmetic_side_effects
-crates/ultra7/src/iteration.rs:39 indexing_slicing
-crates/ultra7/src/iteration.rs:41 indexing_slicing
-crates/ultra7/src/iteration.rs:43 indexing_slicing
-crates/ultra7/src/iteration.rs:82 arithmetic_side_effects
-crates/ultra7/src/iteration.rs:82 indexing_slicing
-crates/ultra7/src/run.rs:84 as_conversions
-crates/ultra7/src/run.rs:86 arithmetic_side_effects
-crates/ultra7/src/run.rs:90 arithmetic_side_effects
-crates/ultra7/src/run.rs:92 arithmetic_side_effects
-crates/ultra7/src/sender/http.rs:168 indexing_slicing
-crates/ultra7/src/sender/http.rs:180 arithmetic_side_effects
-crates/ultra7/src/sender/http.rs:180 indexing_slicing
-crates/ultra7/src/sender/http.rs:196 indexing_slicing
-crates/ultra7/src/sender/http.rs:201 arithmetic_side_effects
-crates/ultra7/src/sender/http.rs:201 indexing_slicing
-crates/ultra7/src/sender/http.rs:208 indexing_slicing
-crates/ultra7/src/sender/http.rs:209 arithmetic_side_effects
-crates/ultra7/src/sender/mllp.rs:77 indexing_slicing
 crates/xml-fhir-proms-transformer/src/bundle.rs:248 indexing_slicing
 crates/xml-fhir-proms-transformer/src/identity.rs:80 arithmetic_side_effects
 crates/xml-fhir-proms-transformer/src/identity.rs:87 arithmetic_side_effects

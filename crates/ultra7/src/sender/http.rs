@@ -162,10 +162,19 @@ fn post(endpoint: &Endpoint, body: &[u8], headers: &[(String, String)]) -> SendR
     }
 }
 
+/// What comes before and after the first `needle` in `haystack`.
+fn split_at_needle<'a>(haystack: &'a [u8], needle: &[u8]) -> Option<(&'a [u8], &'a [u8])> {
+    let at = haystack
+        .windows(needle.len())
+        .position(|window| window == needle)?;
+    let (before, from_needle) = haystack.split_at_checked(at)?;
+    Some((before, from_needle.get(needle.len()..)?))
+}
+
 /// Status code and decoded body of a `Connection: close` response.
 fn parse_response(raw: &[u8]) -> Option<(u16, String)> {
-    let split = raw.windows(4).position(|w| w == b"\r\n\r\n")?;
-    let head = String::from_utf8_lossy(&raw[..split]);
+    let (head_bytes, body) = split_at_needle(raw, b"\r\n\r\n")?;
+    let head = String::from_utf8_lossy(head_bytes);
     let mut lines = head.lines();
     let status = lines
         .next()?
@@ -177,7 +186,6 @@ fn parse_response(raw: &[u8]) -> Option<(u16, String)> {
         let l = l.to_ascii_lowercase();
         l.starts_with("transfer-encoding:") && l.contains("chunked")
     });
-    let body = &raw[split + 4..];
     let bytes = if chunked {
         dechunk(body)
     } else {
@@ -192,21 +200,24 @@ fn parse_response(raw: &[u8]) -> Option<(u16, String)> {
 /// the tool exists to show a misbehaving receiver's reply, not reject it.
 fn dechunk(mut body: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
-    while let Some(eol) = body.windows(2).position(|w| w == b"\r\n") {
-        let size_text = String::from_utf8_lossy(&body[..eol]);
+    while let Some((size_line, after_line)) = split_at_needle(body, b"\r\n") {
+        let size_text = String::from_utf8_lossy(size_line);
         let Ok(size) = usize::from_str_radix(size_text.split(';').next().unwrap_or("").trim(), 16)
         else {
             break;
         };
-        body = &body[eol + 2..];
+        body = after_line;
         if size == 0 || body.len() < size {
             if size != 0 {
                 out.extend_from_slice(body);
             }
             break;
         }
-        out.extend_from_slice(&body[..size]);
-        body = body.get(size + 2..).unwrap_or(&[]);
+        let Some((chunk, tail)) = body.split_at_checked(size) else {
+            break;
+        };
+        out.extend_from_slice(chunk);
+        body = tail.get(2..).unwrap_or(&[]);
     }
     out
 }

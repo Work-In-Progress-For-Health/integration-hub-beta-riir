@@ -30,6 +30,15 @@ pub struct Summary {
     pub cancelled: bool,
 }
 
+/// One more than `count`, holding at `usize::MAX` (a tally for the summary;
+/// a run that long does not finish).
+const fn tally(count: usize) -> usize {
+    match count.checked_add(1) {
+        Some(next) => next,
+        None => usize::MAX,
+    }
+}
+
 /// `<host> on port <port>` for MLLP; the URL's host, with the port only when
 /// the URL names one, otherwise (`§8.2`).
 ///
@@ -73,7 +82,7 @@ pub fn send_messages(
     let repeat_count = repeat_count.max(1);
     let destination = describe_destination(endpoint);
     let mut summary = Summary::default();
-    for repeat in 0..repeat_count {
+    for (repeat, ordinal) in (0..repeat_count).zip(1..=repeat_count) {
         for message in messages {
             if cancel.load(Ordering::Relaxed) {
                 summary.cancelled = true;
@@ -81,15 +90,19 @@ pub fn send_messages(
             }
             let mut outgoing = (*message).clone();
             if let Some(spec) = &message.iteration {
-                outgoing.content = apply_iteration(&message.content, spec, repeat as usize);
+                let Ok(index) = usize::try_from(repeat) else {
+                    summary.cancelled = true;
+                    return summary;
+                };
+                outgoing.content = apply_iteration(&message.content, spec, index);
             }
-            let label = format!("{} [{}/{}]", message.name, repeat + 1, repeat_count);
+            let label = format!("{} [{}/{}]", message.name, ordinal, repeat_count);
             sink(Event::Info(format!("Sending {label} to {destination}")));
             let result = sender(endpoint, &outgoing);
             sink(Event::Result(&label, &result));
-            summary.sent += 1;
+            summary.sent = tally(summary.sent);
             if !result.ok {
-                summary.failed += 1;
+                summary.failed = tally(summary.failed);
             }
             if delay_ms > 0 {
                 std::thread::sleep(Duration::from_millis(delay_ms));

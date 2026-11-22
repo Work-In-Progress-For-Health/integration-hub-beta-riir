@@ -2,6 +2,19 @@
 //!
 //! Output goes to stdout and stderr only, never to a log sink (`§1.3`).
 
+// Checked arithmetic (`rust-checked-arithmetic`, RCA-ENF-3): see `lib.rs`.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::integer_division,
+        clippy::unreachable
+    )
+)]
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;

@@ -33,22 +33,28 @@ pub fn apply_iteration_at(
     now: OffsetDateTime,
 ) -> String {
     let chars: Vec<char> = content.chars().collect();
-    if !(spec.start < spec.end && spec.end <= chars.len()) {
+    let (true, Some(before), Some(selected), Some(after)) = (
+        spec.start < spec.end,
+        chars.get(..spec.start),
+        chars.get(spec.start..spec.end),
+        chars.get(spec.end..),
+    ) else {
+        // The stale-range rule above (`§4.1`); see the audit's decisions.
         return content.to_owned();
-    }
-    let original: String = chars[spec.start..spec.end].iter().collect();
+    };
+    let original: String = selected.iter().collect();
     let replacement = compute_value(&original, spec, index, now);
-    let mut out: String = chars[..spec.start].iter().collect();
+    let mut out: String = before.iter().collect();
     out.push_str(&replacement);
-    out.extend(&chars[spec.end..]);
+    out.extend(after);
     out
 }
 
 /// The replacement text for `original` (`§4.2`).
 ///
-/// Increment arithmetic is done in `i128` with saturation so a hostile
-/// `step` in a hand-edited project file cannot panic on overflow (debug
-/// builds would abort). A negative result is not padded, because a leading
+/// Increment arithmetic is done in `i128`, checked, so a hostile `step` in a
+/// hand-edited project file cannot panic on overflow; a result that does not
+/// fit leaves the original unchanged. A negative result is not padded, because a leading
 /// zero before the sign would be meaningless. A non-integer original is
 /// returned unchanged, as the Python does.
 fn compute_value(
@@ -62,8 +68,15 @@ fn compute_value(
             let Ok(base) = original.trim().parse::<i128>() else {
                 return original.to_owned();
             };
-            let offset = i128::from(spec.step).saturating_mul(i128::try_from(index).unwrap_or(0));
-            let value = base.saturating_add(offset);
+            // A value that does not fit is returned unchanged, as a
+            // non-integer original is: nothing is saturated or invented.
+            let Some(value) = i128::try_from(index)
+                .ok()
+                .and_then(|index| i128::from(spec.step).checked_mul(index))
+                .and_then(|offset| base.checked_add(offset))
+            else {
+                return original.to_owned();
+            };
             let width = if spec.pad_width == 0 {
                 original.chars().count()
             } else {
@@ -76,11 +89,11 @@ fn compute_value(
             }
         }
         IterationMode::List => {
-            if spec.values.is_empty() {
-                original.to_owned()
-            } else {
-                spec.values[index % spec.values.len()].clone()
-            }
+            // An empty list has no remainder: the original stays.
+            index
+                .checked_rem(spec.values.len())
+                .and_then(|slot| spec.values.get(slot))
+                .map_or_else(|| original.to_owned(), Clone::clone)
         }
         IterationMode::Timestamp => strftime(&spec.timestamp_format, now),
     }

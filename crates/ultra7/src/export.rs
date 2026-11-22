@@ -68,12 +68,18 @@ pub fn sanitize_filename(name: &str) -> String {
 /// assert_eq!(unique_filename("adt", ".hl7", &mut used), "adt (2).hl7");
 /// ```
 pub fn unique_filename(stem: &str, ext: &str, used: &mut BTreeSet<String>) -> String {
-    let mut candidate = format!("{stem}{ext}");
-    let mut counter = 2;
-    while used.contains(&candidate) {
-        candidate = format!("{stem} ({counter}){ext}");
-        counter += 1;
-    }
+    let plain = format!("{stem}{ext}");
+    let candidate = if used.contains(&plain) {
+        // `(2)`, `(3)`, ... : a range that cannot overflow. Running out of
+        // 2^64 numbers is unreachable (the set would not fit in memory); the
+        // name below is only so the function is total, never a collision.
+        (2_u64..=u64::MAX)
+            .map(|counter| format!("{stem} ({counter}){ext}"))
+            .find(|name| !used.contains(name))
+            .unwrap_or_else(|| format!("{stem} (copy){ext}"))
+    } else {
+        plain
+    };
     used.insert(candidate.clone());
     candidate
 }

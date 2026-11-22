@@ -74,7 +74,10 @@ pub fn send_mllp(endpoint: &Endpoint, message: &Message) -> SendResult {
             if n == 0 {
                 break;
             }
-            buf.extend_from_slice(&chunk[..n]);
+            let read = chunk
+                .get(..n)
+                .ok_or_else(|| std::io::Error::other("read more than the buffer"))?;
+            buf.extend_from_slice(read);
         }
         Ok(buf)
     };

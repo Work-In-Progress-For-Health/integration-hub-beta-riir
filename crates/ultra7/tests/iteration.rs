@@ -107,3 +107,28 @@ fn strftime_subset() {
         "2025-07-03 01:02:03.000004 25 184 % %Q"
     );
 }
+
+/// RCA-INT-4: a result that does not fit `i128` is not saturated; the original
+/// stays, as a non-integer original does.
+#[test]
+fn an_increment_that_overflows_leaves_the_original_unchanged() {
+    let mut spec = IterationSpec::new(3, 6, IterationMode::Increment);
+    spec.step = i64::MAX;
+    // base is near the top of i128: base + step * index overflows.
+    let huge = "ID:170141183460469231731687303715884105727:END";
+    let mut wide = IterationSpec::new(3, 42, IterationMode::Increment);
+    wide.step = i64::MAX;
+    assert_eq!(at(huge, &wide, 1), huge);
+    // A hostile step on a small base still works while it fits.
+    assert_eq!(at("ID:001:END", &spec, 0), "ID:001:END");
+}
+
+#[test]
+fn a_list_cycles_and_an_empty_list_keeps_the_original() {
+    let mut spec = IterationSpec::new(0, 1, IterationMode::List);
+    spec.values = vec!["a".into(), "b".into()];
+    assert_eq!(at("x", &spec, 0), "a");
+    assert_eq!(at("x", &spec, 3), "b");
+    spec.values.clear();
+    assert_eq!(at("x", &spec, 3), "x");
+}
