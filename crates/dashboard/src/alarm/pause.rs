@@ -447,7 +447,7 @@ pub fn fields_for(pause: &Pause, now: OffsetDateTime) -> PauseFields {
         pause_reason: pause.reason.clone(),
         pause_remaining: pause
             .end_at
-            .map(|end| (end - now).as_seconds_f64() / 60.0)
+            .map(|end| super::minutes_between(now, end))
             .map(f64::round),
         pause_indefinite: pause.end_at.is_none(),
         paused_until: pause.end_at.map(format_london),
@@ -528,7 +528,7 @@ pub fn to_view(pause: &Pause, now: OffsetDateTime) -> PauseView {
         cancelled_early: pause.cancelled_at.is_some() && state == PauseStatus::Ended,
         status: state.as_str(),
         remaining_minutes: match (pause.end_at, state) {
-            (Some(end), PauseStatus::Active) => Some(((end - now).as_seconds_f64() / 60.0).round()),
+            (Some(end), PauseStatus::Active) => Some(super::minutes_between(now, end).round()),
             _ => None,
         },
     }
@@ -562,7 +562,10 @@ pub fn group_for_display(pauses: &[Pause], now: OffsetDateTime) -> Groups {
             PauseStatus::Active => active.push(pause),
             PauseStatus::Scheduled => scheduled.push(pause),
             PauseStatus::Ended | PauseStatus::Cancelled => {
-                if finished_at(pause).unwrap_or(now) >= now - RECENT_WINDOW {
+                // A cutoff before the earliest representable date is earlier
+                // than every pause, so everything is recent (RCA-TIME-3).
+                let recent_since = now.checked_sub(RECENT_WINDOW);
+                if recent_since.is_none_or(|since| finished_at(pause).unwrap_or(now) >= since) {
                     recent.push(pause);
                 }
             }
@@ -731,10 +734,19 @@ fn resolve_start(payload: &Value, now: OffsetDateTime) -> Result<OffsetDateTime,
     }
 
     let start = parse_london(raw, "Start time")?;
-    if start < now - START_TOLERANCE {
+    // A bound that cannot be represented is one no start time passes
+    // (RCA-TIME-3): "before the earliest date" and "after the latest" are
+    // false for every `start`.
+    if now
+        .checked_sub(START_TOLERANCE)
+        .is_some_and(|earliest| start < earliest)
+    {
         return Err(PauseError::invalid("Start time is in the past."));
     }
-    if start > now + MAX_LEAD_TIME {
+    if now
+        .checked_add(MAX_LEAD_TIME)
+        .is_some_and(|latest| start > latest)
+    {
         return Err(PauseError::invalid(
             "Start time must be within the next 365 days.",
         ));
@@ -779,7 +791,10 @@ fn resolve_end(
                     "Duration must be between 1 minute and 365 days.",
                 ));
             }
-            Ok(Some(start + Duration::minutes(minutes)))
+            start
+                .checked_add(Duration::minutes(minutes))
+                .map(Some)
+                .ok_or_else(|| PauseError::invalid("End time is out of range."))
         }
         _ => Err(PauseError::invalid("Invalid end option.")),
     }
@@ -864,7 +879,9 @@ async fn purge_old<S: AlarmStore>(store: &S, pauses: &[Pause], now: OffsetDateTi
         ) {
             continue;
         }
-        if finished_at(pause).is_some_and(|finished| finished < now - RETENTION)
+        // No representable cutoff means nothing is older than it: keep it.
+        if let Some(cutoff) = now.checked_sub(RETENTION)
+            && finished_at(pause).is_some_and(|finished| finished < cutoff)
             && let Err(error) = store.delete_document(PARTITION, &pause.pause_id).await
         {
             tracing::warn!(%error, "could not purge an old alarm pause");

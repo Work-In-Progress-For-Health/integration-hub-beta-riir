@@ -354,7 +354,11 @@ fn store(state: RuleState) -> Option<RuleState> {
 }
 
 /// Minutes from `from` to `to`, which may be negative.
-fn minutes_between(from: OffsetDateTime, to: OffsetDateTime) -> f64 {
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "RCA-EXC-2: the difference of two OffsetDateTime always fits a Duration"
+)]
+pub(crate) fn minutes_between(from: OffsetDateTime, to: OffsetDateTime) -> f64 {
     (to - from).as_seconds_f64() / 60.0
 }
 
@@ -381,10 +385,10 @@ pub fn format_duration(minutes: f64) -> String {
         return "< 1 minute".to_string();
     }
     if minutes < 60.0 {
-        // Truncated, as the Python's `int()` is.
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let whole = minutes as u64;
-        return format!("{whole} minute{}", if whole == 1 { "" } else { "s" });
+        // Truncated, as the Python's `int()` is. `minutes` is in 1 ..< 60, so
+        // the whole number is exact and needs no integer conversion.
+        let whole = minutes.trunc();
+        return format!("{whole:.0} minute{}", if whole < 2.0 { "" } else { "s" });
     }
 
     let hours = minutes / 60.0;

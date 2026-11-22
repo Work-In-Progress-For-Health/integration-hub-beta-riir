@@ -126,7 +126,7 @@ pub fn inactivity_trip(
         return Trip::NoData;
     };
 
-    let minutes = (now - last).as_seconds_f64() / 60.0;
+    let minutes = super::minutes_between(last, now);
     let threshold = f64::from(thresholds.for_period(period_at(now)));
 
     // §5.3.2 — **strictly** greater. Compare with §5.5.2's at-or-above.
