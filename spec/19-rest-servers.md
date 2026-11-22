@@ -102,7 +102,7 @@ on them. No reason quotes a PID, name, date or identifier.
 3   parse                                     failure: §3.1
 4   common validation (§5.1)                  failure: §3.2
 5   VALIDATION_SUCCESS "Valid HL7 message - Type: {MSH-9}"
-6   tracking metadata (CorrelationId, MessageReceivedAt, WorkflowID, SourceSystem=MSH-3)
+6   tracking metadata (CorrelationId, MessageReceivedAt, WorkflowID, SourceSystem=first component of MSH-3, `ihb_fields::source_system`; `07` §6.1)
 7   risp:      resolve routing targets (§6)   failure: §3.2
     otherwise: flow-schema validation + XML   failure: §3.3
 8   if no XML yet: er7_to_xml for the store   failure: logged, XML omitted

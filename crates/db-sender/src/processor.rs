@@ -12,6 +12,7 @@ use crate::config::{AppConfig, ProcedureType};
 use crate::db::{DatabaseError, FailureKind, ProcedureRunner};
 use crate::idupdate;
 use crate::msh::{MshInfo, extract_msh_for_logging};
+use crate::trrr;
 
 /// Dead-letter reason for a procedure the server refused for good (`§7.3`).
 pub const FATAL_REASON: &str = "StoredProcedureExecutionFailed";
@@ -36,6 +37,35 @@ pub enum Disposition {
     },
 }
 
+/// Log a refusal and turn it into the dead letter (`spec/10-senders.md` §7.8).
+fn reject(
+    rejected: &idupdate::Rejected,
+    procedure: &str,
+    msh: &MshInfo,
+    events: &EventLogger,
+    correlation: Option<&str>,
+) -> Disposition {
+    events.log_message_failed(
+        &msh.msh_text,
+        &format!(
+            "Message rejected for {procedure}: {} - {}",
+            rejected.reason, rejected.description
+        ),
+        None,
+        correlation,
+    );
+    tracing::error!(
+        reason = rejected.reason,
+        control_id = %msh.control_id,
+        "dead-lettering a message for {procedure}: {}",
+        rejected.description
+    );
+    Disposition::DeadLetter {
+        reason: rejected.reason.to_string(),
+        description: rejected.description.clone(),
+    }
+}
+
 /// Run the configured call, or reject the message before any call.
 ///
 /// `Err` is a dead letter decided without touching the database
@@ -52,34 +82,22 @@ async fn dispatch<R: ProcedureRunner>(
     let procedure = &config.db.stored_procedure;
     match config.procedure_type {
         ProcedureType::QueueMessage => Ok(runner.execute(body, config.default_is_priority).await),
+        // The identifiers are read here, and a message they cannot be read
+        // from can never succeed.
         ProcedureType::QueueIdUpdate => {
-            // The identifiers are read here, and a message they cannot be
-            // read from can never succeed.
             match idupdate::plan(body, &message.properties, msh, &config.source_system) {
                 Ok(update) => Ok(runner.execute_id_update(&update).await),
-                Err(rejected) => {
-                    events.log_message_failed(
-                        &msh.msh_text,
-                        &format!(
-                            "Message rejected for {procedure}: {} - {}",
-                            rejected.reason, rejected.description
-                        ),
-                        None,
-                        correlation,
-                    );
-                    tracing::error!(
-                        reason = rejected.reason,
-                        control_id = %msh.control_id,
-                        "dead-lettering a message for {procedure}: {}",
-                        rejected.description
-                    );
-                    Err(Disposition::DeadLetter {
-                        reason: rejected.reason.to_string(),
-                        description: rejected.description,
-                    })
-                }
+                Err(rejected) => Err(reject(&rejected, procedure, msh, events, correlation)),
             }
         }
+        ProcedureType::UpdateIdentifier => match idupdate::plan_update_identifier(body, msh) {
+            Ok(update) => Ok(runner.execute_update_identifier(&update).await),
+            Err(rejected) => Err(reject(&rejected, procedure, msh, events, correlation)),
+        },
+        ProcedureType::Trrr(mapping) => match trrr::map(body, mapping) {
+            Ok(request) => Ok(runner.execute_trrr(&request).await),
+            Err(rejected) => Err(reject(&rejected, procedure, msh, events, correlation)),
+        },
     }
 }
 
@@ -260,6 +278,8 @@ mod tests {
     struct Fake {
         calls: Vec<(String, bool)>,
         id_calls: Vec<idupdate::IdUpdate>,
+        identifier_calls: Vec<idupdate::IdentifierUpdate>,
+        trrr_calls: Vec<trrr::TrrrRequest>,
         result: Result<(), DatabaseError>,
     }
 
@@ -268,6 +288,8 @@ mod tests {
             Self {
                 calls: vec![],
                 id_calls: vec![],
+                identifier_calls: vec![],
+                trrr_calls: vec![],
                 result: Ok(()),
             }
         }
@@ -275,6 +297,8 @@ mod tests {
             Self {
                 calls: vec![],
                 id_calls: vec![],
+                identifier_calls: vec![],
+                trrr_calls: vec![],
                 result: Err(DatabaseError::new(kind, code, message)),
             }
         }
@@ -291,6 +315,19 @@ mod tests {
             update: &idupdate::IdUpdate,
         ) -> Result<(), DatabaseError> {
             self.id_calls.push(update.clone());
+            self.result.clone()
+        }
+
+        async fn execute_trrr(&mut self, request: &trrr::TrrrRequest) -> Result<(), DatabaseError> {
+            self.trrr_calls.push(request.clone());
+            self.result.clone()
+        }
+
+        async fn execute_update_identifier(
+            &mut self,
+            update: &idupdate::IdentifierUpdate,
+        ) -> Result<(), DatabaseError> {
+            self.identifier_calls.push(update.clone());
             self.result.clone()
         }
     }
@@ -533,6 +570,129 @@ mod tests {
             unsupported,
             Disposition::DeadLetter { reason, .. } if reason == "UnsupportedTriggerEvent"
         ));
+    }
+
+    // ---- spec/10-senders.md §7.9: the WCRS identifier update ---------------
+
+    async fn run_update_identifier(body: &str, runner: &mut Fake) -> Disposition {
+        let config = AppConfig::from_pairs([
+            ("INGRESS_TOPIC_NAME", "t"),
+            ("INGRESS_SUBSCRIPTION_NAME", "s"),
+            ("DB_PROCEDURE_TYPE", "update_identifier"),
+            ("DB_USERNAME", "sa"),
+            ("DB_PASSWORD", "pwd"),
+            ("DB_ENCRYPT", "No"),
+        ])
+        .unwrap();
+        process_one(
+            &inbound(body),
+            runner,
+            &config,
+            &EventLogger::new("cavpms-to-wcrs", "wcrs_idupd_dbsender"),
+            &Metrics::new("cavpms-to-wcrs", "wcrs_idupd_dbsender", "CAVPMS", "WCRS"),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn an_a40_calls_update_identifier_with_three_strings_and_nothing_else() {
+        let mut runner = Fake::ok();
+        let body = "MSH|^~\\&|CAV|CAV|||2026||ADT^A40^ADT_A39|C40|P|2.5\r\
+                    PID|1||0042^^^VAL\rMRG|0007^^^VAL";
+        assert_eq!(
+            run_update_identifier(body, &mut runner).await,
+            Disposition::Complete
+        );
+        assert!(runner.calls.is_empty() && runner.id_calls.is_empty());
+        assert_eq!(runner.identifier_calls.len(), 1);
+        assert_eq!(runner.identifier_calls[0].old_identifier, "0007");
+        assert_eq!(runner.identifier_calls[0].new_identifier, "0042");
+    }
+
+    #[tokio::test]
+    async fn an_unplannable_a40_is_dead_lettered_before_any_call() {
+        let mut runner = Fake::ok();
+        let two = "MSH|^~\\&|CAV|CAV|||2026||ADT^A40|C|P|2.5\rPID|1||1^^^V\rMRG|2^^^V\rPID|1||3^^^V\rMRG|4^^^V";
+        assert!(matches!(
+            run_update_identifier(two, &mut runner).await,
+            Disposition::DeadLetter { reason, .. } if reason == "MultiplePatientGroups"
+        ));
+        let a31 = "MSH|^~\\&|CAV|CAV|||2026||ADT^A31|C|P|2.5\rPID|1||1^^^V";
+        assert!(matches!(
+            run_update_identifier(a31, &mut runner).await,
+            Disposition::DeadLetter { reason, .. } if reason == "UnsupportedTriggerEvent"
+        ));
+        assert!(runner.identifier_calls.is_empty());
+    }
+
+    // ---- spec/10-senders.md §7.10: the TRRR senders ------------------------
+
+    async fn run_trrr(body: &str, mapping: &'static str, runner: &mut Fake) -> Disposition {
+        let config = AppConfig::from_pairs([
+            ("INGRESS_TOPIC_NAME", "t"),
+            ("INGRESS_SUBSCRIPTION_NAME", "s"),
+            ("DB_PROCEDURE_TYPE", "trrr"),
+            ("TRRR_MAPPING_TYPE", mapping),
+            ("DB_USERNAME", "sa"),
+            ("DB_PASSWORD", "pwd"),
+            ("DB_ENCRYPT", "No"),
+        ])
+        .unwrap();
+        process_one(
+            &inbound(body),
+            runner,
+            &config,
+            &EventLogger::new("lims-to-trrr", "db_sender_trrr"),
+            &Metrics::new("lims-to-trrr", "db_sender_trrr", "SHARED", "TRRR"),
+        )
+        .await
+    }
+
+    const TRRR_A40: &str = "MSH|^~\\&|SENDER|SENDER|||2026||ADT^A40^ADT_A39|C40|P|2.5\r\
+                            PID|1||0042^^^SENDER~9999999999^^^NHS||SECRET^PATIENT\rMRG|0007^^^SENDER";
+
+    #[tokio::test]
+    async fn one_a40_is_served_by_both_instances_with_their_own_parameters() {
+        // An A40 reaches both subscriptions; each instance makes its own call.
+        let mut runner = Fake::ok();
+        assert_eq!(
+            run_trrr(TRRR_A40, "NHS_ID_UPDATE", &mut runner).await,
+            Disposition::Complete
+        );
+        assert_eq!(
+            run_trrr(TRRR_A40, "MERGE", &mut runner).await,
+            Disposition::Complete
+        );
+        assert!(runner.calls.is_empty() && runner.id_calls.is_empty());
+        assert!(matches!(
+            runner.trrr_calls[0],
+            trrr::TrrrRequest::Association { .. }
+        ));
+        assert!(matches!(
+            runner.trrr_calls[1],
+            trrr::TrrrRequest::Merge { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_message_the_mapping_cannot_use_is_dead_lettered_with_mapping_failed() {
+        let mut runner = Fake::ok();
+        let outcome = run_trrr(
+            "MSH|^~\\&|328|328|||2026||ADT^A31|C|P|2.5\rPID|1||555^^^328",
+            "NHS_ID_UPDATE",
+            &mut runner,
+        )
+        .await;
+        let Disposition::DeadLetter {
+            reason,
+            description,
+        } = outcome
+        else {
+            panic!("expected a dead letter");
+        };
+        assert_eq!(reason, "MappingFailed");
+        assert_eq!(description, "Missing NHS identifier");
+        assert!(runner.trrr_calls.is_empty());
     }
 
     #[tokio::test]

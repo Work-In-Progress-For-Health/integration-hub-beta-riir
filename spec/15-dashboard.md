@@ -465,6 +465,21 @@ somebody has to fix; the second is an ordinary Tuesday. Returning empty for
 both silently disables every alarm in the estate while the page reports
 nothing wrong.
 
+§5.6.4 **An unreachable account is left alone for thirty seconds.** After a
+request fails to *connect* or *time out*, the store sends nothing for 30 s
+and answers `Unavailable` at once (`UNAVAILABLE_BACKOFF`, `Backoff`; upstream
+`#461`, which found a dashboard made slow throughout by an account that was
+down, each request waiting out the full SDK retry window). The pause is
+checked before any signing or token request. **An HTTP status does not start
+it**: Cosmos answered, so it is reachable, and a `429` is the throttled write
+§5.6.2 is there to survive. The result is still `Unavailable`, never empty
+(§5.6.3). Tests: `a_connection_failure_pauses_requests_for_thirty_seconds`,
+`a_timeout_pauses_too`, `an_http_status_does_not_pause`. **Not ported from
+`#461`:** the Python's resolved-container cache (the Rust store addresses a
+container by URL and resolves nothing), the `gunicorn` `gthread` worker,
+response compression and static-file fingerprinting (a different server), and
+the shared credential (`TokenSource` already caches by scope, §4.6.3).
+
 ### §5.8 E-mail escalation
 
 Azure Communication Services, per `services/email_service.py`.

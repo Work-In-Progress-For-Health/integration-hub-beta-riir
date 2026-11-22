@@ -395,6 +395,51 @@ mod tests {
         assert_eq!(reparsed.get("PID-7").unwrap().as_deref(), Some("19990101"));
     }
 
+    /// Upstream `c8bb7c0` (#458), `test_xml_to_er7.py`: the positional
+    /// components of a CX survive the way back, the assigning authority in
+    /// `CX.4` above all. Here the converter is the `hl7-2` crate's, so these
+    /// pin it rather than port Python's hand-written one. The Rust converter
+    /// wants a whole message, so each case goes ER7, XML, ER7.
+    fn pid_after_round_trip(pid: &str) -> String {
+        let er7 = format!(
+            "MSH|^~\\&|328|328|200|200|20250101120000||ADT^A31^ADT_A05|C1|P|2.5\rEVN||2025\r{pid}\rPV1||U"
+        );
+        let back = xml_to_er7(&er7_to_xml(&er7).unwrap()).unwrap();
+        back.split('\r')
+            .find(|line| line.starts_with("PID"))
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    #[test]
+    fn internal_empty_components_are_kept_and_trailing_ones_trimmed() {
+        let pid = pid_after_round_trip("PID|1||B0000010612^^^328^PI");
+        assert!(pid.contains("B0000010612^^^328^PI"), "{pid}");
+
+        let pid = pid_after_round_trip("PID|1||A^B^^");
+        assert!(pid.ends_with("A^B"), "{pid}");
+    }
+
+    #[test]
+    fn subcomponents_are_joined_with_an_ampersand() {
+        let pid = pid_after_round_trip("PID|1||B0000010612^^^328&X^PI");
+        assert!(pid.contains("B0000010612^^^328&X^PI"), "{pid}");
+    }
+
+    #[test]
+    fn the_assigning_authority_survives_a_round_trip() {
+        let er7 = "MSH|^~\\&|328|328|200|200|20250101120000||ADT^A31^ADT_A05|CTRL1|P|2.5|||||GBR||EN\r\
+                   EVN||20250101120000\r\
+                   PID|1||B0000010612^^^328^PI~9876543210^^^NHS^NH||Lims2val^Test||20010909|M\r\
+                   PV1||U";
+        let back = xml_to_er7(&er7_to_xml_for_flow(er7, Flow::Phw, None).unwrap()).unwrap();
+        assert!(back.contains("B0000010612^^^328^PI"), "{back}");
+        assert!(back.contains("9876543210^^^NHS^NH"), "{back}");
+
+        let back = xml_to_er7(&er7_to_xml(er7).unwrap()).unwrap();
+        assert!(back.contains("B0000010612^^^328^PI"), "{back}");
+    }
+
     #[test]
     fn an_unreadable_document_is_an_error() {
         assert!(xml_to_er7("not xml").is_err());

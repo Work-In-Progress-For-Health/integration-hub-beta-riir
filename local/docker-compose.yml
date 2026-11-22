@@ -578,6 +578,68 @@ services:
         aliases:
           - "wrrs-idupd-dbsender"
 
+  # TRRR identifier update (spec/10-senders.md section 7.10; upstream #458, `db_sender_trrr`): the
+  # generic db-sender, NHS-ID-update instance, calling dbo.TRRRIDUpdate in Clinical_Results.
+  # `sql/init-clinical-results-db.sql` creates the database and both procedures; nothing applies it
+  # on start-up (no sqlcmd in Edge).
+  trrr-dbsender:
+    container_name: "ihb-rs-trrr-dbsender"
+    image: "ihb-rs/db-sender:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: db-sender
+    env_file:
+      - ./trrr-dbsender.env
+      - ./.secrets
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+      - sqledge
+    profiles:
+      - lims-to-trrr
+    networks:
+      integration-hub:
+        aliases:
+          - "trrr-dbsender"
+
+  # TRRR merge: the same image and a second subscription (every A40), TRRR_MAPPING_TYPE=MERGE,
+  # calling dbo.TRRRIDMerge. An A40 also reaches trrr-dbsender, so it results in two TRRR requests.
+  trrr-merge-dbsender:
+    container_name: "ihb-rs-trrr-merge-dbsender"
+    image: "ihb-rs/db-sender:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: db-sender
+    env_file:
+      - ./trrr-merge-dbsender.env
+      - ./.secrets
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+      - sqledge
+    profiles:
+      - lims-to-trrr
+    networks:
+      integration-hub:
+        aliases:
+          - "trrr-merge-dbsender"
+
   # Dedicated LIMS -> TRRR sender (upstream #429): a second subscription on the LIMS topic,
   # delivering to the topic mock receiver locally.
   lims-trrr-hl7-sender:

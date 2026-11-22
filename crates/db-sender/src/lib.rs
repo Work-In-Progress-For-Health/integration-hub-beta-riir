@@ -24,6 +24,7 @@
 //! | [`db`] | the connection, the call and failure classes (`§7.3`) |
 //! | [`ids`] | reading `PID-3` and `MRG-1` identifiers (`§7.8`) |
 //! | [`idupdate`] | choosing the parameters of `dbo.prQueueIdUpdate` (`§7.8`) |
+//! | [`trrr`] | the TRRR mappings: association and merge (`§7.10`) |
 //! | [`processor`] | one message, start to disposition (`§7.2`) |
 //! | [`main_loop`] | assembling and running the service |
 
@@ -35,6 +36,7 @@ pub mod main_loop;
 pub mod msh;
 pub mod processor;
 pub mod sanitize;
+pub mod trrr;
 
 pub use config::{AppConfig, ProcedureType};
 pub use db::{DatabaseError, FailureKind, ProcedureRunner};

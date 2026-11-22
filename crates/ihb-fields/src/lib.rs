@@ -127,6 +127,33 @@ pub fn read_some(message: &Message, path: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// The sending application as the `SourceSystem` property carries it: the
+/// first component of `MSH-3`.
+///
+/// `MSH-3` is an `HD`, so a sender may write `APP^1.2.3.4^ISO`; the property
+/// is the application name, not the composite. Falls back to the whole field,
+/// then to empty (upstream `69548eb`, #465: `msh_3.msh_3_1`, then
+/// `msh_3.hd_1`, then `msh_3`).
+///
+/// # Examples
+///
+/// ```
+/// # fn main() -> Result<(), hl7_2::Error> {
+/// use ihb_fields::source_system;
+///
+/// assert_eq!(source_system(&hl7_2::parse("MSH|^~\\&|COMP_APP^1.2.3.4^ISO|FAC")?), "COMP_APP");
+/// assert_eq!(source_system(&hl7_2::parse("MSH|^~\\&|SIMPLE|FAC")?), "SIMPLE");
+/// assert_eq!(source_system(&hl7_2::parse("MSH|^~\\&||FAC")?), "");
+/// # Ok(())
+/// # }
+/// ```
+#[must_use]
+pub fn source_system(message: &Message) -> String {
+    read_some(message, "MSH-3.1")
+        .or_else(|| read_some(message, "MSH-3"))
+        .unwrap_or_default()
+}
+
 /// Every repetition of a field.
 ///
 /// The mapping tables say "every repetition" for `PID-13` in both the PIMS

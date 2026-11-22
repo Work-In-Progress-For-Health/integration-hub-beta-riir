@@ -382,17 +382,18 @@ message type, never the MSH text.**
 | --- | --- | --- |
 | `INGRESS_TOPIC_NAME`, `INGRESS_SUBSCRIPTION_NAME` | — | **Required** |
 | `INGRESS_SESSION_ID` | *(unset)* | Session; unset is a plain subscription receiver |
-| `DB_SERVER`, `DB_PORT`, `DB_NAME` | `localhost`, `1433`, `DRS` | |
-| `DB_STORED_PROCEDURE` | `dbo.prQueueMessage`, or `dbo.prQueueIdUpdate` when `DB_PROCEDURE_TYPE=queue_id_update` | One to three `.`-separated identifiers (`[A-Za-z0-9_@#$]`). Anything else is a startup failure: the name is spliced into `EXEC` |
+| `DB_SERVER`, `DB_PORT`, `DB_NAME` | `localhost`, `1433`, `DRS` (`Clinical_Results` for `trrr`) | |
+| `DB_STORED_PROCEDURE` | `dbo.prQueueMessage`; `dbo.prQueueIdUpdate` for `queue_id_update`; `dbo.spUpdateIdentifier` for `update_identifier`; `dbo.TRRRIDUpdate` or `dbo.TRRRIDMerge` for `trrr` | One to three `.`-separated identifiers (`[A-Za-z0-9_@#$]`). Anything else is a startup failure: the name is spliced into `EXEC` |
 | `DB_USERNAME`, `DB_PASSWORD` | `sa`/`MSSQL_SA_PASSWORD` fallback | Both or neither |
 | `DB_ENCRYPT`, `DB_TRUST_SERVER_CERTIFICATE` | `Yes`, `No` | `Yes`/`No` only |
 | `DB_CONNECTION_TIMEOUT`, `DB_COMMAND_TIMEOUT` | `30`, `60` | Seconds, positive |
 | `MANAGED_IDENTITY_CLIENT_ID` | *(unset)* | |
-| `DB_PROCEDURE_TYPE` | `queue_message` | `queue_message` or `queue_id_update` (§7.8), case-insensitive. **Anything else is a startup failure**; upstream treats it as `queue_message`, so a typo runs the wrong procedure and fails at the first message |
+| `DB_PROCEDURE_TYPE` | `queue_message` | `queue_message`, `queue_id_update` (§7.8), `update_identifier` (§7.9) or `trrr` (§7.10), case-insensitive. **Anything else is a startup failure**; upstream treats it as `queue_message`, so a typo runs the wrong procedure and fails at the first message |
 | `SOURCE_SYSTEM` | `328` | The authority an `A31` is taken to come from when neither the `SourceSystem` property nor `MSH-3.1` says (§7.8) |
 | `DEFAULT_IS_PRIORITY` | `0` | Non-zero sets `@IsPriority` |
 | `MAX_BATCH_SIZE` | `10` | |
-| `WORKFLOW_ID`, `MICROSERVICE_ID` | `risp-to-wrrs`, `wrrs_stmsg_dbsender` | |
+| `TRRR_MAPPING_TYPE` | `NHS_ID_UPDATE` | `trrr` only (§7.10): `NHS_ID_UPDATE` or `MERGE`, case-insensitive; anything else is a startup failure |
+| `WORKFLOW_ID`, `MICROSERVICE_ID`, `PEER_SERVICE` | `risp-to-wrrs`, `wrrs_stmsg_dbsender`, `WRRS`; for `trrr`, `lims-to-trrr`, `db_sender_trrr` (`db_sender_trrr_merge` for `MERGE`), `TRRR` | |
 | `HEALTH_BOARD`, `PEER_SERVICE` | `SHARED`, `WRRS` | |
 
 `DB_ENCRYPT=Yes` (the default) makes TLS mandatory
@@ -459,6 +460,69 @@ startup failure (§7.6). (b) XML that does not parse yields no identifiers, so
 the message dead-letters as missing one; upstream falls back to regular
 expressions over the broken text. The producers here (`rest-server`,
 `hl7-soap-server`) emit ER7. (c) §7.8.1.
+
+§7.9 **WCRS identifier update** (`DB_PROCEDURE_TYPE=update_identifier`;
+upstream `#462`, `handlers/update_identifier_handler.py`). A third
+procedure for the same service: an `ADT^A40` from CAV PMS becomes three
+**string** parameters of `dbo.spUpdateIdentifier` (strings, so a leading zero
+survives): `@OldIdentifier` (`MRG-1.1`), `@OldIdentifierAssigningAuthority`
+(`MRG-1.4.1`, as it came) and `@NewIdentifier` (the `PID-3` identifier whose
+authority matches `MRG-1.4.1`). Implemented by `idupdate::plan_update_identifier`,
+`ids::count_segments` and `SqlRunner::execute_update_identifier`; it reads
+identifiers the way §7.8 does.
+
+Dead letters, before any database call: `UnsupportedTriggerEvent` (not
+`A40`), **`MultiplePatientGroups`** (more than one `MRG` or `PID`),
+`MissingOldIdentifier`, `MissingOldAssigningAuthority`, `MissingNewIdentifier`.
+The multi-patient refusal is the clause that matters: the `MRG` is read from
+the first segment but `PID-3` is searched in every `PID`, so a message with
+two patients could pair one patient's old identifier with another's new one
+and merge the wrong people. Upstream added it in the same PR, after review.
+`count_segments` falls back to a text scan when XML does not parse, so a broken
+two-patient message is still refused rather than read as none. **Not
+checked:** the widths of `spUpdateIdentifier`'s parameters (§7.8.1 does for
+`prQueueIdUpdate`); no WCRS database was available, so a value wider than its
+column may be silently truncated. Find the widths before first deployment.
+
+§7.10 **TRRR identifier update** (`DB_PROCEDURE_TYPE=trrr`; upstream `#458`,
+`senders/db_sender_trrr`). Upstream shipped this as a second image; here it
+is a fourth procedure of the same one (the design of §7: *the next database
+flow is another environment file, not another crate*). One instance applies
+the one mapping `TRRR_MAPPING_TYPE` names and **never infers it from the
+message**; the subscription does the routing, and the sender maps whatever
+arrives. Implemented by `trrr.rs`, which is deliberately not `ids.rs`: TRRR
+reads an authority as `CX.4.1` only (never the compacted `ID^AUTH` layout),
+compares authorities **exactly** (§7.8 ignores case), and never trims an
+identifier.
+
+| `TRRR_MAPPING_TYPE` | Subscription (locally) | Accepts | Procedure | Parameters |
+| --- | --- | --- | --- | --- |
+| `NHS_ID_UPDATE` | `…-lims-trrr-db-sender-sub`: `A31`, `A40`, source `328` | `A31`, `A40` | `dbo.TRRRIDUpdate` | `LIMSIdentifier`, `NewIdentifier`, `NewIdentifierAssigningAuthority` (`NHS`) |
+| `MERGE` | `…-lims-trrr-merge-sender-sub`: every `A40` | `A40` | `dbo.TRRRIDMerge` | `OldIdentifier`, `OldIdentifierAssigningAuthority`, `NewIdentifier`, `NewIdentifierAssigningAuthority` |
+
+For `NHS_ID_UPDATE` the LIMS identifier is the `PID-3` repetition whose
+authority is **`328`** for an `A31`, and **`MSH-3.1`** for an `A40` (so one
+mapping serves several sending systems); the NHS number is the repetition with
+authority `NHS`. `MERGE` pairs `MRG-1` with the `PID-3` of the same authority,
+as §7.9. **An `A40` is delivered to both subscriptions and so makes two TRRR
+calls**; an `A40` with no `NHS` identifier is dead-lettered by
+`NHS_ID_UPDATE` and still merged.
+
+Every refusal is dead-lettered with reason **`MappingFailed`**, before any
+call, and the description is one of: `Empty message body`, `Malformed XML
+message`, `Unsupported trigger event: {MSH-9.2 or UNKNOWN}`, `Multiple patient
+groups are not supported` (merge only), `Missing old identifier`, `Missing old
+assigning authority`, `Missing new identifier`, `Missing sending LIMS
+authority`, `Missing LIMS identifier`, `Missing NHS identifier`. None contains
+an identifier. Database failures are §7.3's, unchanged.
+
+**Deviation.** Upstream defaults to `DB_SERVER=TES06SRVSQLNOD1`,
+`DB_USERNAME=TRRR`, `DB_PASSWORD=trrr`. Those are not defaults here: a
+credential in source is a defect, and with neither set the sender uses its
+managed identity (§7.6). The local environment files name `sa` and take the
+password from `.secrets`. **Not run:** nothing here has met a TRRR or
+`Clinical_Results` database other than the local mock; the compose flow
+(`lims-to-trrr`) has not been brought up.
 
 §7.7 Tests: the Python's configuration, MSH-extractor and sanitiser cases;
 the application cases against a fake procedure runner (success calls once

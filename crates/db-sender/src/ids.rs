@@ -70,6 +70,68 @@ pub fn pid_identifier_by_authority(body: &str, authority: &str) -> Option<String
     }
 }
 
+/// How many `segment` (`"MRG"`, `"PID"`) segments the message has, in XML or
+/// ER7 (`count_segments`).
+///
+/// `mrg_identifiers` reads only the first `MRG` but the PID search covers
+/// every `PID`, so a multi-patient message could pair one patient's old
+/// identifier with another's new one; callers use this to refuse it
+/// (`spec/10-senders.md` §7.9).
+///
+/// # Examples
+///
+/// ```
+/// use db_sender::ids::count_segments;
+///
+/// assert_eq!(count_segments("MSH|^~\\&|a\rPID|1\rPID|2", "PID"), 2);
+/// assert_eq!(count_segments("<A><PID/><x:PID xmlns:x='u'/></A>", "PID"), 2);
+/// assert_eq!(count_segments("  ", "PID"), 0);
+/// ```
+#[must_use]
+pub fn count_segments(body: &str, segment: &str) -> usize {
+    let cleaned = body.trim();
+    if cleaned.is_empty() {
+        return 0;
+    }
+    if cleaned.starts_with('<') {
+        // The Python falls back to a text scan when the XML does not parse,
+        // so a broken multi-patient message is still refused.
+        return roxmltree::Document::parse(cleaned).map_or_else(
+            |_| count_open_tags(cleaned, segment),
+            |document| {
+                document
+                    .descendants()
+                    .filter(|node| node.is_element() && local(*node) == segment)
+                    .count()
+            },
+        );
+    }
+    lines(cleaned)
+        .filter(|line| {
+            line.strip_prefix(segment)
+                .is_some_and(|rest| rest.starts_with('|'))
+        })
+        .count()
+}
+
+/// `<SEG`, `<ns:SEG` followed by whitespace, `>` or `/`
+/// (`<(?:[\w.-]+:)?SEG[\s>/]`).
+fn count_open_tags(text: &str, segment: &str) -> usize {
+    text.match_indices('<')
+        .filter(|(at, _)| {
+            let rest = &text[at + 1..];
+            let name_start = rest
+                .find(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '.' | '-')))
+                .filter(|&end| rest[end..].starts_with(':'))
+                .map_or(0, |end| end + 1);
+            rest[name_start..]
+                .strip_prefix(segment)
+                .and_then(|after| after.chars().next())
+                .is_some_and(|c| c.is_whitespace() || c == '>' || c == '/')
+        })
+        .count()
+}
+
 /// Whether two authorities are the same (`_authority_matches`).
 fn authority_matches(actual: &str, expected: &str) -> bool {
     actual.trim().eq_ignore_ascii_case(expected.trim())
@@ -390,5 +452,31 @@ mod tests {
         let broken = "<ADT><PID><PID.3><CX.1>1</CX.1><CX.4><HD.1>NHS</HD.1></CX.4></PID.3>";
         assert_eq!(pid_identifier_by_authority(broken, "NHS"), None);
         assert_eq!(mrg_identifiers("<ADT><MRG><MRG.1>"), (None, None));
+    }
+
+    #[test]
+    fn segments_are_counted_in_er7_with_any_line_ending() {
+        let er7 = "MSH|^~\\&|a\rPID|1\r\nPID|2\nMRG|3\rPIDX|4";
+        assert_eq!(count_segments(er7, "PID"), 2, "PIDX is not a PID");
+        assert_eq!(count_segments(er7, "MRG"), 1);
+        assert_eq!(count_segments("", "PID"), 0);
+    }
+
+    #[test]
+    fn segments_are_counted_in_xml_with_or_without_a_namespace() {
+        let xml = "<A xmlns:n='u'><PID/><n:PID><PID.3/></n:PID><MRG/></A>";
+        assert_eq!(count_segments(xml, "PID"), 2, "PID.3 is not a PID");
+        assert_eq!(count_segments(xml, "MRG"), 1);
+    }
+
+    #[test]
+    fn broken_xml_is_still_counted_by_a_text_scan() {
+        // Upstream falls back to a regular expression here, so a broken
+        // two-patient message is refused rather than read as having none.
+        let broken = "<A><PID><x/></PID>< PID ><ns:PID a='1'><PIDX/><PID/><oops";
+        assert_eq!(count_segments(broken, "PID"), 3);
+        assert_eq!(count_segments("<A><MRG>", "MRG"), 1);
+        assert_eq!(count_segments("<A><MRGX>", "MRG"), 0);
+        assert_eq!(count_segments("<", "PID"), 0, "nothing after the bracket");
     }
 }

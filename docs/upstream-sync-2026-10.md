@@ -112,3 +112,22 @@ on a clean tree by stashing this change.
 | `servers/hl7_server` `build_pims_properties` | Already true: the standard set carries `MessageType`; test added | `07-hl7-server.md` §6.2 item 5 |
 | `shared_libs/hl7_message_processor` `converter.py` (omit unsupplied components), `message_fields.py` (`get_sendingapp` etc.) | **Not applicable**: the hl7apy-to-XML converter is not ported (see above), and the accessors have no Rust caller | none |
 | `fc7f39f` (#455) REST server secondary WRRS destination | `rest-server` `generic` pipeline: optional `WRRS_QUEUE_NAME`/`WRRS_TOPIC_NAME` with `WRRS_EGRESS_SESSION_ID`, `WRRS_WORKFLOW_ID` (required once one is named, all errors together) and `WRRS_TRIGGER_EVENTS` (default `A31,A40`); a listed trigger is sent to it after the primary send with the WRRS session and workflow, same correlation id. A WRRS failure is a 500, as upstream. 8 new tests (config and processor). **Not run** against a broker: no environment here configures it | `19-rest-servers.md` §9.7 |
+
+## 17–20 November: `#458`–`#465` and `5673db8`
+
+| Upstream | Rust | Spec |
+| --- | --- | --- |
+| `#462` WCRS `update_identifier` handler (and its multi-patient refusal) | `db-sender`: `ProcedureType::UpdateIdentifier`, `idupdate::plan_update_identifier`, `ids::count_segments`, `SqlRunner::execute_update_identifier`; tests in `ids`, `idupdate`, `processor`, `config`, `db` | `10-senders.md` §7.9 |
+| `#458` `db_sender_trrr` (`NHS_ID_UPDATE` and `MERGE`) | **Not a new crate**: `DB_PROCEDURE_TYPE=trrr` plus `TRRR_MAPPING_TYPE`, module `trrr.rs`, `SqlRunner::execute_trrr`; the one `db-sender` image serves both instances, as `§7` intended. The TRRR build pipeline and release entry are not ported (same image). Local: two emulator subscriptions, `trrr-dbsender.env`, `trrr-merge-dbsender.env`, services under profile `lims-to-trrr`, `sql/init-clinical-results-db.sql`. **Deviation:** upstream's default DB credentials (`TRRR`/`trrr`) and server name are not defaults here | `10-senders.md` §7.10 |
+| `#458` `convert.py` nested separator fix (`xml_to_er7`) | No port: the converter is the `hl7-2` crate's. Its tests ported to `ihb-validation` as pins (`internal_empty_components_are_kept…`, `subcomponents_are_joined_with_an_ampersand`, `the_assigning_authority_survives_a_round_trip`); they pass | `06-validation.md` |
+| `#465` `SourceSystem` from the first component of `MSH-3` | **Defect found here too**: `read(msg, "MSH-3")` returns the composite (`COMP_APP^1.2.3.4^ISO`). `ihb_fields::source_system` (`MSH-3.1`, else `MSH-3`) used by `hl7-server` and `hl7-rest-server`; tests in both | `07` §6, `19` §3 |
+| `#460`/`#459` return code of the procedure | Already ported (`09cfd3b`, `check_return_code`) | `10` §7.3a |
+| `#461` dashboard performance and Cosmos fixes | Cosmos back-off only: `cosmos_store::Backoff`. The rest is Python-server specific (see the spec) | `15-dashboard.md` §5.6.4 |
+| `#463` local WCRS flow, NDR mock | **Not ported**: the flow reads a PMS SOAP topic (`local-inthub-pms-sender-ingress`) that this emulator config lacks. The handler it exercises is ported (`#462`). Its mock `NDR` database and `spUpdateIdentifier` are not in `local/sql/` | |
+| `#464`, `5673db8`, `#463` mock-db edits | Python test infrastructure and the Python validation dictionaries | |
+
+**Not run.** The gate, the `lims-to-trrr` Compose flow and the SQL Edge tests
+(`--features sqlserver`) were not run for this batch; the unit tests of the
+touched crates were. `spUpdateIdentifier`'s parameter widths are unknown, so
+§7.8.1's truncation check is not applied to it (`10-senders.md` §7.9).
+

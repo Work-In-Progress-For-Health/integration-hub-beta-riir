@@ -24,7 +24,6 @@ sqlserver = []
 [dependencies]
 ihb-bus.workspace = true
 ihb-config.workspace = true
-ihb-fields.workspace = true
 ihb-health.workspace = true
 ihb-identity.workspace = true
 ihb-runtime.workspace = true

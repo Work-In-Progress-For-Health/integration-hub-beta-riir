@@ -26,7 +26,7 @@ use ihb_bus::message::Outgoing;
 use ihb_bus::metadata::{Properties, Tracking, WORKFLOW_ID};
 use ihb_bus::sink::MessageSink;
 use ihb_bus::store::StoreEvent;
-use ihb_fields::read;
+use ihb_fields::{read, source_system};
 use ihb_telemetry::events::EventLogger;
 use ihb_telemetry::metrics::Metrics;
 
@@ -220,7 +220,7 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Processor<E, S, M> {
         let tracking = Tracking {
             correlation_id: self.mint.correlation_id(),
             received_at: self.mint.received_at(),
-            source_system: read(&message, "MSH-3"),
+            source_system: source_system(&message),
             workflow_id: self.identity.workflow_id.clone(),
         };
         let correlation_id = tracking.correlation_id.clone();
@@ -665,6 +665,28 @@ mod tests {
         assert_eq!(sent.properties["CorrelationId"], "fixed-correlation-id");
         assert_eq!(sent.properties["SourceSystem"], "252");
         assert_eq!(sent.properties["WorkflowID"], "test-workflow");
+    }
+
+    #[tokio::test]
+    async fn source_system_is_the_first_component_of_a_composite_msh_3() {
+        // Upstream 69548eb (#465), in the forwarded properties.
+        let rig = rig(&[]);
+        let composite = VALID.replace("|252|252|", "|COMP_APP^1.2.3.4^ISO|252|");
+        rig.processor.process(&composite).await.unwrap();
+        assert_eq!(
+            rig.bus.all_sent("egress-queue")[0].properties["SourceSystem"],
+            "COMP_APP"
+        );
+
+        let rig = self::rig(&[]);
+        rig.processor
+            .process(&VALID.replace("|252|252|", "||252|"))
+            .await
+            .unwrap();
+        assert_eq!(
+            rig.bus.all_sent("egress-queue")[0].properties["SourceSystem"],
+            ""
+        );
     }
 
     #[tokio::test]

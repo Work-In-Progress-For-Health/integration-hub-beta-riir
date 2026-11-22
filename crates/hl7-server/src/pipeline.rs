@@ -37,7 +37,7 @@ use ihb_bus::message::Outgoing;
 use ihb_bus::metadata::{Properties, Tracking};
 use ihb_bus::sink::MessageSink;
 use ihb_bus::store::StoreEvent;
-use ihb_fields::read;
+use ihb_fields::{read, source_system};
 use ihb_telemetry::events::EventLogger;
 use ihb_telemetry::metrics::Metrics;
 
@@ -210,7 +210,7 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Pipeline<E, S, M> {
         let tracking = Tracking {
             correlation_id: self.mint.correlation_id(),
             received_at: self.mint.received_at(),
-            source_system: read(&message, "MSH-3"),
+            source_system: source_system(&message),
             workflow_id: self.config.workflow_id.clone(),
         };
         let correlation_id = tracking.correlation_id.clone();

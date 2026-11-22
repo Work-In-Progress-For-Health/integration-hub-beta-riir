@@ -10,7 +10,7 @@
 
 use ihb_bus::metadata::Properties;
 
-use crate::ids::{mrg_identifiers, pid_identifier_by_authority};
+use crate::ids::{count_segments, mrg_identifiers, pid_identifier_by_authority};
 use crate::msh::{MshInfo, UNKNOWN};
 
 /// Dead-letter reason: an identifier or authority wider than its column.
@@ -37,6 +37,72 @@ pub const MISSING_NHS_IDENTIFIER: &str = "MissingNhsIdentifier";
 
 /// The assigning authority of an NHS number.
 pub const NHS_AUTHORITY: &str = "NHS";
+
+/// Dead-letter reason: an `A40` with more than one `MRG` or `PID`.
+pub const MULTIPLE_PATIENT_GROUPS: &str = "MultiplePatientGroups";
+
+/// The three parameters of `dbo.spUpdateIdentifier`, in order (`§7.9`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdentifierUpdate {
+    /// `@OldIdentifier`: `MRG-1.1`.
+    pub old_identifier: String,
+    /// `@OldIdentifierAssigningAuthority`: `MRG-1.4.1`, as it came.
+    pub old_authority: String,
+    /// `@NewIdentifier`: the `PID-3` identifier of the same authority.
+    pub new_identifier: String,
+}
+
+/// Plan the WCRS call (`update_identifier_handler.py`): `A40` only, one
+/// patient only. Strings throughout, so leading zeroes survive.
+///
+/// # Errors
+///
+/// [`Rejected`] for any other trigger, a second `MRG` or `PID`, or a missing
+/// identifier. No description carries a value.
+///
+/// # Examples
+///
+/// ```
+/// use db_sender::idupdate::plan_update_identifier;
+/// use db_sender::msh::extract_msh_for_logging;
+///
+/// let a40 = "MSH|^~\\&|a|a|||2026||ADT^A40^ADT_A39|C1|P|2.5\rPID|1||0042^^^VAL~7^^^NHS\rMRG|0007^^^VAL";
+/// let update = plan_update_identifier(a40, &extract_msh_for_logging(a40))?;
+/// assert_eq!(update.old_identifier, "0007");
+/// assert_eq!(update.new_identifier, "0042");
+/// # Ok::<(), db_sender::idupdate::Rejected>(())
+/// ```
+pub fn plan_update_identifier(body: &str, msh: &MshInfo) -> Result<IdentifierUpdate, Rejected> {
+    let trigger = if msh.trigger_event.is_empty() {
+        UNKNOWN
+    } else {
+        msh.trigger_event.as_str()
+    };
+    if trigger != "A40" {
+        return Err(reject(
+            UNSUPPORTED_TRIGGER,
+            format!("Trigger event {trigger} is not supported for identifier update"),
+        ));
+    }
+    if count_segments(body, "MRG") > 1 || count_segments(body, "PID") > 1 {
+        return Err(reject(
+            MULTIPLE_PATIENT_GROUPS,
+            "A40 messages with more than one MRG or PID segment are not supported",
+        ));
+    }
+    let (old_id, old_authority) = mrg_identifiers(body);
+    let old_identifier =
+        old_id.ok_or_else(|| reject(MISSING_OLD_IDENTIFIER, "Missing old identifier"))?;
+    let old_authority = old_authority
+        .ok_or_else(|| reject(MISSING_OLD_AUTHORITY, "Missing old assigning authority"))?;
+    let new_identifier = pid_identifier_by_authority(body, &old_authority)
+        .ok_or_else(|| reject(MISSING_NEW_IDENTIFIER, "Missing new identifier"))?;
+    Ok(IdentifierUpdate {
+        old_identifier,
+        old_authority,
+        new_identifier,
+    })
+}
 
 /// The six parameters of `dbo.prQueueIdUpdate`, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -380,5 +446,45 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.description, "Missing identifier with authority 328");
         assert!(!error.description.contains("5551234567"));
+    }
+
+    #[test]
+    fn update_identifier_reads_an_a40_and_keeps_leading_zeroes() {
+        let body = "MSH|^~\\&|a|a|||2026||ADT^A40^ADT_A39|C1|P|2.5\rPID|1||0042^^^VAL~7^^^NHS\rMRG|0007^^^VAL^PI";
+        let update = plan_update_identifier(body, &extract_msh_for_logging(body)).unwrap();
+        assert_eq!(
+            update,
+            IdentifierUpdate {
+                old_identifier: "0007".into(),
+                old_authority: "VAL".into(),
+                new_identifier: "0042".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn update_identifier_refuses_other_triggers_and_multi_patient_a40s() {
+        let a31 = "MSH|^~\\&|a|a|||2026||ADT^A31|C1|P|2.5\rPID|1||1^^^V";
+        let rejected = plan_update_identifier(a31, &extract_msh_for_logging(a31)).unwrap_err();
+        assert_eq!(rejected.reason, UNSUPPORTED_TRIGGER);
+
+        let two = "MSH|^~\\&|a|a|||2026||ADT^A40|C1|P|2.5\rPID|1||1^^^V\rMRG|2^^^V\rPID|1||3^^^V\rMRG|4^^^V";
+        let rejected = plan_update_identifier(two, &extract_msh_for_logging(two)).unwrap_err();
+        assert_eq!(rejected.reason, MULTIPLE_PATIENT_GROUPS);
+        assert!(!rejected.description.contains('1'));
+    }
+
+    #[test]
+    fn update_identifier_names_each_missing_value() {
+        let msh = "MSH|^~\\&|a|a|||2026||ADT^A40|C1|P|2.5\r";
+        let reason = |tail: &str| {
+            let body = format!("{msh}{tail}");
+            plan_update_identifier(&body, &extract_msh_for_logging(&body))
+                .unwrap_err()
+                .reason
+        };
+        assert_eq!(reason("PID|1||1^^^V\rMRG|"), MISSING_OLD_IDENTIFIER);
+        assert_eq!(reason("PID|1||1^^^V\rMRG|2"), MISSING_OLD_AUTHORITY);
+        assert_eq!(reason("PID|1||1^^^X\rMRG|2^^^V"), MISSING_NEW_IDENTIFIER);
     }
 }

@@ -24,6 +24,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use ihb_config::Secret;
 use time::OffsetDateTime;
@@ -44,6 +45,53 @@ pub const CONFIG_DOC_ID: &str = "config";
 
 /// The document holding an alarm's cooldowns.
 pub const STATE_DOC_ID: &str = "state";
+
+/// How long Cosmos is left alone after a connectivity failure
+/// (`spec/15-dashboard.md` §5.6.4; upstream `#461`, `_UNAVAILABLE_BACKOFF_SECONDS`).
+pub const UNAVAILABLE_BACKOFF: Duration = Duration::from_secs(30);
+
+/// A pause after the account could not be reached.
+///
+/// §5.6.4. Without it every page and every evaluation cycle waits out the
+/// full connect and request timeouts against an account that is down, so a
+/// Cosmos outage makes the whole dashboard slow, not just its alarms. The
+/// clock is passed in so the rule is tested without sleeping.
+#[derive(Debug, Default)]
+pub struct Backoff {
+    /// When the pause ends, if there is one.
+    until: Mutex<Option<Instant>>,
+}
+
+impl Backoff {
+    /// Whether requests should be skipped at `now`.
+    #[must_use]
+    pub fn active_at(&self, now: Instant) -> bool {
+        self.until
+            .lock()
+            .ok()
+            .and_then(|until| *until)
+            .is_some_and(|until| now < until)
+    }
+
+    /// Start a pause of `length` at `now`.
+    pub fn start_at(&self, now: Instant, length: Duration) {
+        if let Ok(mut until) = self.until.lock() {
+            *until = Some(now + length);
+        }
+    }
+
+    /// Pause if `error` says the account was not reached.
+    ///
+    /// Only a connection failure or a timeout does. **An HTTP status means
+    /// Cosmos answered** (a 404 for an unconfigured alarm, a 429 under RU
+    /// exhaustion) and so is reachable; pausing on it would hide the
+    /// writes §5.6.2 exists to survive.
+    pub fn note(&self, error: &HttpError, now: Instant) {
+        if matches!(error, HttpError::Connect(_) | HttpError::Timeout) {
+            self.start_at(now, UNAVAILABLE_BACKOFF);
+        }
+    }
+}
 
 /// How the store authenticates (§5.6, §5.7).
 pub enum Credential {
@@ -78,6 +126,8 @@ pub struct CosmosStore {
     client: HttpsClient,
     /// §5.6.2's in-memory layer — see this module's documentation.
     remembered: Mutex<BTreeMap<Partition, BTreeMap<String, RuleState>>>,
+    /// §5.6.4's pause after a connectivity failure.
+    backoff: Backoff,
 }
 
 impl CosmosStore {
@@ -97,7 +147,15 @@ impl CosmosStore {
             credential,
             client,
             remembered: Mutex::new(BTreeMap::new()),
+            backoff: Backoff::default(),
         }
+    }
+
+    /// Turn a failed request into the store's error, pausing first if the
+    /// account was unreachable (§5.6.4).
+    fn failed(&self, error: &HttpError) -> StoreError {
+        self.backoff.note(error, Instant::now());
+        StoreError::Unavailable(error.to_string())
     }
 
     /// The scope an RBAC token is taken for (§5.7.4).
@@ -114,6 +172,13 @@ impl CosmosStore {
         resource_link: &str,
         partition_key: &str,
     ) -> Result<Vec<(String, String)>, StoreError> {
+        // §5.6.4. Before any signing or token request: during the pause
+        // nothing is sent. Still `Unavailable`, never an empty result (§5.6.3).
+        if self.backoff.active_at(Instant::now()) {
+            return Err(StoreError::Unavailable(
+                "Cosmos DB was unreachable a moment ago; not retrying yet".to_string(),
+            ));
+        }
         let date = cosmos_date(OffsetDateTime::now_utc());
 
         let authorization = match &self.credential {
@@ -166,7 +231,7 @@ impl CosmosStore {
             // A document that is not there is not a failure: it is an alarm
             // nobody has configured yet.
             Err(HttpError::Status { code: 404, .. }) => Ok(None),
-            Err(error) => Err(StoreError::Unavailable(error.to_string())),
+            Err(error) => Err(self.failed(&error)),
         }
     }
 }
@@ -231,7 +296,7 @@ impl AlarmStore for CosmosStore {
 
         match self.client.post_json_with(&url, &borrowed, body).await {
             Ok(_) => Ok(()),
-            Err(error) => Err(StoreError::Unavailable(error.to_string())),
+            Err(error) => Err(self.failed(&error)),
         }
     }
 
@@ -263,7 +328,7 @@ impl AlarmStore for CosmosStore {
             .await
         {
             Ok(response) => Ok(parse_query_response(&response)),
-            Err(error) => Err(StoreError::Unavailable(error.to_string())),
+            Err(error) => Err(self.failed(&error)),
         }
     }
 
@@ -289,7 +354,7 @@ impl AlarmStore for CosmosStore {
 
         match self.client.post_json_with(&url, &borrowed, body).await {
             Ok(_) => Ok(()),
-            Err(error) => Err(StoreError::Unavailable(error.to_string())),
+            Err(error) => Err(self.failed(&error)),
         }
     }
 
@@ -316,7 +381,7 @@ impl AlarmStore for CosmosStore {
         match self.client.post_json_with(&url, &borrowed, body).await {
             Ok(_) => Ok(true),
             Err(HttpError::Status { code: 409, .. }) => Ok(false),
-            Err(error) => Err(StoreError::Unavailable(error.to_string())),
+            Err(error) => Err(self.failed(&error)),
         }
     }
 
@@ -338,7 +403,7 @@ impl AlarmStore for CosmosStore {
             Ok(_) => Ok(()),
             // Already gone is the outcome that was asked for.
             Err(HttpError::Status { code: 404, .. }) => Ok(()),
-            Err(error) => Err(StoreError::Unavailable(error.to_string())),
+            Err(error) => Err(self.failed(&error)),
         }
     }
 }
@@ -707,6 +772,47 @@ mod tests {
             "https://x.documents.azure.com/.default",
             "a trailing slash must not double"
         );
+    }
+
+    #[test]
+    fn a_connection_failure_pauses_requests_for_thirty_seconds() {
+        // §5.6.4, upstream #461 (test_outage_after_container_cached_starts_backoff).
+        let backoff = Backoff::default();
+        let now = Instant::now();
+        assert!(!backoff.active_at(now), "no pause before a failure");
+
+        backoff.note(&HttpError::Connect("refused".into()), now);
+        assert!(backoff.active_at(now));
+        assert!(backoff.active_at(now + Duration::from_secs(29)));
+        assert!(!backoff.active_at(now + Duration::from_secs(30)), "it ends");
+    }
+
+    #[test]
+    fn a_timeout_pauses_too() {
+        let backoff = Backoff::default();
+        let now = Instant::now();
+        backoff.note(&HttpError::Timeout, now);
+        assert!(backoff.active_at(now));
+    }
+
+    #[test]
+    fn an_http_status_does_not_pause() {
+        // §5.6.4, upstream test_http_error_response_does_not_start_backoff:
+        // Cosmos answered, so it is reachable. A throttled write (429) is
+        // the case §5.6.2 exists for.
+        let backoff = Backoff::default();
+        let now = Instant::now();
+        for code in [401, 404, 429, 500] {
+            backoff.note(
+                &HttpError::Status {
+                    code,
+                    body: String::new(),
+                },
+                now,
+            );
+        }
+        backoff.note(&HttpError::Body("not json".into()), now);
+        assert!(!backoff.active_at(now));
     }
 
     #[test]

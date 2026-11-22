@@ -6,6 +6,8 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use ihb_config::{ConfigErrors, Reader, Secret};
 
+use crate::trrr::Mapping;
+
 /// What the service does with a message (`§7.6`, `§7.8`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcedureType {
@@ -15,15 +17,45 @@ pub enum ProcedureType {
     /// `dbo.prQueueIdUpdate`: identifiers are read from an `A31` or `A40`
     /// and passed as six parameters (`§7.8`).
     QueueIdUpdate,
+    /// `dbo.spUpdateIdentifier` (WCRS): the old identifier, its authority and
+    /// the surviving identifier are read from an `A40` and passed as three
+    /// strings (`§7.9`).
+    UpdateIdentifier,
+    /// A TRRR procedure (`dbo.TRRRIDUpdate` or `dbo.TRRRIDMerge`), chosen by
+    /// `TRRR_MAPPING_TYPE` (`§7.10`).
+    Trrr(Mapping),
 }
 
 impl ProcedureType {
+    /// The database this type writes to unless `DB_NAME` says otherwise.
+    #[must_use]
+    pub const fn default_database(self) -> &'static str {
+        match self {
+            Self::Trrr(_) => "Clinical_Results",
+            _ => "DRS",
+        }
+    }
+
+    /// `(WORKFLOW_ID, MICROSERVICE_ID, PEER_SERVICE)` when `DB_PROCEDURE_TYPE`
+    /// is `trrr`, as upstream's `db_sender_trrr`; the WRRS names otherwise.
+    #[must_use]
+    pub const fn identity_defaults(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            Self::Trrr(Mapping::NhsIdUpdate) => ("lims-to-trrr", "db_sender_trrr", "TRRR"),
+            Self::Trrr(Mapping::Merge) => ("lims-to-trrr", "db_sender_trrr_merge", "TRRR"),
+            _ => ("risp-to-wrrs", "wrrs_stmsg_dbsender", "WRRS"),
+        }
+    }
+
     /// The default procedure for this type.
     #[must_use]
     pub const fn default_procedure(self) -> &'static str {
         match self {
             Self::QueueMessage => "dbo.prQueueMessage",
             Self::QueueIdUpdate => "dbo.prQueueIdUpdate",
+            Self::UpdateIdentifier => "dbo.spUpdateIdentifier",
+            Self::Trrr(Mapping::NhsIdUpdate) => "dbo.TRRRIDUpdate",
+            Self::Trrr(Mapping::Merge) => "dbo.TRRRIDMerge",
         }
     }
 
@@ -33,6 +65,8 @@ impl ProcedureType {
         match self {
             Self::QueueMessage => "queue_message",
             Self::QueueIdUpdate => "queue_id_update",
+            Self::UpdateIdentifier => "update_identifier",
+            Self::Trrr(_) => "trrr",
         }
     }
 }
@@ -254,7 +288,7 @@ impl AppConfig {
         let db = DbConfig {
             server: reader.string_or("DB_SERVER", "localhost"),
             port: reader.optional_positive_integer("DB_PORT").unwrap_or(1433),
-            database: reader.string_or("DB_NAME", "DRS"),
+            database: reader.string_or("DB_NAME", procedure_type.default_database()),
             stored_procedure,
             auth,
             encrypt,
@@ -267,6 +301,7 @@ impl AppConfig {
                 .unwrap_or(60),
         };
 
+        let identity = procedure_type.identity_defaults();
         let health_host = reader.string_or("HEALTH_CHECK_HOST", ihb_health::DEFAULT_HOST);
         let health_port: Option<u16> = reader.optional_positive_integer("HEALTH_CHECK_PORT");
         // `or 0` upstream: zero and unset both mean the default.
@@ -281,10 +316,10 @@ impl AppConfig {
             db,
             procedure_type,
             source_system: reader.string_or("SOURCE_SYSTEM", "328"),
-            workflow_id: reader.string_or("WORKFLOW_ID", "risp-to-wrrs"),
-            microservice_id: reader.string_or("MICROSERVICE_ID", "wrrs_stmsg_dbsender"),
+            workflow_id: reader.string_or("WORKFLOW_ID", identity.0),
+            microservice_id: reader.string_or("MICROSERVICE_ID", identity.1),
             health_board: reader.string_or("HEALTH_BOARD", "SHARED"),
-            peer_service: reader.string_or("PEER_SERVICE", "WRRS"),
+            peer_service: reader.string_or("PEER_SERVICE", identity.2),
             health_check: SocketAddr::new(
                 health_host
                     .parse::<IpAddr>()
@@ -304,7 +339,7 @@ impl AppConfig {
 
 /// `DB_PROCEDURE_TYPE`, case-insensitive; absent or blank is `queue_message`.
 ///
-/// Upstream treats **anything** that is not `queue_id_update` as
+/// Upstream treats **anything** that is not a known type as
 /// `queue_message`, so a typo silently runs the wrong procedure with the
 /// wrong parameters and fails at the first message. Here it is a startup
 /// failure (`spec/10-senders.md` §7.8).
@@ -315,9 +350,32 @@ fn read_procedure_type(reader: &mut Reader) -> ProcedureType {
     match raw.trim().to_ascii_lowercase().as_str() {
         "" | "queue_message" => ProcedureType::QueueMessage,
         "queue_id_update" => ProcedureType::QueueIdUpdate,
+        "update_identifier" => ProcedureType::UpdateIdentifier,
+        "trrr" => ProcedureType::Trrr(read_trrr_mapping(reader)),
         _ => {
-            reader.invalid("DB_PROCEDURE_TYPE", "queue_message or queue_id_update", raw);
+            reader.invalid(
+                "DB_PROCEDURE_TYPE",
+                "queue_message, queue_id_update, update_identifier or trrr",
+                raw,
+            );
             ProcedureType::QueueMessage
+        }
+    }
+}
+
+/// `TRRR_MAPPING_TYPE`: `NHS_ID_UPDATE` (the default) or `MERGE`,
+/// case-insensitive. Anything else is a startup failure, as upstream's
+/// `ValueError` (`spec/10-senders.md` §7.10).
+fn read_trrr_mapping(reader: &mut Reader) -> Mapping {
+    let Some(raw) = reader.raw("TRRR_MAPPING_TYPE").map(str::to_string) else {
+        return Mapping::NhsIdUpdate;
+    };
+    match raw.trim().to_ascii_uppercase().as_str() {
+        "" | "NHS_ID_UPDATE" => Mapping::NhsIdUpdate,
+        "MERGE" => Mapping::Merge,
+        _ => {
+            reader.invalid("TRRR_MAPPING_TYPE", "NHS_ID_UPDATE or MERGE", raw);
+            Mapping::NhsIdUpdate
         }
     }
 }
@@ -394,6 +452,56 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(named.db.stored_procedure, "dbo.other");
+    }
+
+    #[test]
+    fn update_identifier_defaults_to_the_wcrs_procedure() {
+        let mut pairs: Vec<_> = valid()
+            .into_iter()
+            .filter(|(name, _)| *name != "DB_STORED_PROCEDURE")
+            .collect();
+        pairs.push(("DB_PROCEDURE_TYPE", " Update_Identifier "));
+        let config = AppConfig::from_pairs(pairs).unwrap();
+        assert_eq!(config.procedure_type, ProcedureType::UpdateIdentifier);
+        assert_eq!(config.db.stored_procedure, "dbo.spUpdateIdentifier");
+    }
+
+    #[test]
+    fn trrr_reads_its_mapping_and_takes_its_own_defaults() {
+        let base = |extra: &[(&'static str, &'static str)]| {
+            let mut pairs: Vec<_> = valid()
+                .into_iter()
+                .filter(|(name, _)| !matches!(*name, "DB_STORED_PROCEDURE" | "DB_NAME"))
+                .collect();
+            pairs.push(("DB_PROCEDURE_TYPE", "trrr"));
+            pairs.extend_from_slice(extra);
+            AppConfig::from_pairs(pairs)
+        };
+
+        let update = base(&[]).unwrap();
+        assert_eq!(
+            update.procedure_type,
+            ProcedureType::Trrr(Mapping::NhsIdUpdate)
+        );
+        assert_eq!(update.db.stored_procedure, "dbo.TRRRIDUpdate");
+        assert_eq!(update.db.database, "Clinical_Results");
+        assert_eq!(update.workflow_id, "lims-to-trrr");
+        assert_eq!(update.microservice_id, "db_sender_trrr");
+        assert_eq!(update.peer_service, "TRRR");
+
+        let merge = base(&[("TRRR_MAPPING_TYPE", " merge ")]).unwrap();
+        assert_eq!(merge.procedure_type, ProcedureType::Trrr(Mapping::Merge));
+        assert_eq!(merge.db.stored_procedure, "dbo.TRRRIDMerge");
+        assert_eq!(merge.microservice_id, "db_sender_trrr_merge");
+
+        let named = base(&[("MICROSERVICE_ID", "mine"), ("DB_NAME", "Other")]).unwrap();
+        assert_eq!(
+            (named.microservice_id.as_str(), named.db.database.as_str()),
+            ("mine", "Other")
+        );
+
+        let error = base(&[("TRRR_MAPPING_TYPE", "SPLIT")]).unwrap_err();
+        assert!(error.to_string().contains("TRRR_MAPPING_TYPE"), "{error}");
     }
 
     #[test]

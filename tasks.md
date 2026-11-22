@@ -933,6 +933,22 @@ and gate-checked except where noted.
   confirmed against the Python (`spec/09` §9.3.1).
 - [x] `http-mock-receiver` vs `spec/11` §3.2/§3.4 recorded as a
   deliberate deviation (§3.8.1) after checking the Python.
+- [x] Upstream 17–20 Nov (`#458`–`#465`, `5673db8`), ported in
+  `docs/upstream-sync-2026-10.md` §"17–20 November":
+  WCRS identifier update (`DB_PROCEDURE_TYPE=update_identifier`, `#462`,
+  [`spec/10`](spec/10-senders.md) §7.9); the TRRR senders
+  (`DB_PROCEDURE_TYPE=trrr`, `#458`, §7.10) with their local profile
+  `lims-to-trrr`; composite `MSH-3` in `SourceSystem` (`#465`, a real defect
+  here too); the dashboard's Cosmos back-off (`#461`,
+  [`spec/15`](spec/15-dashboard.md) §5.6.4).
+  **Written and unit-tested, not run:** the gate (`cargo xtask gate`) and the
+  `lims-to-trrr` compose flow have not been run for this batch.
+- [ ] **Not ported from that batch:** the CAV PMS to WCRS local flow (`#463`:
+  needs a PMS SOAP topic this stack does not have); `#464`/`#463` mock-db
+  edits (the local stack uses SQL Edge, not `mock-db-receiver`); `5673db8`'s
+  regenerated dictionaries and `hl7apy` fidelity helper (Python-side), and its
+  `hl7_mock_receiver_rust` (this workspace has its own `hl7-mock-receiver`;
+  not compared).
 - [ ] **Open:** nothing here has run against a real Service Bus or SQL Server.
 
 ---

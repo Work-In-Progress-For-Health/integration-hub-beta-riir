@@ -314,7 +314,7 @@ requirement.
 
 §6.1 Minted per message, per
 [`03-message-bus.md`](03-message-bus.md) §4: `MessageReceivedAt`,
-`CorrelationId`, `WorkflowID`, `SourceSystem` (from `MSH-3`, or `""`).
+`CorrelationId`, `WorkflowID`, `SourceSystem` (the **first component** of `MSH-3`, or `""`: a sender may write `APP^1.2.3.4^ISO`, and the property is the application name, not the composite; `ihb_fields::source_system`, upstream `#465`). Subscription filters compare it with `=`, so the composite would match nothing.
 
 §6.2 Routing properties (step 9), so that a Service Bus subscription filter
 can match without opening the payload

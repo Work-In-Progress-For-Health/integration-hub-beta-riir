@@ -156,6 +156,57 @@ async fn a_good_message_is_stored_then_forwarded_then_acknowledged() {
     assert_eq!(forwarded[0].session_id.as_deref(), Some("phw-to-mpi"));
 }
 
+/// A pipeline with no `SENDING_APP` allow-list, so `MSH-3` is free to vary:
+/// these tests are about the `SourceSystem` property, not sender validation.
+fn pipeline_open_to_any_sender() -> Harness {
+    let mut pairs = vec![
+        ("WORKFLOW_ID", "phw-to-mpi"),
+        ("MICROSERVICE_ID", "hl7-server-phw"),
+        ("HEALTH_BOARD", "PHW"),
+        ("PEER_SERVICE", "MPI"),
+        ("EGRESS_QUEUE_NAME", EGRESS),
+        ("EGRESS_SESSION_ID", "phw-to-mpi"),
+        ("MESSAGE_STORE_QUEUE_NAME", STORE),
+        ("HL7_VERSION", "2.5"),
+        ("HL7_VALIDATION_FLOW", "phw"),
+    ];
+    pairs.retain(|(name, _)| *name != "SENDING_APP");
+    let config = Config::from_pairs(pairs).expect("complete without an allow-list");
+    let bus = FakeBus::new();
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let egress = Recorder::new(&bus, EGRESS, &log);
+    let store = Recorder::new(&bus, STORE, &log);
+    (
+        Pipeline::with_mint(config, egress, Some(store), FixedMint),
+        bus,
+        log,
+    )
+}
+
+#[tokio::test]
+async fn source_system_is_the_first_component_of_a_composite_msh_3() {
+    // Upstream 69548eb (#465): `APP^OID^ISO` is not an application name.
+    let (pipeline, bus, _) = pipeline_open_to_any_sender();
+    let composite = GOOD.replace("|252|252|", "|COMP_APP^1.2.3.4^ISO|252|");
+
+    pipeline.handle(&composite).await.unwrap();
+
+    assert_eq!(
+        bus.all_sent(EGRESS)[0].properties["SourceSystem"],
+        "COMP_APP"
+    );
+}
+
+#[tokio::test]
+async fn source_system_is_empty_when_msh_3_is_empty() {
+    let (pipeline, bus, _) = pipeline_open_to_any_sender();
+    let empty = GOOD.replace("|252|252|", "||252|");
+
+    pipeline.handle(&empty).await.unwrap();
+
+    assert_eq!(bus.all_sent(EGRESS)[0].properties["SourceSystem"], "");
+}
+
 #[tokio::test]
 async fn the_tracking_metadata_of_section_six_rides_on_the_message() {
     // spec/07-hl7-server.md §6.1, via spec/03-message-bus.md §4.

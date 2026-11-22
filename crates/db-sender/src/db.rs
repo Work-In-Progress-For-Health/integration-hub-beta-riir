@@ -19,8 +19,9 @@ use tokio::net::TcpStream;
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
 use crate::config::{DbAuth, DbConfig};
-use crate::idupdate::IdUpdate;
+use crate::idupdate::{IdUpdate, IdentifierUpdate};
 use crate::sanitize::sanitize_error_message;
+use crate::trrr::TrrrRequest;
 
 /// SQL Server native error codes that are worth a retry (`§7.3`).
 ///
@@ -216,6 +217,50 @@ pub trait ProcedureRunner: Send {
             ))
         }
     }
+
+    /// Execute `dbo.spUpdateIdentifier` with three strings and commit
+    /// (`spec/10-senders.md` §7.9).
+    ///
+    /// Defaults to a fatal "not supported", as [`Self::execute_id_update`].
+    ///
+    /// # Errors
+    ///
+    /// A [`DatabaseError`], already classified and sanitised.
+    fn execute_update_identifier(
+        &mut self,
+        update: &IdentifierUpdate,
+    ) -> impl Future<Output = Result<(), DatabaseError>> + Send {
+        let _ = update;
+        async {
+            Err(DatabaseError::new(
+                FailureKind::Fatal,
+                0,
+                "this runner cannot execute the identifier update",
+            ))
+        }
+    }
+
+    /// Execute a TRRR procedure with three or four strings and commit
+    /// (`spec/10-senders.md` §7.10).
+    ///
+    /// Defaults to a fatal "not supported", as [`Self::execute_id_update`].
+    ///
+    /// # Errors
+    ///
+    /// A [`DatabaseError`], already classified and sanitised.
+    fn execute_trrr(
+        &mut self,
+        request: &TrrrRequest,
+    ) -> impl Future<Output = Result<(), DatabaseError>> + Send {
+        let _ = request;
+        async {
+            Err(DatabaseError::new(
+                FailureKind::Fatal,
+                0,
+                "this runner cannot execute the TRRR procedures",
+            ))
+        }
+    }
 }
 
 /// A `tiberius` client over a Tokio socket.
@@ -229,6 +274,10 @@ pub struct SqlRunner {
     statement: String,
     /// `EXEC dbo.proc @P1 .. @P6`, for the Queue ID Update.
     id_update_statement: String,
+    /// `EXEC dbo.proc @P1 .. @P3`, for the WCRS identifier update.
+    update_identifier_statement: String,
+    /// `EXEC dbo.proc @P1 .. @P3` and `@P1 .. @P4`: the TRRR association and merge.
+    trrr_statements: (String, String),
     /// The managed identity, when that is the mode; its token cache must
     /// outlive a reconnect (`spec/12-message-store.md` §5.4.2).
     identity: Option<ihb_identity::ManagedIdentity>,
@@ -265,6 +314,20 @@ impl SqlRunner {
             "DECLARE @rc INT; EXEC @rc = {} @P1, @P2, @P3, @P4, @P5, @P6; SELECT @rc;",
             config.stored_procedure
         );
+        let update_identifier_statement = format!(
+            "DECLARE @rc INT; EXEC @rc = {} @P1, @P2, @P3; SELECT @rc;",
+            config.stored_procedure
+        );
+        let trrr_statements = (
+            format!(
+                "DECLARE @rc INT; EXEC @rc = {} @P1, @P2, @P3; SELECT @rc;",
+                config.stored_procedure
+            ),
+            format!(
+                "DECLARE @rc INT; EXEC @rc = {} @P1, @P2, @P3, @P4; SELECT @rc;",
+                config.stored_procedure
+            ),
+        );
         let identity = match &config.auth {
             DbAuth::ManagedIdentity { client_id } => {
                 Some(ihb_identity::ManagedIdentity::new(client_id.clone()))
@@ -275,6 +338,8 @@ impl SqlRunner {
             config,
             statement,
             id_update_statement,
+            update_identifier_statement,
+            trrr_statements,
             identity,
             client: None,
         }
@@ -458,6 +523,61 @@ impl ProcedureRunner for SqlRunner {
         )
         .await
     }
+
+    async fn execute_update_identifier(
+        &mut self,
+        update: &IdentifierUpdate,
+    ) -> Result<(), DatabaseError> {
+        let statement = self.update_identifier_statement.clone();
+        self.call(
+            &statement,
+            &[
+                &update.old_identifier.as_str(),
+                &update.old_authority.as_str(),
+                &update.new_identifier.as_str(),
+            ],
+        )
+        .await
+    }
+
+    async fn execute_trrr(&mut self, request: &TrrrRequest) -> Result<(), DatabaseError> {
+        match request {
+            TrrrRequest::Association {
+                lims_identifier,
+                new_identifier,
+                new_authority,
+            } => {
+                let statement = self.trrr_statements.0.clone();
+                self.call(
+                    &statement,
+                    &[
+                        &lims_identifier.as_str(),
+                        &new_identifier.as_str(),
+                        &new_authority.as_str(),
+                    ],
+                )
+                .await
+            }
+            TrrrRequest::Merge {
+                old_identifier,
+                old_authority,
+                new_identifier,
+                new_authority,
+            } => {
+                let statement = self.trrr_statements.1.clone();
+                self.call(
+                    &statement,
+                    &[
+                        &old_identifier.as_str(),
+                        &old_authority.as_str(),
+                        &new_identifier.as_str(),
+                        &new_authority.as_str(),
+                    ],
+                )
+                .await
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -551,6 +671,46 @@ mod tests {
         assert_eq!(
             SqlRunner::new(config.db).id_update_statement,
             "DECLARE @rc INT; EXEC @rc = dbo.prQueueIdUpdate @P1, @P2, @P3, @P4, @P5, @P6; SELECT @rc;"
+        );
+    }
+
+    #[test]
+    fn the_update_identifier_statement_has_three_positional_parameters() {
+        let config = crate::AppConfig::from_pairs([
+            ("INGRESS_TOPIC_NAME", "t"),
+            ("INGRESS_SUBSCRIPTION_NAME", "s"),
+            ("DB_PROCEDURE_TYPE", "update_identifier"),
+            ("DB_USERNAME", "sa"),
+            ("DB_PASSWORD", "p"),
+            ("DB_ENCRYPT", "No"),
+        ])
+        .unwrap();
+        assert_eq!(config.db.stored_procedure, "dbo.spUpdateIdentifier");
+        assert_eq!(
+            SqlRunner::new(config.db).update_identifier_statement,
+            "DECLARE @rc INT; EXEC @rc = dbo.spUpdateIdentifier @P1, @P2, @P3; SELECT @rc;"
+        );
+    }
+
+    #[test]
+    fn the_trrr_statements_have_three_and_four_positional_parameters() {
+        let config = crate::AppConfig::from_pairs([
+            ("INGRESS_TOPIC_NAME", "t"),
+            ("INGRESS_SUBSCRIPTION_NAME", "s"),
+            ("DB_PROCEDURE_TYPE", "trrr"),
+            ("DB_USERNAME", "sa"),
+            ("DB_PASSWORD", "p"),
+            ("DB_ENCRYPT", "No"),
+        ])
+        .unwrap();
+        let (association, merge) = SqlRunner::new(config.db).trrr_statements;
+        assert_eq!(
+            association,
+            "DECLARE @rc INT; EXEC @rc = dbo.TRRRIDUpdate @P1, @P2, @P3; SELECT @rc;"
+        );
+        assert!(
+            merge.ends_with("@P1, @P2, @P3, @P4; SELECT @rc;"),
+            "{merge}"
         );
     }
 
