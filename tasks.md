@@ -967,3 +967,14 @@ Recorded so the omission is deliberate rather than forgotten.
   current bundle.
 - Dashboard internationalisation — English only in the first cut
   ([`spec/15`](spec/15-dashboard.md) §6).
+
+## Checked arithmetic (`rust-checked-arithmetic`)
+
+- [ ] Convert the 303 production-code findings in `docs/checked-arithmetic-audit.md`
+      crate by crate, denying the lints at each crate root once it is clean
+      (RCA-ENF-3). `db-sender` first (`sanitize.rs`, `msh.rs`).
+- [ ] Then move the lints to `[workspace.lints.clippy]` and add the `clippy.toml`
+      bans so the gate enforces them (RCA-ENF-1, -2). Not done: the gate cannot
+      see any of this today.
+- [x] Applied to the upstream-sync code: `count_segments`, the Cosmos back-off,
+      `trrr.rs` (denied from the start).
