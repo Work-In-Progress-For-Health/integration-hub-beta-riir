@@ -135,9 +135,11 @@ fn already_passed(record: Option<&str>) -> bool {
     else {
         return false;
     };
-    TIERS
-        .iter()
-        .all(|tier| doc["tiers"][tier]["result"] == "passed" && doc["tiers"][tier]["clean"] == true)
+    TIERS.iter().all(|tier| {
+        let field = |name: &str| doc.pointer(&format!("/tiers/{tier}/{name}"));
+        field("result").is_some_and(|result| result == "passed")
+            && field("clean").and_then(serde_json::Value::as_bool) == Some(true)
+    })
 }
 
 /// Why the job should not run now, or `None` to run.

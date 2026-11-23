@@ -406,7 +406,8 @@ fn post_existing(tier: Tier) -> Result<()> {
     }
     let entry = record
         .as_ref()
-        .map_or(&serde_json::Value::Null, |doc| &doc["tiers"][tier.name()]);
+        .and_then(|doc| doc.get("tiers")?.get(tier.name()))
+        .unwrap_or(&serde_json::Value::Null);
     record::post(tier, &head, entry)
 }
 

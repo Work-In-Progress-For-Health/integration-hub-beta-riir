@@ -145,6 +145,11 @@ fn tds_prelogin() -> Vec<u8> {
         &[0x02],                             // encryption data
     ]
     .concat();
+    // The payload is the fixed 18 bytes above, so the packet is 8 + 18 = 26.
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "RCA-EXC-2: the payload is a fixed 18-byte literal, so 8 + len is 26"
+    )]
     let length = u16::try_from(8 + payload.len()).unwrap_or(26);
     let mut packet = vec![0x12, 0x01];
     packet.extend_from_slice(&length.to_be_bytes());

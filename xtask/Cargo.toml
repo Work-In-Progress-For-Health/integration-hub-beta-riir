@@ -10,6 +10,7 @@ description = "Workspace automation: schema dictionary generation and verificati
 [dependencies]
 anyhow.workspace = true
 serde_json.workspace = true
+time.workspace = true
 hl7-2-from-xsd-into-json-dictionary.workspace = true
 hl7-2.workspace = true
 

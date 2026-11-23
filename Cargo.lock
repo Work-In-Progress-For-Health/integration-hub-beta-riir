@@ -4698,6 +4698,7 @@ dependencies = [
  "hl7-2",
  "hl7-2-from-xsd-into-json-dictionary",
  "serde_json",
+ "time",
 ]
 
 [[package]]

@@ -47,8 +47,8 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 **Done:** every crate under `crates/` (the last eight: `ihb-sql`, `ihb-identity`, `ihb-telemetry`,
 `hl7-mock-receiver`, `ihb-transformer`, `hl7-rest-server`, `hl7-sender`,
 `hl7-lims-wrrs-transformer`; `FixedClock::from_unix_micros` returns `None` out of range instead of
-substituting the epoch). **Left: `xtask`** (24 findings: a hand-rolled civil-date algorithm that
-should use the `time` crate, RCA-TIME-4). Also done: `message-store-service`, `message-replay-job`, `buswatch`, `ihb-sender` (`clamp` on the batch
+substituting the epoch). `xtask` too (the hand-rolled civil-date algorithm is replaced by the `time` crate, RCA-TIME-4; a
+record timestamp that cannot be represented is stored as `null`, not a date). Also done: `message-store-service`, `message-replay-job`, `buswatch`, `ihb-sender` (`clamp` on the batch
 size replaced by the declared ceiling), `rest-server`, `xml-fhir-proms-transformer`, `integration-hub-tester`, `fhir-sender`, `ihb-fields` (a path with position `0` underflowed `index - 1`, reachable from a
 mapping path; now reads as nothing), `soap-sender`, `hl7-server` (the partial-message log cap is enforced by `take`, with no fallback that could log
 more), `ihb-bus` (tokens and sent-counts refuse at 2^64 instead of wrapping), `http-mock-receiver` (`soap::extract_payload` on remainders; identical to the offset version
