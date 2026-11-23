@@ -95,6 +95,10 @@ impl Segment {
 
     /// The HL7 number of the field at `index`.
     #[must_use]
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "RCA-EXC-2: `index` is a position in `fields`, which is at most isize::MAX, and the first number is 1 or 2"
+    )]
     pub fn number_of(&self, index: usize) -> usize {
         self.first_field_number() + index
     }

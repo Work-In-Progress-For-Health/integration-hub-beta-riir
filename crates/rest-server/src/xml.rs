@@ -143,10 +143,16 @@ pub fn standalone(source: &str, node: Node<'_, '_>) -> String {
     }
 
     // After the qualified name: `<ns0:ADT_A05` | `<ADT_A05` + declarations.
-    let name_end = slice[1..]
+    let Some((open, after_open)) = slice.split_at_checked(1) else {
+        return slice.to_string();
+    };
+    let name_length = after_open
         .find(|c: char| c.is_whitespace() || c == '/' || c == '>')
-        .map_or(slice.len(), |at| at + 1);
-    format!("{}{declarations}{}", &slice[..name_end], &slice[name_end..])
+        .unwrap_or(after_open.len());
+    let Some((name, rest)) = after_open.split_at_checked(name_length) else {
+        return slice.to_string();
+    };
+    format!("{open}{name}{declarations}{rest}")
 }
 
 /// A namespace URI as an attribute value.

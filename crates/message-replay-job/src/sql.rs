@@ -82,7 +82,10 @@ pub const MAX_IDENTIFIERS_PER_STATEMENT: usize = ihb_sql::MAX_PARAMETERS - 1;
 #[must_use]
 pub fn mark_sql(count: usize) -> String {
     // @P1 is the status; identifiers start at @P2.
-    let placeholders: Vec<String> = (0..count).map(|index| format!("@P{}", index + 2)).collect();
+    let placeholders: Vec<String> = (2..)
+        .take(count)
+        .map(|number| format!("@P{number}"))
+        .collect();
 
     format!(
         "UPDATE monitoring.MessageReplayQueue \

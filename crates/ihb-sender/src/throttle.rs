@@ -101,10 +101,14 @@ impl Throttle {
         // §2.4.1 — the first message goes at once. §2.4.2 — and if a later
         // slot has already passed, the target is *now*, not the overdue
         // moment, which is what stops an idle sender bursting to catch up.
-        let target = self.last_target.map_or(now, |last| {
-            let scheduled = last + interval;
-            if scheduled > now { scheduled } else { now }
-        });
+        // A slot too far ahead to represent is not a future slot: it is
+        // treated as passed, so the target is now (`§2.4.2`).
+        let target = self
+            .last_target
+            .map_or(now, |last| match last.checked_add(interval) {
+                Some(scheduled) if scheduled > now => scheduled,
+                _ => now,
+            });
 
         self.last_target = Some(target);
 
@@ -156,19 +160,51 @@ pub fn batch_size(configured: usize, interval: Option<Duration>) -> usize {
     }
 
     let window = LOCK_RENEWAL_DURATION.saturating_sub(RENEWAL_MARGIN);
+    // More than a `usize` of messages fit the window: no bound but the
+    // configured one, which is the declared ceiling (`§2.4.3`).
+    let allowable = whole_floor(window.as_secs_f64() / interval.as_secs_f64())
+        .and_then(|whole| whole.checked_add(1))
+        .unwrap_or(usize::MAX);
+
+    // At least 1 (`allowable` is), at most what is configured.
+    allowable.min(configured.max(1))
+}
+
+/// `value` floored, as a `usize`, if it is finite, not negative and exact in
+/// an `f64` (below 2^53); otherwise `None` (RCA-CONV-3).
+fn whole_floor(value: f64) -> Option<usize> {
+    const EXACT_LIMIT: f64 = 9_007_199_254_740_992.0;
+    if !value.is_finite() || value < 0.0 {
+        return None;
+    }
+    let floored = value.floor();
+    if floored >= EXACT_LIMIT {
+        return None;
+    }
     #[expect(
+        clippy::as_conversions,
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
-        reason = "the quotient of two positive durations, floored, then clamped to a configured usize"
+        reason = "RCA-CONV-3: finite, non-negative, integral and below 2^53, checked above"
     )]
-    let allowable = (window.as_secs_f64() / interval.as_secs_f64()).floor() as usize + 1;
-
-    allowable.clamp(1, configured.max(1))
+    Some(floored as usize)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RCA-CONV-3 / the ceiling: a window that fits more messages than a
+    /// `usize` can count is bounded by the configured size, never wrapped.
+    #[test]
+    fn a_ratio_that_does_not_fit_is_bounded_by_the_configuration() {
+        assert_eq!(batch_size(500, Some(Duration::from_nanos(1))), 500);
+        assert_eq!(batch_size(0, Some(Duration::from_nanos(1))), 1);
+        assert_eq!(whole_floor(f64::NAN), None);
+        assert_eq!(whole_floor(-1.0), None);
+        assert_eq!(whole_floor(1e300), None);
+        assert_eq!(whole_floor(7.9), Some(7));
+    }
 
     #[test]
     fn the_interval_is_a_minute_divided_by_the_rate() {

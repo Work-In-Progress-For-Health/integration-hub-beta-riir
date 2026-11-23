@@ -220,7 +220,7 @@ async fn mark_once(
     let label = status.as_str();
 
     for chunk in identifier_chunks(identifiers) {
-        let mut parameters: Vec<&dyn tiberius::ToSql> = Vec::with_capacity(chunk.len() + 1);
+        let mut parameters: Vec<&dyn tiberius::ToSql> = Vec::with_capacity(chunk.len());
         parameters.push(&label);
         for identifier in chunk {
             parameters.push(identifier);

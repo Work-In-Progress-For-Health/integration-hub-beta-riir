@@ -280,7 +280,7 @@ impl LiveReader {
     /// until there is no next one -- at which point the acceptance fails,
     /// and that failure is the **success** condition rather than an error.
     async fn clear_sessions(&self, queue: &str) -> Result<usize, String> {
-        let mut cleared = 0;
+        let mut cleared = 0_usize;
 
         for _ in 0..CLEAR_SESSIONS {
             let Ok(receiver) = self.next_session(queue).await else {
@@ -293,7 +293,11 @@ impl LiveReader {
 
             match drained {
                 Ok(0) => break,
-                Ok(count) => cleared += count,
+                Ok(count) => {
+                    cleared = cleared.checked_add(count).ok_or_else(|| {
+                        "the count of cleared sessions is out of range".to_string()
+                    })?;
+                }
                 // A real failure, after some sessions may already have been
                 // cleared. Saying how many went is more use than saying none
                 // did, but the failure is what the developer needs.
@@ -311,7 +315,7 @@ impl LiveReader {
 /// first failure. The count completed before a failure is not returned, so
 /// a partial clear reports only the error.
 async fn drain(receiver: &LiveReceiver) -> Result<usize, String> {
-    let mut cleared = 0;
+    let mut cleared = 0_usize;
 
     for _ in 0..CLEAR_PASSES {
         let batch = receiver
@@ -330,7 +334,9 @@ async fn drain(receiver: &LiveReceiver) -> Result<usize, String> {
                 .settle(message, Outcome::Accepted)
                 .await
                 .map_err(|error| error.to_string())?;
-            cleared += 1;
+            cleared = cleared
+                .checked_add(1)
+                .ok_or_else(|| "the count of cleared messages is out of range".to_string())?;
         }
     }
 

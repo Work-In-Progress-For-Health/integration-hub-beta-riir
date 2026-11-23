@@ -29,11 +29,11 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `fhir-sender` | **0** (was 6) | | | | | | |
 | `xml-fhir-proms-transformer` | **0** (was 5) | | | | | | |
 | `integration-hub-tester` | **0** (was 5) | | | | | | |
-| `message-store-service` | 3 | 3 |  |  |  |  |  |
-| `message-replay-job` | 3 | 3 |  |  |  |  |  |
-| `buswatch` | 3 | 3 |  |  |  |  |  |
-| `ihb-sender` | 3 | 2 |  |  | 1 |  |  |
-| `rest-server` | 3 | 1 | 2 |  |  |  |  |
+| `message-store-service` | **0** | | | | | | |
+| `message-replay-job` | **0** | | | | | | |
+| `buswatch` | **0** | | | | | | |
+| `ihb-sender` | **0** | | | | | | |
+| `rest-server` | **0** | | | | | | |
 | `ihb-sql` | 2 |  |  |  |  | 1 | 1 |
 | `ihb-identity` | 1 |  |  |  | 1 |  |  |
 | `ihb-telemetry` | 1 | 1 |  |  |  |  |  |
@@ -44,7 +44,8 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
-**Done:** `xml-fhir-proms-transformer`, `integration-hub-tester`, `fhir-sender`, `ihb-fields` (a path with position `0` underflowed `index - 1`, reachable from a
+**Done:** `message-store-service`, `message-replay-job`, `buswatch`, `ihb-sender` (`clamp` on the batch
+size replaced by the declared ceiling), `rest-server`, `xml-fhir-proms-transformer`, `integration-hub-tester`, `fhir-sender`, `ihb-fields` (a path with position `0` underflowed `index - 1`, reachable from a
 mapping path; now reads as nothing), `soap-sender`, `hl7-server` (the partial-message log cap is enforced by `take`, with no fallback that could log
 more), `ihb-bus` (tokens and sent-counts refuse at 2^64 instead of wrapping), `http-mock-receiver` (`soap::extract_payload` on remainders; identical to the offset version
 on 400,000 generated texts), `ihb-validation` (`drop_empty_elements` compared with the offset version on 400,000
@@ -71,7 +72,7 @@ code (2026-11-22):
 | `dashboard/src/contacts.rs:454` | `(page.max(1) - 1).saturating_mul(per_page)` | **decision**: `page=0` is invalid input (RCA-IN-2) |
 | `dashboard/src/azure/token.rs:195` | `Instant::now() + expires_in.saturating_sub(..)` | `checked_*`, declared fallback |
 | `dashboard/src/web.rs:444` | `.clamp(1, MAX_THROUGHPUT_HOURS)` | **decision**: an out-of-range query parameter is an error |
-| `ihb-sender/src/main_loop.rs:85`, `throttle.rs:158,166` | `saturating_sub`, `allowable.clamp(1, ..)` | declared floor, or error |
+| `ihb-sender/src/main_loop.rs:85`, `throttle.rs:158` | `saturating_sub` | declared floor, or error (`throttle.rs:166` clamp done) |
 | `dashboard/src/azure/email.rs:164` | `backoff * 2_u32.saturating_pow(attempt)` | declared ceiling |
 | `hl7-server/src/listener.rs:199` | `len().saturating_sub(buffered())` | done: `checked_sub`, the connection closes on divergence |
 | `lookup-service/src/security.rs:753` | `len().saturating_sub(1)` | done: `der_integer` rewritten |
@@ -109,28 +110,13 @@ on `str::get`, `split_once`, `char_indices`), `lookup-service`, `dashboard`,
 `file:line lint`, one per line.
 
 ```
-crates/buswatch/src/live.rs:296 arithmetic_side_effects
-crates/buswatch/src/live.rs:333 arithmetic_side_effects
-crates/buswatch/src/render.rs:99 arithmetic_side_effects
 crates/hl7-lims-wrrs-transformer/src/classifier.rs:93 string_slice
 crates/hl7-mock-receiver/src/server.rs:117 indexing_slicing
 crates/hl7-rest-server/src/ack.rs:124 string_slice
 crates/hl7-sender/src/client.rs:220 indexing_slicing
 crates/ihb-identity/src/lib.rs:205 as_conversions
-crates/ihb-sender/src/throttle.rs:105 arithmetic_side_effects
-crates/ihb-sender/src/throttle.rs:164 arithmetic_side_effects
-crates/ihb-sender/src/throttle.rs:164 as_conversions
 crates/ihb-sql/src/chunk.rs:15 integer_division
 crates/ihb-sql/src/connection.rs:157 unreachable
 crates/ihb-telemetry/src/clock.rs:160 arithmetic_side_effects
 crates/ihb-transformer/src/runtime.rs:262 arithmetic_side_effects
-crates/message-replay-job/src/job.rs:223 arithmetic_side_effects
-crates/message-replay-job/src/main.rs:174 arithmetic_side_effects
-crates/message-replay-job/src/sql.rs:85 arithmetic_side_effects
-crates/message-store-service/src/insert.rs:21 arithmetic_side_effects
-crates/message-store-service/src/insert.rs:23 arithmetic_side_effects
-crates/message-store-service/src/insert.rs:96 arithmetic_side_effects
-crates/rest-server/src/xml.rs:146 string_slice
-crates/rest-server/src/xml.rs:148 arithmetic_side_effects
-crates/rest-server/src/xml.rs:149 string_slice
 ```

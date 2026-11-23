@@ -18,10 +18,15 @@ pub const COLUMNS: &str = "ReceivedAt, StoredAt, CorrelationId, SourceSystem, \
 
 /// The `VALUES` placeholders for one row, in `tiberius`'s numbered form.
 fn placeholders(row: usize) -> String {
-    let base = row * ihb_sql::PARAMETERS_PER_ROW;
-    let list: Vec<String> = (1..=ihb_sql::PARAMETERS_PER_ROW)
-        .map(|offset| format!("@P{}", base + offset))
-        .collect();
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "RCA-EXC-2: `row` < ROWS_PER_STATEMENT (233, by `chunks`) and PARAMETERS_PER_ROW is 9, so `base + offset` is at most 2,100, SQL Server's own limit"
+    )]
+    let numbered = |offset: usize| {
+        let base = row * ihb_sql::PARAMETERS_PER_ROW;
+        format!("@P{}", base + offset)
+    };
+    let list: Vec<String> = (1..=ihb_sql::PARAMETERS_PER_ROW).map(numbered).collect();
     format!("({})", list.join(", "))
 }
 
@@ -92,8 +97,9 @@ where
             .map(|record| as_datetime2(record.received_at))
             .collect();
 
-        let mut parameters: Vec<&dyn tiberius::ToSql> =
-            Vec::with_capacity(chunk.len() * ihb_sql::PARAMETERS_PER_ROW);
+        // Bounded by the declared maximum, not computed from the chunk
+        // (RCA-LEN-4); a chunk never needs more than SQL Server allows.
+        let mut parameters: Vec<&dyn tiberius::ToSql> = Vec::with_capacity(ihb_sql::MAX_PARAMETERS);
         for (record, received_at) in chunk.iter().zip(received.iter()) {
             // The order here IS §2.1's column order. Changing one without
             // the other silently writes every value one column left.

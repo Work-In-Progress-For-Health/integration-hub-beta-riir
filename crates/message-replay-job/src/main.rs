@@ -14,6 +14,18 @@
 // are ~32 KB. `ihb_bus::live` records why that is allowed rather than boxed
 // away.
 #![allow(clippy::large_futures)]
+// Checked arithmetic (`rust-checked-arithmetic`, RCA-ENF-3): see `lib.rs`.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::integer_division,
+        clippy::unreachable
+    )
+)]
 
 use std::process::ExitCode;
 
@@ -171,7 +183,11 @@ async fn run() -> ExitCode {
 
     // §1.3 — fetch, send, mark, repeat, until a fetch returns nothing.
     loop {
-        page_number += 1;
+        let Some(next_page) = page_number.checked_add(1) else {
+            tracing::error!("the replay job's page counter is exhausted");
+            return ExitCode::FAILURE;
+        };
+        page_number = next_page;
 
         let page = match fetch(&mut sql, config.batch_id, config.batch_size).await {
             Ok(page) => page,

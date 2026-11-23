@@ -83,6 +83,15 @@ recorded time is the *target*, not the actual send time.
 
 §2.4.3 A configured value of zero or less is a startup failure.
 
+§2.4.4 **Checked arithmetic** (`rust-checked-arithmetic`; `ihb-sender`,
+`rest-server`, `message-store-service`, `message-replay-job` and `buswatch` deny
+`arithmetic_side_effects`, `as_conversions`, `indexing_slicing`,
+`string_slice`, `integer_division` and `unreachable`). Declarations for the
+throttle: a slot too far ahead to represent as an `Instant` is treated as
+passed, so the target is now (§2.4.2); a window that fits more messages than a
+`usize` can count is bounded by the configured batch size, which is the
+declared ceiling (`batch_size` is never above it and never below 1).
+
 §2.5 **Store event.** Built per [`03-message-bus.md`](03-message-bus.md) §6
 with `RawPayload` = the message body, `XmlPayload` = the schema-unaware
 v2.xml conversion, `SessionId` = the sender's own `INGRESS_SESSION_ID`, and
