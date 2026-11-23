@@ -190,6 +190,24 @@ mod table_page {
         assert!(first.contains("href=\"/tables/codes?page=2\""));
     }
 
+    /// §9.1 and RCA-IN-2: a query the page cannot read is refused, naming
+    /// the parameter, and is never replaced by a default.
+    #[tokio::test]
+    async fn unreadable_table_queries_are_refused() {
+        let app = read_only().await;
+        let long = "a".repeat(201);
+        for (query, parameter) in [
+            ("page=0".to_owned(), "page"),
+            ("page=abc".to_owned(), "page"),
+            ("page=-1".to_owned(), "page"),
+            (format!("search={long}"), "search"),
+        ] {
+            let reply = get(&app.router, &format!("/tables/ward_map?{query}")).await;
+            assert_eq!(reply.status, 422, "{query}");
+            assert!(reply.body.contains(parameter), "{query}");
+        }
+    }
+
     /// §9.1.
     #[tokio::test]
     async fn values_and_names_are_html_escaped() {
