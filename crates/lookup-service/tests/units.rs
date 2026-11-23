@@ -679,6 +679,77 @@ mod csv_import {
         );
     }
 
+    /// `spec/20-lookup-service.md` §6: the three transform spellings are
+    /// exact; anything else is not a transform.
+    #[test]
+    fn transform_spellings_are_exact() {
+        assert_eq!(Transform::parse("trim"), Some(Transform::Trim));
+        assert_eq!(Transform::parse("upper"), Some(Transform::Upper));
+        assert_eq!(Transform::parse("lower"), Some(Transform::Lower));
+        assert_eq!(Transform::parse("Upper"), None);
+        assert_eq!(Transform::parse(""), None);
+    }
+
+    /// An upload's mapping names every problem as `<path>: <reason>` and
+    /// never echoes a value.
+    #[test]
+    fn mapping_json_problems_are_named_by_path() {
+        let problems = |value: serde_json::Value| RecordMapping::from_json(&value).unwrap_err();
+        assert_eq!(problems(json!([])), ["mapping: must be an object"]);
+        assert_eq!(
+            problems(json!({"key": {}, "values": 3, "extra": 1})),
+            ["values: must be an object", "extra: unknown field"]
+        );
+        assert_eq!(
+            problems(json!({})),
+            ["key: field required", "values: field required"]
+        );
+        let nested = problems(json!({
+            "key": {"a": 1, "b": {}, "c": {"path": ""}, "d": {"path": "x", "transforms": 5}},
+            "values": {"e": {"path": "x", "transforms": ["trim", "nope"], "bogus": true}},
+        }));
+        assert_eq!(
+            nested,
+            [
+                "key.a: must be an object",
+                "key.b.path: field required",
+                "key.c.path: must be a string of 1 to 200 characters",
+                "key.d.transforms: must be a list",
+                "values.e.bogus: unknown field",
+                "values.e.transforms.1: must be one of trim, upper, lower",
+            ]
+        );
+    }
+
+    #[test]
+    fn mapping_json_reads_paths_and_transforms() {
+        let mapping = RecordMapping::from_json(&json!({
+            "key": {"code": {"path": "A", "transforms": ["trim", "upper"]}},
+            "values": {"label": {"path": "B"}},
+        }))
+        .unwrap();
+        assert_eq!(
+            mapping.key["code"].transforms,
+            [Transform::Trim, Transform::Upper]
+        );
+        assert!(mapping.values["label"].transforms.is_empty());
+        assert_eq!(
+            mapping.source_fields().into_iter().collect::<Vec<_>>(),
+            ["A", "B"]
+        );
+    }
+
+    #[test]
+    fn mapping_key_targets_must_match_key_columns() {
+        let (document, _) = read_csv_default("code,label\nA,Alpha\n");
+        let mapping = RecordMapping {
+            key: BTreeMap::from([("other".to_owned(), FieldSpec::plain("code"))]),
+            values: BTreeMap::from([("label".to_owned(), FieldSpec::plain("label"))]),
+        };
+        let errors = import_rows(&document, &codes_definition(), Some(&mapping)).errors;
+        assert!(errors.iter().any(|e| e.to_string().contains("key targets")));
+    }
+
     #[test]
     fn header_must_contain_mapped_columns_and_nothing_else() {
         let (document, _) = read_csv_default("code,notes\nA,n\n");
