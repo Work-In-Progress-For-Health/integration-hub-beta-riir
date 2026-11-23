@@ -213,6 +213,15 @@ element on remainders, not byte offsets, with the same results as before on
 one, are logged. Response bodies may echo message content, so what is logged
 MUST pass through redaction.
 
+§4.4.3 **Checked arithmetic** (`rust-checked-arithmetic`): `fhir-sender` denies
+`arithmetic_side_effects`, `as_conversions`, `indexing_slicing`, `string_slice`,
+`integer_division` and `unreachable`. An attempt number that cannot be advanced
+ends the attempts (the delivery fails as "failed after N attempt(s)"); the
+back-off is `base * 2^(attempt - 1)` computed as `2^attempt / 2`, so it has no
+subtraction to underflow; `join_url` finds the path after the authority
+without matching the lowercased origin as a prefix (the same results as before
+on 200,000 generated URL pairs and the cases with an uppercase host).
+
 §4.5 `WS_SECURITY_ENABLED` is reserved and MUST be `false`. A `true` value
 is a startup failure until this section specifies the header.
 

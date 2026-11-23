@@ -26,7 +26,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-server` | **0** (was 7) | | | | | | |
 | `soap-sender` | **0** (was 7) | | | | | | |
 | `ihb-fields` | **0** (was 6) | | | | | | |
-| `fhir-sender` | 6 | 4 | 2 |  |  |  |  |
+| `fhir-sender` | **0** (was 6) | | | | | | |
 | `xml-fhir-proms-transformer` | 5 | 2 |  | 3 |  |  |  |
 | `integration-hub-tester` | 5 | 3 |  | 2 |  |  |  |
 | `message-store-service` | 3 | 3 |  |  |  |  |  |
@@ -44,7 +44,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
-**Done:** `ihb-fields` (a path with position `0` underflowed `index - 1`, reachable from a
+**Done:** `fhir-sender`, `ihb-fields` (a path with position `0` underflowed `index - 1`, reachable from a
 mapping path; now reads as nothing), `soap-sender`, `hl7-server` (the partial-message log cap is enforced by `take`, with no fallback that could log
 more), `ihb-bus` (tokens and sent-counts refuse at 2^64 instead of wrapping), `http-mock-receiver` (`soap::extract_payload` on remainders; identical to the offset version
 on 400,000 generated texts), `ihb-validation` (`drop_empty_elements` compared with the offset version on 400,000
@@ -112,12 +112,6 @@ on `str::get`, `split_once`, `char_indices`), `lookup-service`, `dashboard`,
 crates/buswatch/src/live.rs:296 arithmetic_side_effects
 crates/buswatch/src/live.rs:333 arithmetic_side_effects
 crates/buswatch/src/render.rs:99 arithmetic_side_effects
-crates/fhir-sender/src/client.rs:283 arithmetic_side_effects
-crates/fhir-sender/src/client.rs:303 arithmetic_side_effects
-crates/fhir-sender/src/client.rs:316 arithmetic_side_effects
-crates/fhir-sender/src/client.rs:329 arithmetic_side_effects
-crates/fhir-sender/src/client.rs:490 string_slice
-crates/fhir-sender/src/client.rs:494 string_slice
 crates/hl7-lims-wrrs-transformer/src/classifier.rs:93 string_slice
 crates/hl7-mock-receiver/src/server.rs:117 indexing_slicing
 crates/hl7-rest-server/src/ack.rs:124 string_slice

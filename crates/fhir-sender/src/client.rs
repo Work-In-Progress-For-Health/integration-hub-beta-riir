@@ -280,7 +280,11 @@ impl<T: Transport, C: Clock> FhirClient<T, C> {
                     last_error = format!("{error}");
                     tracing::warn!(url = shown, attempt, max, error = %last_error, "{name} failed");
                     self.backoff(attempt, deadline).await?;
-                    attempt += 1;
+                    // Running out of attempt numbers is running out of attempts.
+                    let Some(next) = attempt.checked_add(1) else {
+                        break;
+                    };
+                    attempt = next;
                     continue;
                 }
             };
@@ -300,7 +304,11 @@ impl<T: Transport, C: Clock> FhirClient<T, C> {
                     self.wait(delay.min(self.settings.max_retry_after_seconds), deadline)
                         .await?;
                 }
-                attempt += 1;
+                // Running out of attempt numbers is running out of attempts.
+                let Some(next) = attempt.checked_add(1) else {
+                    break;
+                };
+                attempt = next;
                 continue;
             }
             if status >= 500 {
@@ -313,7 +321,11 @@ impl<T: Transport, C: Clock> FhirClient<T, C> {
                     "{name} returned a server error"
                 );
                 self.backoff(attempt, deadline).await?;
-                attempt += 1;
+                // Running out of attempt numbers is running out of attempts.
+                let Some(next) = attempt.checked_add(1) else {
+                    break;
+                };
+                attempt = next;
                 continue;
             }
             return Ok(response);
@@ -326,7 +338,9 @@ impl<T: Transport, C: Clock> FhirClient<T, C> {
 
     /// The wait before attempt `attempt + 1`: doubles each time.
     fn backoff_delay(&self, attempt: u32) -> f64 {
-        self.settings.backoff_seconds * 2_f64.powi(i32::try_from(attempt - 1).unwrap_or(i32::MAX))
+        // 2^(attempt - 1) as 2^attempt / 2: exact for a power of two, and
+        // with no `attempt - 1` to underflow (`attempt` starts at 1).
+        self.settings.backoff_seconds * 2_f64.powi(i32::try_from(attempt).unwrap_or(i32::MAX)) / 2.0
     }
 
     /// Wait the backoff, unless this was the last attempt.
@@ -487,11 +501,19 @@ fn join_url(base: &str, location: &str) -> String {
     if location.starts_with('/') {
         return format!("{base_origin}{location}");
     }
-    let path = base[base_origin.len()..]
-        .split(['?', '#'])
-        .next()
-        .unwrap_or("");
-    let directory = path.rfind('/').map_or("/", |index| &path[..=index]);
+    // What follows the authority (`origin` lowercases it, so it is not matched
+    // as a prefix); with no scheme there is no origin and the whole is the path.
+    let after_origin = match base.split_once("://") {
+        Some((_, rest)) => rest
+            .find(['/', '?', '#'])
+            .and_then(|at| rest.get(at..))
+            .unwrap_or(""),
+        None => base,
+    };
+    let path = after_origin.split(['?', '#']).next().unwrap_or("");
+    let directory = path
+        .rsplit_once('/')
+        .map_or_else(|| "/".to_string(), |(directory, _)| format!("{directory}/"));
     format!("{base_origin}{directory}{location}")
 }
 
