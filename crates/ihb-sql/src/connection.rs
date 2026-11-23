@@ -152,11 +152,18 @@ impl SqlConnection {
                 // `Authentication=ActiveDirectoryMsi` ODBC parameter. §5.4.2:
                 // the identity caches it and refreshes it before expiry, so a
                 // reconnect per §5.2 always presents a live one.
-                let token = match &self.identity {
-                    Some(identity) => identity.sql_token().await,
-                    None => unreachable!("a managed-identity config always builds an identity"),
-                }
-                .map_err(|error| SqlError::Token(error.to_string()))?;
+                // A managed-identity config always builds an identity; if one
+                // is missing it is reported like any token failure, not
+                // asserted away (RCA-P-1).
+                let Some(identity) = &self.identity else {
+                    return Err(SqlError::Token(
+                        "managed identity configured but no identity source was built".to_string(),
+                    ));
+                };
+                let token = identity
+                    .sql_token()
+                    .await
+                    .map_err(|error| SqlError::Token(error.to_string()))?;
                 config.authentication(AuthMethod::aad_token(token));
             }
         }

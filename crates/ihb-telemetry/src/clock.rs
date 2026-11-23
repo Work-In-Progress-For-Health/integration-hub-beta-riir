@@ -141,25 +141,27 @@ impl FixedClock {
 
     /// A clock fixed at a number of microseconds since the Unix epoch.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if the value is outside the range `OffsetDateTime` can
-    /// represent, which is roughly the years -9999 to 9999. Test-only
-    /// construction, so a panic on nonsense input is the right answer.
+    /// `None` if the value is outside the range `OffsetDateTime` can
+    /// represent (roughly the years -9999 to 9999), or its nanoseconds
+    /// overflow. It is never replaced by the epoch (RCA-IN-2).
     ///
     /// # Examples
     ///
     /// ```
     /// use ihb_telemetry::clock::{Clock, FixedClock};
     ///
-    /// let clock = FixedClock::from_unix_micros(0);
+    /// let clock = FixedClock::from_unix_micros(0).expect("in range");
     /// assert_eq!(clock.now_iso8601(), "1970-01-01T00:00:00+00:00");
+    /// assert!(FixedClock::from_unix_micros(i128::MAX).is_none());
     /// ```
     #[must_use]
-    pub fn from_unix_micros(micros: i128) -> Self {
-        let moment = OffsetDateTime::from_unix_timestamp_nanos(micros * 1_000)
-            .unwrap_or(OffsetDateTime::UNIX_EPOCH);
-        Self { moment }
+    pub fn from_unix_micros(micros: i128) -> Option<Self> {
+        let nanos = micros.checked_mul(1_000)?;
+        OffsetDateTime::from_unix_timestamp_nanos(nanos)
+            .ok()
+            .map(|moment| Self { moment })
     }
 }
 

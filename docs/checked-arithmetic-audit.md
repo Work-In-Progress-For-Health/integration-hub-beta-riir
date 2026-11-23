@@ -34,17 +34,21 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `buswatch` | **0** | | | | | | |
 | `ihb-sender` | **0** | | | | | | |
 | `rest-server` | **0** | | | | | | |
-| `ihb-sql` | 2 |  |  |  |  | 1 | 1 |
-| `ihb-identity` | 1 |  |  |  | 1 |  |  |
-| `ihb-telemetry` | 1 | 1 |  |  |  |  |  |
-| `hl7-mock-receiver` | 1 |  |  | 1 |  |  |  |
-| `ihb-transformer` | 1 | 1 |  |  |  |  |  |
-| `hl7-rest-server` | 1 |  | 1 |  |  |  |  |
-| `hl7-sender` | 1 |  |  | 1 |  |  |  |
-| `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
+| `ihb-sql` | **0** | | | | | | |
+| `ihb-identity` | **0** | | | | | | |
+| `ihb-telemetry` | **0** | | | | | | |
+| `hl7-mock-receiver` | **0** | | | | | | |
+| `ihb-transformer` | **0** | | | | | | |
+| `hl7-rest-server` | **0** | | | | | | |
+| `hl7-sender` | **0** | | | | | | |
+| `hl7-lims-wrrs-transformer` | **0** | | | | | | |
 | **all** | **303** | |||||| 
 
-**Done:** `message-store-service`, `message-replay-job`, `buswatch`, `ihb-sender` (`clamp` on the batch
+**Done:** every crate under `crates/` (the last eight: `ihb-sql`, `ihb-identity`, `ihb-telemetry`,
+`hl7-mock-receiver`, `ihb-transformer`, `hl7-rest-server`, `hl7-sender`,
+`hl7-lims-wrrs-transformer`; `FixedClock::from_unix_micros` returns `None` out of range instead of
+substituting the epoch). **Left: `xtask`** (24 findings: a hand-rolled civil-date algorithm that
+should use the `time` crate, RCA-TIME-4). Also done: `message-store-service`, `message-replay-job`, `buswatch`, `ihb-sender` (`clamp` on the batch
 size replaced by the declared ceiling), `rest-server`, `xml-fhir-proms-transformer`, `integration-hub-tester`, `fhir-sender`, `ihb-fields` (a path with position `0` underflowed `index - 1`, reachable from a
 mapping path; now reads as nothing), `soap-sender`, `hl7-server` (the partial-message log cap is enforced by `take`, with no fallback that could log
 more), `ihb-bus` (tokens and sent-counts refuse at 2^64 instead of wrapping), `http-mock-receiver` (`soap::extract_payload` on remainders; identical to the offset version
@@ -110,13 +114,4 @@ on `str::get`, `split_once`, `char_indices`), `lookup-service`, `dashboard`,
 `file:line lint`, one per line.
 
 ```
-crates/hl7-lims-wrrs-transformer/src/classifier.rs:93 string_slice
-crates/hl7-mock-receiver/src/server.rs:117 indexing_slicing
-crates/hl7-rest-server/src/ack.rs:124 string_slice
-crates/hl7-sender/src/client.rs:220 indexing_slicing
-crates/ihb-identity/src/lib.rs:205 as_conversions
-crates/ihb-sql/src/chunk.rs:15 integer_division
-crates/ihb-sql/src/connection.rs:157 unreachable
-crates/ihb-telemetry/src/clock.rs:160 arithmetic_side_effects
-crates/ihb-transformer/src/runtime.rs:262 arithmetic_side_effects
 ```

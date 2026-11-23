@@ -24,6 +24,19 @@
 
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
+// Checked arithmetic (`rust-checked-arithmetic`, RCA-ENF-3): denied for the whole
+// crate. Tests may use plain operators and indexing (RCA-EXC-5).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::integer_division,
+        clippy::unreachable
+    )
+)]
 
 use std::time::Duration;
 
@@ -201,8 +214,10 @@ async fn exchange(target: &Target, headers: &[(String, String)]) -> Result<Strin
         .map_err(|error| IdentityError::Endpoint(error.to_string()))?;
 
     let mut raw = Vec::new();
+    let limit =
+        u64::try_from(MAX_RESPONSE).map_err(|error| IdentityError::Endpoint(error.to_string()))?;
     stream
-        .take(MAX_RESPONSE as u64)
+        .take(limit)
         .read_to_end(&mut raw)
         .await
         .map_err(|error| IdentityError::Endpoint(error.to_string()))?;

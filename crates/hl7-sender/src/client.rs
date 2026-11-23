@@ -217,7 +217,14 @@ async fn read_frame(stream: &mut TcpStream, timeout: Duration) -> Result<String,
             Err(_) => return Err(Attempt::Timeout),
         };
 
-        framer.push(&chunk[..read]);
+        // `read` never exceeds the buffer; one that does is a connection
+        // failure, not a panic (RCA-LEN-2).
+        let Some(received) = chunk.get(..read) else {
+            return Err(Attempt::Connection(
+                "a read reported more than the buffer".to_string(),
+            ));
+        };
+        framer.push(received);
 
         match framer.next_frame() {
             Ok(Some(frame)) => {

@@ -972,7 +972,7 @@ Recorded so the omission is deliberate rather than forgotten.
 
 - [ ] Convert the 303 production-code findings in `docs/checked-arithmetic-audit.md`
       crate by crate, denying the lints at each crate root once it is clean
-      (RCA-ENF-3). `db-sender`, `lookup-service` and `dashboard` are done; next the remaining small crates (see the audit table).
+      (RCA-ENF-3). `db-sender`, `lookup-service` and `dashboard` are done; only `xtask` is left (24 findings, see the audit), then the workspace lints (RCA-ENF-1, -2).
 - [ ] Then move the lints to `[workspace.lints.clippy]` and add the `clippy.toml`
       bans so the gate enforces them (RCA-ENF-1, -2). Not done: the gate cannot
       see any of this today.

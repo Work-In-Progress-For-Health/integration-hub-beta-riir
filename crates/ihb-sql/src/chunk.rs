@@ -12,6 +12,10 @@ pub const PARAMETERS_PER_ROW: usize = 9;
 
 /// Rows per statement: `2100 / 9`, floored, so 233 rows use 2097 parameters;
 /// a 234th would need 2106 and fail.
+#[expect(
+    clippy::integer_division,
+    reason = "RCA-EXC-1: constant expression, floored on purpose"
+)]
 pub const ROWS_PER_STATEMENT: usize = MAX_PARAMETERS / PARAMETERS_PER_ROW;
 
 /// Split `rows` into runs that each fit one statement.

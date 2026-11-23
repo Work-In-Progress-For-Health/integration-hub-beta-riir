@@ -87,10 +87,12 @@ fn has_nhs_and_lims_identifiers(message: &Message) -> bool {
 
     rendered
         .split('\r')
-        // `segment[3..]` is safe: the guard before it proves the first three
-        // bytes are the ASCII `PID`, so index 3 is a character boundary. The
-        // field-separator test stops `PIDX|...` matching.
-        .filter(|segment| segment.starts_with("PID") && segment[3..].starts_with(separators.field))
+        // The field-separator test after `PID` stops `PIDX|...` matching.
+        .filter(|segment| {
+            segment
+                .strip_prefix("PID")
+                .is_some_and(|rest| rest.starts_with(separators.field))
+        })
         .any(|segment| {
             let codes = pid3_authority_codes(
                 segment,

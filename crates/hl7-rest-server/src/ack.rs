@@ -121,7 +121,12 @@ pub fn generic_nack(reason: &str, control_id: &str, now: &str) -> String {
 /// (`spec/19-rest-servers.md` §4.3).
 #[must_use]
 pub fn generate_control_id() -> String {
-    uuid::Uuid::new_v4().simple().to_string()[..GENERATED_CONTROL_ID_LENGTH].to_string()
+    uuid::Uuid::new_v4()
+        .simple()
+        .to_string()
+        .chars()
+        .take(GENERATED_CONTROL_ID_LENGTH)
+        .collect()
 }
 
 /// `MSH-12`, or the default.

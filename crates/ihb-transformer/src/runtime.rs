@@ -259,7 +259,7 @@ impl<T: PayloadTransformer, E: MessageSink> Runtime<T, E> {
                 // order is the contract, and a message that jumped ahead of
                 // one that failed would reach MPI out of sequence.
                 tracing::warn!(
-                    remaining = batch.len() - outcomes.len(),
+                    remaining = batch.iter().skip(outcomes.len()).count(),
                     "abandoning the rest of the batch behind a failed message"
                 );
                 break;

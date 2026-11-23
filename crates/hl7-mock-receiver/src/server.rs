@@ -114,7 +114,12 @@ async fn handle<S: MessageSink>(mut stream: TcpStream, receiver: &Receiver<S>) -
         if read == 0 {
             return Ok(());
         }
-        framer.push(&buffer[..read]);
+        // `read` never exceeds the buffer; a `Read` that says otherwise is an
+        // error, not a panic (RCA-LEN-2).
+        let bytes = buffer
+            .get(..read)
+            .ok_or_else(|| std::io::Error::other("a read reported more than the buffer"))?;
+        framer.push(bytes);
 
         loop {
             match framer.next_frame() {
