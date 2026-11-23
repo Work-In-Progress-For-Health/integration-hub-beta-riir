@@ -54,6 +54,19 @@
 // stay on for everything the container actually runs.
 // See spec/17-testing-and-quality.md §2.3.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
+// Checked arithmetic (`rust-checked-arithmetic`, RCA-ENF-3): denied for the whole
+// crate. Tests may use plain operators and indexing (RCA-EXC-5).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::integer_division,
+        clippy::unreachable
+    )
+)]
 
 use hl7_2::{Error, Message};
 
@@ -342,7 +355,15 @@ fn copy_whole_field(source: &Message, target: &mut Message, from: &str, to: &str
             .fields
             .resize(to_index, hl7_2::er7::Field::default());
     }
-    segment.fields[to_index - 1] = field;
+    // Index 0 is not a field (they are 1-based): no-op, like every other
+    // unusable path here, rather than an underflow.
+    let Some(slot) = to_index
+        .checked_sub(1)
+        .and_then(|at| segment.fields.get_mut(at))
+    else {
+        return;
+    };
+    *slot = field;
 }
 
 /// `PID-13` becomes `("PID", 13)`. `None` for anything else.
@@ -552,8 +573,14 @@ fn raw_at<'a>(message: &'a Message, path: &str) -> Option<&'a str> {
 
     let field = message.raw().segment(segment_name)?.field(field_index)?;
     let repetition = field.repetitions.get(repetition.checked_sub(1)?)?;
-    let component = repetition.components.get(component.unwrap_or(1) - 1)?;
-    let subcomponent = component.subcomponents.get(subcomponent.unwrap_or(1) - 1)?;
+    // Absent means the first (`§3`); a supplied 0 is not a position, so it
+    // reads as nothing, never as an underflow.
+    let component = repetition
+        .components
+        .get(component.unwrap_or(1).checked_sub(1)?)?;
+    let subcomponent = component
+        .subcomponents
+        .get(subcomponent.unwrap_or(1).checked_sub(1)?)?;
 
     Some(&subcomponent.raw)
 }
@@ -696,7 +723,12 @@ pub fn ensure_repetitions(message: &mut Message, path: &str, count: usize) {
     if segment.fields.len() < index {
         segment.fields.resize(index, hl7_2::er7::Field::default());
     }
-    let field = &mut segment.fields[index - 1];
+    let Some(field) = index
+        .checked_sub(1)
+        .and_then(|at| segment.fields.get_mut(at))
+    else {
+        return;
+    };
     if field.repetitions.len() < count {
         field
             .repetitions
@@ -731,6 +763,20 @@ mod tests {
         assert_eq!(read(&message, "MSH-3"), "252");
         assert_eq!(read(&message, "PID-5.1"), "SURNAME");
         assert_eq!(read(&message, "PID-7"), "19990101");
+    }
+
+    /// RCA-INT-1: positions are 1-based, so a 0 is nothing, never an underflow.
+    #[test]
+    fn a_zero_position_reads_as_nothing_and_writes_nowhere() {
+        let mut message = message();
+        for path in ["PID-0", "PID-5.0", "PID-5.1.0", "PID-5.0.1"] {
+            assert_eq!(read(&message, path), "", "{path}");
+        }
+        let before = message.to_er7();
+        ensure_repetitions(&mut message, "PID-0", 3);
+        let source = hl7_2::parse(MESSAGE).expect("the fixture parses");
+        let _ = copy_to(&source, &mut message, "PID-5", "PID-0");
+        assert_eq!(message.to_er7(), before, "nothing was written");
     }
 
     #[test]

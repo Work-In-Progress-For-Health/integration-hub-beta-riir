@@ -182,6 +182,13 @@ the XML rendering, found independently here.
 §2.3 **`get_hl7_field_value(seg, path)`** reads a value, returning `""` for
 anything missing. Written **`read`**.
 
+§2.3a **Positions are 1-based; 0 is nothing.** A path naming field, component or
+subcomponent `0` (`PID-0`, `PID-5.0`) reads as empty and writes nowhere, as any
+other unusable path does, instead of underflowing `index - 1`
+(`rust-checked-arithmetic` RCA-LEN-1). `ihb-fields` denies
+`arithmetic_side_effects`, `as_conversions`, `indexing_slicing`, `string_slice`,
+`integer_division` and `unreachable`.
+
 §2.4 A destination path written as a literal in the tables is **set
 unconditionally**.
 

@@ -25,7 +25,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `ihb-bus` | **0** (was 8) | | | | | | |
 | `hl7-server` | **0** (was 7) | | | | | | |
 | `soap-sender` | **0** (was 7) | | | | | | |
-| `ihb-fields` | 6 | 4 |  | 2 |  |  |  |
+| `ihb-fields` | **0** (was 6) | | | | | | |
 | `fhir-sender` | 6 | 4 | 2 |  |  |  |  |
 | `xml-fhir-proms-transformer` | 5 | 2 |  | 3 |  |  |  |
 | `integration-hub-tester` | 5 | 3 |  | 2 |  |  |  |
@@ -44,7 +44,8 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
-**Done:** `soap-sender`, `hl7-server` (the partial-message log cap is enforced by `take`, with no fallback that could log
+**Done:** `ihb-fields` (a path with position `0` underflowed `index - 1`, reachable from a
+mapping path; now reads as nothing), `soap-sender`, `hl7-server` (the partial-message log cap is enforced by `take`, with no fallback that could log
 more), `ihb-bus` (tokens and sent-counts refuse at 2^64 instead of wrapping), `http-mock-receiver` (`soap::extract_payload` on remainders; identical to the offset version
 on 400,000 generated texts), `ihb-validation` (`drop_empty_elements` compared with the offset version on 400,000
 generated texts; `insertion_point` counts from the end instead of `+ 1`), `hl7-pims-transformer` (a network-supplied chunk size was added to unchecked, as in
@@ -121,12 +122,6 @@ crates/hl7-lims-wrrs-transformer/src/classifier.rs:93 string_slice
 crates/hl7-mock-receiver/src/server.rs:117 indexing_slicing
 crates/hl7-rest-server/src/ack.rs:124 string_slice
 crates/hl7-sender/src/client.rs:220 indexing_slicing
-crates/ihb-fields/src/lib.rs:345 arithmetic_side_effects
-crates/ihb-fields/src/lib.rs:345 indexing_slicing
-crates/ihb-fields/src/lib.rs:555 arithmetic_side_effects
-crates/ihb-fields/src/lib.rs:556 arithmetic_side_effects
-crates/ihb-fields/src/lib.rs:699 arithmetic_side_effects
-crates/ihb-fields/src/lib.rs:699 indexing_slicing
 crates/ihb-identity/src/lib.rs:205 as_conversions
 crates/ihb-sender/src/throttle.rs:105 arithmetic_side_effects
 crates/ihb-sender/src/throttle.rs:164 arithmetic_side_effects
