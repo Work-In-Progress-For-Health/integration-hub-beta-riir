@@ -161,6 +161,16 @@ these is `invalid_key` (`422`): no key at all; both styles; the wrong number
 of positional parts; an unknown or a missing part name; a name supplied more
 than once; a part empty after normalisation.
 
+§4.3a **A query string or urlencoded form that is not valid percent-encoding
+is refused**, `invalid_request` (`422`), naming nothing from the input: a `%`
+not followed by two hex digits, or bytes that are not UTF-8 once decoded, in
+any name or value of a lookup, a table page, the upload page or a settings
+form. The framework this replaces kept such an escape literally and replaced
+invalid UTF-8 with U+FFFD, so a malformed key was looked up as a different key
+(`rust-checked-arithmetic` RCA-IN-2). `percent_decode` and `parse_pairs` return
+`Result`. The table page's `page` was already refused below 1 (§9.1), and its
+rendering no longer clamps it.
+
 §4.4 A lookup that finds no row is `key_not_found` (`404`) and its message
 names the table and **not the key**.
 
@@ -476,6 +486,13 @@ else `unknown`. Every refusal is `401` with `WWW-Authenticate: Bearer`:
 `Token has expired` for an expired one, `Invalid token` for the rest. If the
 key set cannot be fetched the answer is `503 backend_unavailable` (the caller
 did nothing wrong). A valid token without a reader role is `403`.
+
+§12.2a **A malformed RSA key in the signing-key document is an error.** An RSA
+key whose `kid`, `n` or `e` is missing or not base64url makes the whole fetch
+`Unavailable`, logged with a fixed phrase and nothing from the document, and
+no key from that document is trusted. It is no longer skipped quietly (RCA-IN-6:
+corrupt data from another system is reported, not repaired). Keys of other
+kinds are still not ours and are skipped.
 
 §12.3 **Easy Auth.** Container Apps Easy Auth overwrites
 `X-MS-CLIENT-PRINCIPAL` (base64 JSON with a `claims` list) and

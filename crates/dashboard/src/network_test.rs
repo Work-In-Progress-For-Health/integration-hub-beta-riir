@@ -15,6 +15,7 @@
 //! error.
 
 use std::net::IpAddr;
+use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -30,7 +31,10 @@ pub const PARTITION: &str = "network-test";
 pub const MAX_HISTORY_SAMPLES: usize = 200;
 
 /// Connect attempts per test unless asked otherwise (§10.4.1).
-pub const DEFAULT_ATTEMPTS: usize = 4;
+pub const DEFAULT_ATTEMPTS: NonZeroUsize = match NonZeroUsize::new(4) {
+    Some(attempts) => attempts,
+    None => NonZeroUsize::MIN, // unreachable: 4 is not zero
+};
 
 /// Each connect's timeout (§10.4.1).
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -193,8 +197,9 @@ pub struct TestResult {
 /// How a test runs. The defaults are §10.4.1's; tests shorten them.
 #[derive(Debug, Clone, Copy)]
 pub struct Settings {
-    /// Connect attempts, at least 1.
-    pub attempts: usize,
+    /// Connect attempts. Non-zero by type, so "0 attempts" cannot be written
+    /// down and is never read as 1 (RCA-P-5, RCA-IN-2).
+    pub attempts: NonZeroUsize,
     /// Each connect's timeout.
     pub timeout: Duration,
     /// Resolution's timeout.
@@ -280,7 +285,7 @@ pub async fn run(
 ) -> Result<TestResult, InvalidTarget> {
     let host = validate_host(host)?;
     let port = validate_port(port)?;
-    let attempts = settings.attempts.max(1);
+    let attempts = settings.attempts.get();
 
     let dns = resolve(&host, settings.dns_timeout).await;
 
@@ -490,7 +495,7 @@ mod tests {
 
     fn quick() -> Settings {
         Settings {
-            attempts: 3,
+            attempts: NonZeroUsize::new(3).unwrap(),
             timeout: Duration::from_millis(500),
             dns_timeout: Duration::from_secs(2),
         }
@@ -636,23 +641,6 @@ mod tests {
                 .unwrap_err(),
             InvalidTarget
         );
-    }
-
-    #[tokio::test]
-    async fn at_least_one_attempt_is_made() {
-        let result = run(
-            "127.0.0.1",
-            &serde_json::json!(1),
-            Settings {
-                attempts: 0,
-                ..quick()
-            },
-            NOW,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(result.attempts.len(), 1);
     }
 
     #[test]

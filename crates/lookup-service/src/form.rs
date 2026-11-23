@@ -7,12 +7,41 @@
 
 use std::fmt::Write as _;
 
+/// A query or form component that is not valid percent-encoding.
+///
+/// Carries nothing from the input: a malformed query can hold anything, and
+/// the message that names it reaches the client and a log (`§12.7`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MalformedEncoding;
+
+impl std::fmt::Display for MalformedEncoding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the query string or form is not valid percent-encoding")
+    }
+}
+
+impl std::error::Error for MalformedEncoding {}
+
 /// Percent-decode a query or form component, treating `+` as a space.
 ///
-/// Invalid escapes are kept literally; invalid UTF-8 is replaced. Both are
-/// the lenient behaviour of the framework the Python runs on.
-#[must_use]
-pub fn percent_decode(text: &str) -> String {
+/// # Errors
+///
+/// [`MalformedEncoding`] for a `%` that is not followed by two hex digits, or
+/// for bytes that are not UTF-8 once decoded. Neither is kept literally or
+/// replaced with U+FFFD: malformed input is refused, not repaired
+/// (`rust-checked-arithmetic` RCA-IN-2; `spec/20-lookup-service.md` §4.3).
+///
+/// # Examples
+///
+/// ```
+/// use lookup_service::form::percent_decode;
+///
+/// assert_eq!(percent_decode("a%20b+c").as_deref(), Ok("a b c"));
+/// assert!(percent_decode("100%").is_err());
+/// assert!(percent_decode("%zz").is_err());
+/// assert!(percent_decode("%FF").is_err(), "not UTF-8");
+/// ```
+pub fn percent_decode(text: &str) -> Result<String, MalformedEncoding> {
     let mut out = Vec::with_capacity(text.len());
     let mut rest = text.as_bytes();
     while let Some((&byte, tail)) = rest.split_first() {
@@ -20,17 +49,16 @@ pub fn percent_decode(text: &str) -> String {
         match byte {
             b'+' => out.push(b' '),
             b'%' => match tail {
-                // Two hex digits make one byte; anything else keeps the `%`.
                 [high, low, after @ ..] if let Some(decoded) = escaped(*high, *low) => {
                     out.push(decoded);
                     rest = after;
                 }
-                _ => out.push(byte),
+                _ => return Err(MalformedEncoding),
             },
             byte => out.push(byte),
         }
     }
-    String::from_utf8_lossy(&out).into_owned()
+    String::from_utf8(out).map_err(|_| MalformedEncoding)
 }
 
 /// The byte `%<high><low>` stands for, when both are hex digits.
@@ -76,14 +104,17 @@ pub fn percent_encode(text: &str) -> String {
 }
 
 /// `a=1&b=2` as ordered pairs, repeats kept.
-#[must_use]
-pub fn parse_pairs(query: &str) -> Vec<(String, String)> {
+///
+/// # Errors
+///
+/// [`MalformedEncoding`] if any name or value is not valid percent-encoding.
+pub fn parse_pairs(query: &str) -> Result<Vec<(String, String)>, MalformedEncoding> {
     query
         .split('&')
         .filter(|pair| !pair.is_empty())
         .map(|pair| {
             let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
-            (percent_decode(name), percent_decode(value))
+            Ok((percent_decode(name)?, percent_decode(value)?))
         })
         .collect()
 }

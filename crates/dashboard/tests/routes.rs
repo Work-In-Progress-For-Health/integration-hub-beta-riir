@@ -453,29 +453,38 @@ async fn the_throughput_window_is_bounded() {
         "6h"
     );
 
-    // Clamped, not rejected: a page with a silly value still renders.
+    // The edges are valid; anything outside them is refused naming `hours`
+    // and its range, never moved to the nearest bound (§2.3.3, RCA-IN-2).
     assert_eq!(
-        app.json("/api/hl7-throughput?hours=999999").await["timespan"],
+        app.json("/api/hl7-throughput?hours=720").await["timespan"],
         "720h"
     );
     assert_eq!(
-        app.json("/api/hl7-throughput?hours=0").await["timespan"],
+        app.json("/api/hl7-throughput?hours=1").await["timespan"],
         "1h"
     );
+    for hours in ["999999", "721", "0", "-1", ""] {
+        let (status, body) = app.get(&format!("/api/hl7-throughput?hours={hours}")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "hours={hours:?}");
+        assert!(
+            body.contains("hours must be a whole number from 1 to 720"),
+            "{body}"
+        );
+    }
 }
 
 #[tokio::test]
-async fn a_nonsense_query_string_does_not_fail_the_page() {
-    // A bookmarked URL from an older version, or a hand-typed one. §1.2
-    // means this is a page, not a 400.
+async fn a_nonsense_hours_is_refused_and_does_not_fall_back_to_the_default() {
+    // §2.3.3, RCA-IN-2: a supplied `hours` that is not a number is a client
+    // error naming it. Only an *absent* `hours` takes the default.
     let app = app_with(Live);
 
-    let (status, _) = app.get("/api/hl7-throughput?hours=banana").await;
-    assert_eq!(
-        status,
-        StatusCode::OK,
-        "an unparseable `hours` should fall back to the default"
-    );
+    let (status, body) = app.get("/api/hl7-throughput?hours=banana").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.contains("hours"), "{body}");
+
+    let (status, _) = app.get("/api/hl7-throughput").await;
+    assert_eq!(status, StatusCode::OK, "absent takes the default");
 }
 
 #[tokio::test]

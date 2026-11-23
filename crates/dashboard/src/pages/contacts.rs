@@ -68,11 +68,11 @@ pub struct ListParams {
     /// A flow id.
     #[serde(default)]
     pub flow: Option<String>,
-    /// 1-based. Text, because `page=abc` is page 1 and not a rejected
-    /// request (upstream's behaviour).
+    /// 1-based. Text, so that `page=abc` reaches the handler and is refused
+    /// there with a message naming `page` (`§10.3.5`), not by the extractor.
     #[serde(default)]
     pub page: Option<String>,
-    /// Page size.
+    /// Page size, a whole number of at least 1.
     #[serde(default)]
     pub per_page: Option<String>,
     /// `false` to hide soft-deleted contacts.
@@ -81,11 +81,18 @@ pub struct ListParams {
 }
 
 impl ListParams {
-    fn query(&self) -> ContactQuery {
-        let number = |text: &Option<String>, default: usize| {
-            text.as_deref()
-                .and_then(|t| t.trim().parse::<usize>().ok())
-                .map_or(default, |n| n.max(1))
+    /// The query, or the name of the parameter that is not a whole number of
+    /// at least 1. Absent takes its default; one that is supplied and invalid
+    /// (empty, text, `0`) is refused, never replaced (RCA-IN-2, RCA-IN-3).
+    fn query(&self) -> Result<ContactQuery, &'static str> {
+        let number = |text: &Option<String>, default: usize, name: &'static str| match text {
+            None => Ok(default),
+            Some(text) => text
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .filter(|n| *n >= 1)
+                .ok_or(name),
         };
         let clean = |text: &Option<String>| {
             text.as_deref()
@@ -94,16 +101,26 @@ impl ListParams {
                 .map(ToString::to_string)
         };
 
-        ContactQuery {
+        Ok(ContactQuery {
             search: clean(&self.q),
             flow_id: clean(&self.flow),
-            page: number(&self.page, 1),
-            per_page: number(&self.per_page, DEFAULT_PAGE_SIZE),
+            page: number(&self.page, 1, "page")?,
+            per_page: number(&self.per_page, DEFAULT_PAGE_SIZE, "per_page")?,
             include_deleted: !self
                 .include_deleted
                 .as_deref()
                 .is_some_and(|v| v.eq_ignore_ascii_case("false")),
-        }
+        })
+    }
+
+    /// The query, or a `400` naming the parameter and its valid range.
+    fn query_or_refusal(&self) -> Result<ContactQuery, Box<Response>> {
+        self.query().map_err(|name| {
+            Box::new(error_json(
+                StatusCode::BAD_REQUEST,
+                &format!("{name} must be a whole number of at least 1"),
+            ))
+        })
     }
 }
 
@@ -172,13 +189,16 @@ async fn contacts_page<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Query(params): Query<ListParams>,
 ) -> Response {
+    let query = match params.query_or_refusal() {
+        Ok(query) => query,
+        Err(refusal) => return *refusal,
+    };
     purge_if_due(&state).await;
 
     let (all, unavailable) = match contacts::list_all(&state.alarms).await {
         Ok(all) => (all, false),
         Err(_) => (Vec::new(), true),
     };
-    let query = params.query();
     let (selected, total) = contacts::select(all, &query);
     let pages = total.div_ceil(query.per_page).max(1);
 
@@ -214,11 +234,14 @@ async fn api_list<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Query(params): Query<ListParams>,
 ) -> Response {
+    let query = match params.query_or_refusal() {
+        Ok(query) => query,
+        Err(refusal) => return *refusal,
+    };
     let all = match contacts::list_all(&state.alarms).await {
         Ok(all) => all,
         Err(error) => return failure(&error),
     };
-    let query = params.query();
     let (page_of_contacts, total) = contacts::select(all, &query);
 
     Json(serde_json::json!({

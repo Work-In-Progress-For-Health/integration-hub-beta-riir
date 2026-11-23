@@ -143,7 +143,13 @@ renders as an empty chart with no error in the console.
 
 §2.3.3 Both take `hours`, and the series are **zero-filled** across the
 window so a gap draws as zero rather than as a straight line between two
-distant points.
+distant points. **`hours` is validated, not bounded:** absent is 24; supplied, it
+must be a whole number from 1 to 720 (30 days), else `400` with
+`hours must be a whole number from 1 to 720`. An empty, non-numeric, zero or
+over-large value is **not** moved to the nearest bound or to 24
+(`rust-checked-arithmetic` RCA-IN-2, RCA-IN-3). This replaces the Flask
+behaviour (clamp to 1 ..= 720, unparseable is 24), which hid a caller's
+mistake; the 720 is kept because `hours` reaches a KQL `ago({hours}h)` (§4.4).
 
 §2.3.4 `/api/container-app/{name}/history` — note the shape. It is not
 `/api/container-app-history/{name}`; `app-history.js` fetches
@@ -606,11 +612,10 @@ is not expired and a pause is not purged; an ACS back-off that cannot be
 computed **gives up** instead of inventing a ceiling; a token that lives no
 longer than its refresh margin is usable for zero time (§4.6.3), and a
 lifetime `Instant` cannot hold is an invalid response; a KQL `Total` that is
-missing or not a whole number leaves its row out (never `0`). **Not changed,
-needs a decision** (rejection currently becomes a substitute, RCA-IN-2):
-`page=0` and `per_page=0` read as 1 (`contacts.rs`), the throughput-hours query
-is clamped (`web.rs`), and `NETWORK_TEST_ATTEMPTS=0` reads as 1
-(`network_test.rs`).
+missing or not a whole number leaves its row out (never `0`). **Rejections that
+used to be substitutions** are now errors: `page`, `per_page` (§10.3.5) and
+`hours` (§2.3.3) are refused with a `400`; the network test's attempt count is
+`NonZeroUsize`, so `0` cannot be written down and is never read as 1 (§10.4.1).
 
 ---
 
@@ -988,8 +993,12 @@ breaks the page.
 §10.3.5 **List.** `GET /api/contacts?q=&flow=&page=&per_page=&include_deleted=`
 returns `{contacts, total, page, per_page}`. `q` is a case-insensitive
 substring over names, e-mail, phone, organisation name and type. Sorted by
-last name then first name, case-insensitively. `page` and `per_page` below 1
-are 1; `per_page` defaults to 25. `include_deleted` defaults to **true**.
+last name then first name, case-insensitively. `page` (default 1) and
+`per_page` (default 25) must each be a whole number of at least 1 when
+supplied; an empty, non-numeric, `0` or negative value is a `400` naming the
+parameter (`page must be a whole number of at least 1`), on both `/contacts` and
+`/api/contacts`. It is **not** read as 1 (the Flask behaviour this replaces:
+`page=abc` was page 1, RCA-IN-2). `include_deleted` defaults to **true**.
 
 §10.3.6 **Import.** `POST /api/contacts/import` takes a CSV. Required columns
 `first_name`, `last_name`, `organisation_type`, `organisation_name`; optional

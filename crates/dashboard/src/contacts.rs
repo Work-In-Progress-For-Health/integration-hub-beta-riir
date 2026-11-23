@@ -414,7 +414,7 @@ pub struct Query {
     pub flow_id: Option<String>,
     /// 1-based.
     pub page: usize,
-    /// At least 1.
+    /// At least 1 (refused at the boundary otherwise).
     pub per_page: usize,
     /// Whether soft-deleted contacts are included.
     pub include_deleted: bool,
@@ -450,12 +450,13 @@ pub fn select(mut contacts: Vec<Contact>, query: &Query) -> (Vec<Contact>, usize
     contacts.sort_by_key(|c| (c.last_name.to_lowercase(), c.first_name.to_lowercase()));
 
     let total = contacts.len();
-    let per_page = query.per_page.max(1);
+    // `page` and `per_page` are at least 1: the handlers refuse anything else
+    // at the boundary (`§10.3.5`, RCA-IN-1), so nothing is clamped here.
+    let per_page = query.per_page;
     // A page whose offset overflows is past the end of any list, and `skip`
     // of `usize::MAX` is exactly that: empty (`§7`).
     let start = query
         .page
-        .max(1)
         .checked_sub(1)
         .and_then(|before| before.checked_mul(per_page))
         .unwrap_or(usize::MAX); // §7
@@ -1186,15 +1187,18 @@ mod tests {
         );
         assert_eq!((second.len(), total), (1, 3));
 
-        let (clamped, _) = select(
+        // Not clamped to 1: the handlers refuse page and per_page below 1
+        // (tests/contacts.rs), so `select` is never asked, and a page 0 is
+        // simply before the first and holds nothing.
+        let (before_first, _) = select(
             all,
             &Query {
-                per_page: 0,
+                per_page: 2,
                 page: 0,
                 ..Query::default()
             },
         );
-        assert_eq!(clamped.len(), 1, "page and per_page below 1 are 1");
+        assert!(before_first.is_empty());
     }
 
     #[tokio::test]

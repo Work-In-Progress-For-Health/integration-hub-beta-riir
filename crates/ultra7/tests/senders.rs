@@ -430,3 +430,76 @@ fn destination_text() {
     );
     assert_eq!(describe_destination(&rest("not a url")), "not a url");
 }
+
+/// `spec/ultra7-test-message-sender.md` §4.2, RCA-IN-2: an iteration that
+/// cannot be applied is a failed send, named, and nothing is sent.
+#[test]
+fn an_iteration_that_cannot_be_applied_fails_the_send_and_sends_nothing() {
+    let mut message = Message::new("stale", MessageFormat::Hl7, "MSH|1");
+    message.iteration = Some(IterationSpec::new(40, 50, IterationMode::Increment));
+    let p = Project::new("p");
+    let sent = Mutex::new(0_usize);
+    let mut results = Vec::new();
+    let summary = send_messages(
+        &p.endpoint,
+        &[&message],
+        2,
+        0,
+        &AtomicBool::new(false),
+        &|_, _| {
+            *sent.lock().unwrap() += 1;
+            ok_result()
+        },
+        &mut |event| {
+            if let Event::Result(label, result) = event {
+                results.push((label.to_string(), result.error.clone()));
+            }
+        },
+    );
+    assert_eq!((summary.sent, summary.failed), (2, 2));
+    assert_eq!(*sent.lock().unwrap(), 0, "nothing was sent");
+    assert_eq!(results[0].0, "stale [1/2]");
+    assert_eq!(
+        results[0].1.as_deref(),
+        Some("the iteration range is outside the message")
+    );
+}
+
+/// RCA-IN-6: a damaged chunked reply is "Malformed HTTP response", not read as
+/// far as it goes.
+#[test]
+fn a_damaged_chunked_reply_is_malformed_not_read_leniently() {
+    for reply in [
+        // A chunk that runs past the data (and a size that would overflow).
+        &b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffff\r\nabc"[..],
+        // A size line that is not hex.
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nabc\r\n0\r\n\r\n",
+        // No terminating zero chunk.
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n",
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let bytes = reply.to_vec();
+        thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut chunk = [0_u8; 4096];
+            let _ = conn.read(&mut chunk);
+            conn.write_all(&bytes).unwrap();
+            // Close our side cleanly, then drain what the client is still
+            // sending: closing with unread data resets the connection and the
+            // client would see that instead of the reply.
+            let _ = conn.shutdown(std::net::Shutdown::Write);
+            let mut rest = Vec::new();
+            let _ = conn.read_to_end(&mut rest);
+        });
+        let e = Endpoint {
+            kind: EndpointKind::Rest,
+            url: format!("http://127.0.0.1:{port}/"),
+            timeout_seconds: 2.0,
+            ..Endpoint::default()
+        };
+        let r = send_rest(&e, &Message::new("m", MessageFormat::Json, "{}"));
+        assert!(!r.ok);
+        assert_eq!(r.error.as_deref(), Some("Malformed HTTP response"));
+    }
+}

@@ -1213,8 +1213,23 @@ mod jwks {
              "n": URL_SAFE_NO_PAD.encode(&components.n),
              "e": URL_SAFE_NO_PAD.encode(&components.e)},
             {"kty": "EC", "kid": "ec"},
-            {"kty": "RSA", "kid": "broken", "n": "!!", "e": "AQAB"},
         ]})
+    }
+
+    /// RCA-IN-6, `spec/20-lookup-service.md` §12.2a: an RSA key that is
+    /// malformed makes the whole document unavailable. It is not skipped
+    /// quietly, and the good key beside it is not trusted either.
+    #[test]
+    fn a_malformed_rsa_key_makes_the_key_set_unavailable() {
+        let mut set = key_set();
+        set["keys"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"kty": "RSA", "kid": "broken", "n": "!!", "e": "AQAB"}));
+        let (url, _) = serve(vec![ok(&set)]);
+        let keys = JwksKeys::at(url);
+        assert!(keys.signing_key("k1").is_err());
+        assert!(keys.signing_key("broken").is_err());
     }
 
     #[test]

@@ -102,32 +102,7 @@ impl JwksKeys {
             tracing::error!(reason, "Could not fetch the token signing keys");
             KeysError::Unavailable
         })?;
-        let document: Value = serde_json::from_slice(&body).map_err(|_| KeysError::Unavailable)?;
-        let mut keys = HashMap::new();
-        for jwk in document
-            .get("keys")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let field = |name: &str| {
-                jwk.get(name)
-                    .and_then(Value::as_str)
-                    .and_then(|v| URL_SAFE_NO_PAD.decode(v.trim_end_matches('=')).ok())
-            };
-            if jwk.get("kty").and_then(Value::as_str) != Some("RSA") {
-                continue;
-            }
-            if let (Some(kid), Some(n), Some(e)) = (
-                jwk.get("kid").and_then(Value::as_str),
-                field("n"),
-                field("e"),
-            ) && let Some(der) = rsa_public_key_der(&n, &e)
-            {
-                keys.insert(kid.to_owned(), der);
-            }
-        }
-        Ok(keys)
+        parse_keys(&body)
     }
 
     /// One `GET`, returning the body of a `200`.
@@ -253,6 +228,48 @@ fn dechunk(body: &[u8]) -> Result<Vec<u8>, &'static str> {
     }
 }
 
+/// The RSA signing keys in a JWKS document, by `kid`.
+///
+/// A key that is not RSA is not ours and is skipped. An RSA key whose `kid`,
+/// `n` or `e` is missing or is not base64url is **corrupt data from the key
+/// host** (RCA-IN-6): the whole fetch is an error, reported with a fixed
+/// phrase and nothing from the document, and no key from it is trusted. It is
+/// not skipped quietly, which would leave tokens failing for a reason nobody
+/// can see (`spec/20-lookup-service.md` §12.2a).
+fn parse_keys(body: &[u8]) -> Result<HashMap<String, Vec<u8>>, KeysError> {
+    let document: Value = serde_json::from_slice(body).map_err(|_| KeysError::Unavailable)?;
+    let mut keys = HashMap::new();
+    for jwk in document
+        .get("keys")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if jwk.get("kty").and_then(Value::as_str) != Some("RSA") {
+            continue;
+        }
+        let field = |name: &str| {
+            jwk.get(name)
+                .and_then(Value::as_str)
+                .and_then(|v| URL_SAFE_NO_PAD.decode(v.trim_end_matches('=')).ok())
+        };
+        let der = match (
+            jwk.get("kid").and_then(Value::as_str),
+            field("n"),
+            field("e"),
+        ) {
+            (Some(kid), Some(n), Some(e)) => rsa_public_key_der(&n, &e).map(|der| (kid, der)),
+            _ => None,
+        };
+        let Some((kid, der)) = der else {
+            tracing::error!("The token signing key document holds a malformed RSA key");
+            return Err(KeysError::Unavailable);
+        };
+        keys.insert(kid.to_owned(), der);
+    }
+    Ok(keys)
+}
+
 impl SigningKeys for JwksKeys {
     fn signing_key(&self, kid: &str) -> Result<Vec<u8>, KeysError> {
         // A poisoned lock means a fetch panicked; the cache is plain data,
@@ -349,5 +366,38 @@ mod tests {
             split_ok_body(b"HTTP/1.1 404 Not Found\r\n\r\nx"),
             Err("the key host did not answer 200")
         );
+    }
+
+    fn document(key: &str) -> Vec<u8> {
+        format!(r#"{{"keys":[{{"kty":"EC","kid":"ec"}},{key}]}}"#).into_bytes()
+    }
+
+    #[test]
+    fn rsa_keys_are_read_and_other_kinds_are_skipped() {
+        let keys = parse_keys(&document(
+            r#"{"kty":"RSA","kid":"k1","n":"gAE","e":"AQAB"}"#,
+        ));
+        assert!(keys.is_ok_and(|keys| keys.len() == 1 && keys.contains_key("k1")));
+    }
+
+    /// RCA-IN-6: a malformed RSA key is an error, never skipped quietly.
+    #[test]
+    fn a_malformed_rsa_key_fails_the_whole_document() {
+        for key in [
+            r#"{"kty":"RSA","n":"gAE","e":"AQAB"}"#,
+            r#"{"kty":"RSA","kid":"k","e":"AQAB"}"#,
+            r#"{"kty":"RSA","kid":"k","n":"gAE"}"#,
+            r#"{"kty":"RSA","kid":"k","n":"!!!","e":"AQAB"}"#,
+            r#"{"kty":"RSA","kid":7,"n":"gAE","e":"AQAB"}"#,
+        ] {
+            assert!(
+                matches!(parse_keys(&document(key)), Err(KeysError::Unavailable)),
+                "{key}"
+            );
+        }
+        assert!(matches!(
+            parse_keys(b"not json"),
+            Err(KeysError::Unavailable)
+        ));
     }
 }

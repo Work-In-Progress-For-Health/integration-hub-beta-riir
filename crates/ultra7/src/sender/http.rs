@@ -187,39 +187,32 @@ fn parse_response(raw: &[u8]) -> Option<(u16, String)> {
         l.starts_with("transfer-encoding:") && l.contains("chunked")
     });
     let bytes = if chunked {
-        dechunk(body)
+        dechunk(body)?
     } else {
         body.to_vec()
     };
     Some((status, String::from_utf8_lossy(&bytes).into_owned()))
 }
 
-/// Decode a `Transfer-Encoding: chunked` body; stops quietly on damage.
-///
-/// Lenient on purpose: a truncated final chunk yields what arrived, since
-/// the tool exists to show a misbehaving receiver's reply, not reject it.
-fn dechunk(mut body: &[u8]) -> Vec<u8> {
+/// Decode a `Transfer-Encoding: chunked` body, or `None` if it is damaged: a
+/// bad size line, a chunk that runs past the data, or a missing terminator.
+/// The caller reports "Malformed HTTP response"; it is not read leniently
+/// (`rust-checked-arithmetic` RCA-IN-6, `spec/ultra7-test-message-sender.md`
+/// §7.4). The chunk size is read off the network and never added to.
+fn dechunk(mut body: &[u8]) -> Option<Vec<u8>> {
     let mut out = Vec::new();
-    while let Some((size_line, after_line)) = split_at_needle(body, b"\r\n") {
+    loop {
+        let (size_line, after_line) = split_at_needle(body, b"\r\n")?;
         let size_text = String::from_utf8_lossy(size_line);
-        let Ok(size) = usize::from_str_radix(size_text.split(';').next().unwrap_or("").trim(), 16)
-        else {
-            break;
-        };
-        body = after_line;
-        if size == 0 || body.len() < size {
-            if size != 0 {
-                out.extend_from_slice(body);
-            }
-            break;
+        let size =
+            usize::from_str_radix(size_text.split(';').next().unwrap_or("").trim(), 16).ok()?;
+        if size == 0 {
+            return Some(out);
         }
-        let Some((chunk, tail)) = body.split_at_checked(size) else {
-            break;
-        };
+        let (chunk, tail) = after_line.split_at_checked(size)?;
         out.extend_from_slice(chunk);
-        body = tail.get(2..).unwrap_or(&[]);
+        body = tail.strip_prefix(b"\r\n")?;
     }
-    out
 }
 
 /// The endpoint's headers plus a default that the endpoint may override.

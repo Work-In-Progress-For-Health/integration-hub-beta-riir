@@ -78,21 +78,23 @@ characters, not bytes, as the Python's, so a project file means the same in
 both tools.
 
 §4.2 `apply_iteration(content, spec, index)` (`index` 0-based) returns
-`content` unchanged when the range is not `0 <= start < end <= len`.
-(A stale range in a hand-edited project file must not stop a run; this is a
-fallback for invalid input, `rust-checked-arithmetic` RCA-DECL-6, kept because
-Ultra7 is a tool for sending broken messages on purpose. **Raised for a
-decision**; see `docs/checked-arithmetic-audit.md`.) The `increment` arithmetic
-is checked in `i128`: a result that does not fit leaves the original unchanged,
-as a non-integer original does, and is never saturated.
-Otherwise it replaces the range:
+`Result<String, IterationError>`. **It refuses; it does not send the message as
+it was.** The error is `RangeOutOfBounds` when the range is not
+`0 <= start < end <= len` (a stale range in a hand-edited project file),
+`NotAnInteger`, `ValueOutOfRange` or `NoValues`, below. In a run (§8.2) the
+message is a **failed send** with that text, counted in `Summary::failed`, and
+**nothing is sent**: a message that is not the one the project describes is not
+a test of it. (The Python sent the content unchanged; that was a fallback for
+invalid input, `rust-checked-arithmetic` RCA-DECL-6 and RCA-IN-2, and is
+replaced.) Otherwise it replaces the range:
 
 - `increment`: parse the original as an integer (surrounding whitespace
-  allowed); not an integer leaves it unchanged. The value is
-  `base + step * index`; a non-negative value is zero-padded to `pad_width`,
-  or to the original's length when `pad_width` is 0; a negative value is not
-  padded.
-- `list`: `values[index % len]`; an empty list leaves it unchanged.
+  allowed); not an integer is `NotAnInteger`. The value is
+  `base + step * index`, **checked in `i128`**: a result that does not fit is
+  `ValueOutOfRange`, never saturated. A non-negative value is zero-padded to
+  `pad_width`, or to the original's length when `pad_width` is 0; a negative
+  value is not padded.
+- `list`: `values[index % len]`; an empty list is `NoValues`.
 - `timestamp`: the current local time rendered with `timestamp_format`, a
   `strftime` subset (§4.3).
 
@@ -153,6 +155,12 @@ Success is a 2xx status (`HTTP <status>: <body>`); another status is
 the first 200 characters already contain `Envelope`, `Content-Type`
 `text/xml; charset=utf-8`, and `SOAPAction` set from the endpoint when
 non-empty. Endpoint headers win over the defaults.
+
+§7.4a **A damaged chunked reply is a malformed reply.** A bad size line, a
+chunk that runs past the data, a missing CRLF after a chunk, or no terminating
+zero chunk makes the send fail with `Malformed HTTP response`. The Python read
+as far as the damage and showed that; it is not read leniently now (RCA-IN-6).
+A chunk size is read off the network and never added to.
 
 §7.5 **Deviation: no `https`.** The Python uses `urllib`; this crate speaks
 HTTP/1.1 over a plain `std` socket so a developer tool does not pull a TLS

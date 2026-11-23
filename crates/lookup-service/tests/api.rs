@@ -43,6 +43,27 @@ mod lookup {
         );
     }
 
+    /// `spec/20-lookup-service.md` §4.3, RCA-IN-2: a query that is not valid
+    /// percent-encoding is a 422 (`invalid_request`), not a lookup of a repaired key.
+    #[tokio::test]
+    async fn a_malformed_query_is_refused_not_repaired() {
+        let app = read_only().await;
+        for path in [
+            "/api/v1/lookup/health_board_mapping?k=22%",
+            "/api/v1/lookup/health_board_mapping?k=%zz",
+            "/api/v1/lookup/health_board_mapping?k=%FF",
+        ] {
+            let reply = get(&app.router, path).await;
+            assert_eq!(reply.status, 422, "{path}");
+            assert!(
+                reply.body.contains("not valid percent-encoding"),
+                "{path}: {}",
+                reply.body
+            );
+            assert!(!reply.body.contains("%zz"), "the input is not echoed");
+        }
+    }
+
     #[tokio::test]
     async fn composite_key_positional() {
         let app = read_only().await;

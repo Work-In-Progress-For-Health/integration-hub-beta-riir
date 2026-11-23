@@ -100,6 +100,12 @@ pub struct LookupError {
     pub bearer_challenge: bool,
 }
 
+impl From<crate::form::MalformedEncoding> for LookupError {
+    fn from(error: crate::form::MalformedEncoding) -> Self {
+        Self::invalid_request(error.to_string())
+    }
+}
+
 impl LookupError {
     /// An error with no table and no problem list.
     #[must_use]

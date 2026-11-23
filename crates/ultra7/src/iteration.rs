@@ -8,30 +8,70 @@ use time::OffsetDateTime;
 
 use crate::model::{IterationMode, IterationSpec};
 
+/// Why an iteration could not be applied. Carries no content: a message under
+/// test can hold anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IterationError {
+    /// The range is empty, inverted, or runs past the message (`§4.1`).
+    RangeOutOfBounds,
+    /// Increment mode, and the text in the range is not an integer.
+    NotAnInteger,
+    /// Increment mode, and the new value does not fit (`§4.2`).
+    ValueOutOfRange,
+    /// List mode, and there are no values to cycle through.
+    NoValues,
+}
+
+impl std::fmt::Display for IterationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::RangeOutOfBounds => "the iteration range is outside the message",
+            Self::NotAnInteger => "the iteration range does not hold an integer",
+            Self::ValueOutOfRange => "the incremented value is out of range",
+            Self::NoValues => "the iteration list has no values",
+        })
+    }
+}
+
+impl std::error::Error for IterationError {}
+
 /// `content` with the spec's range recomputed for send `index` (0-based),
 /// using the current local time for timestamp mode (`§4.2`).
 ///
 /// Local time falls back to UTC when the offset cannot be determined
 /// (`§4.3`); `OffsetDateTime::now_local` refuses on some multi-threaded Unix
 /// builds, so this is not a rare case.
-#[must_use]
-pub fn apply_iteration(content: &str, spec: &IterationSpec, index: usize) -> String {
+///
+/// # Errors
+///
+/// [`IterationError`], as [`apply_iteration_at`].
+pub fn apply_iteration(
+    content: &str,
+    spec: &IterationSpec,
+    index: usize,
+) -> Result<String, IterationError> {
     let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
     apply_iteration_at(content, spec, index, now)
 }
 
 /// As [`apply_iteration`] with the clock supplied, so tests are exact.
 ///
-/// Offsets are characters, not bytes (`§4.1`); an out-of-range or inverted
-/// range returns `content` untouched rather than failing, because a stale
-/// range in a hand-edited project file should not stop a test run.
-#[must_use]
+/// Offsets are characters, not bytes (`§4.1`).
+///
+/// # Errors
+///
+/// [`IterationError`] for an out-of-range or inverted range, an increment
+/// whose text is not an integer or whose result does not fit, and a list with
+/// no values. None of them returns the content unchanged: a stale range in a
+/// hand-edited project file is refused, so a run does not send a message that
+/// is not the one the project describes (`rust-checked-arithmetic` RCA-DECL-6,
+/// RCA-IN-2; `spec/ultra7-test-message-sender.md` §4.2).
 pub fn apply_iteration_at(
     content: &str,
     spec: &IterationSpec,
     index: usize,
     now: OffsetDateTime,
-) -> String {
+) -> Result<String, IterationError> {
     let chars: Vec<char> = content.chars().collect();
     let (true, Some(before), Some(selected), Some(after)) = (
         spec.start < spec.end,
@@ -39,63 +79,57 @@ pub fn apply_iteration_at(
         chars.get(spec.start..spec.end),
         chars.get(spec.end..),
     ) else {
-        // The stale-range rule above (`§4.1`); see the audit's decisions.
-        return content.to_owned();
+        return Err(IterationError::RangeOutOfBounds);
     };
     let original: String = selected.iter().collect();
-    let replacement = compute_value(&original, spec, index, now);
+    let replacement = compute_value(&original, spec, index, now)?;
     let mut out: String = before.iter().collect();
     out.push_str(&replacement);
     out.extend(after);
-    out
+    Ok(out)
 }
 
 /// The replacement text for `original` (`§4.2`).
 ///
 /// Increment arithmetic is done in `i128`, checked, so a hostile `step` in a
 /// hand-edited project file cannot panic on overflow; a result that does not
-/// fit leaves the original unchanged. A negative result is not padded, because a leading
-/// zero before the sign would be meaningless. A non-integer original is
-/// returned unchanged, as the Python does.
+/// fit is an error. A negative result is not padded, because a leading zero
+/// before the sign would be meaningless.
 fn compute_value(
     original: &str,
     spec: &IterationSpec,
     index: usize,
     now: OffsetDateTime,
-) -> String {
+) -> Result<String, IterationError> {
     match spec.mode {
         IterationMode::Increment => {
-            let Ok(base) = original.trim().parse::<i128>() else {
-                return original.to_owned();
-            };
-            // A value that does not fit is returned unchanged, as a
-            // non-integer original is: nothing is saturated or invented.
-            let Some(value) = i128::try_from(index)
+            let base = original
+                .trim()
+                .parse::<i128>()
+                .map_err(|_| IterationError::NotAnInteger)?;
+            let value = i128::try_from(index)
                 .ok()
                 .and_then(|index| i128::from(spec.step).checked_mul(index))
                 .and_then(|offset| base.checked_add(offset))
-            else {
-                return original.to_owned();
-            };
+                .ok_or(IterationError::ValueOutOfRange)?;
             let width = if spec.pad_width == 0 {
                 original.chars().count()
             } else {
                 spec.pad_width
             };
-            if value >= 0 {
+            Ok(if value >= 0 {
                 format!("{value:0>width$}")
             } else {
                 value.to_string()
-            }
+            })
         }
-        IterationMode::List => {
-            // An empty list has no remainder: the original stays.
-            index
-                .checked_rem(spec.values.len())
-                .and_then(|slot| spec.values.get(slot))
-                .map_or_else(|| original.to_owned(), Clone::clone)
-        }
-        IterationMode::Timestamp => strftime(&spec.timestamp_format, now),
+        // An empty list has no remainder and so no value.
+        IterationMode::List => index
+            .checked_rem(spec.values.len())
+            .and_then(|slot| spec.values.get(slot))
+            .cloned()
+            .ok_or(IterationError::NoValues),
+        IterationMode::Timestamp => Ok(strftime(&spec.timestamp_format, now)),
     }
 }
 

@@ -30,6 +30,19 @@ pub struct Summary {
     pub cancelled: bool,
 }
 
+/// `message` as it is sent on repeat `repeat` (0-based): with its iteration
+/// applied, or the reason it cannot be.
+fn prepare(message: &Message, repeat: u32) -> Result<Message, String> {
+    let mut outgoing = message.clone();
+    if let Some(spec) = &message.iteration {
+        let index =
+            usize::try_from(repeat).map_err(|_| "the repeat number is out of range".to_string())?;
+        outgoing.content =
+            apply_iteration(&message.content, spec, index).map_err(|error| error.to_string())?;
+    }
+    Ok(outgoing)
+}
+
 /// One more than `count`, holding at `usize::MAX` (a tally for the summary;
 /// a run that long does not finish).
 const fn tally(count: usize) -> usize {
@@ -88,17 +101,16 @@ pub fn send_messages(
                 summary.cancelled = true;
                 return summary;
             }
-            let mut outgoing = (*message).clone();
-            if let Some(spec) = &message.iteration {
-                let Ok(index) = usize::try_from(repeat) else {
-                    summary.cancelled = true;
-                    return summary;
-                };
-                outgoing.content = apply_iteration(&message.content, spec, index);
-            }
             let label = format!("{} [{}/{}]", message.name, ordinal, repeat_count);
-            sink(Event::Info(format!("Sending {label} to {destination}")));
-            let result = sender(endpoint, &outgoing);
+            // A message the iteration cannot be applied to is a failed send,
+            // named and counted, and nothing is sent (RCA-IN-2).
+            let result = match prepare(message, repeat) {
+                Ok(outgoing) => {
+                    sink(Event::Info(format!("Sending {label} to {destination}")));
+                    sender(endpoint, &outgoing)
+                }
+                Err(reason) => SendResult::failure(0.0, String::new(), reason),
+            };
             sink(Event::Result(&label, &result));
             summary.sent = tally(summary.sent);
             if !result.ok {

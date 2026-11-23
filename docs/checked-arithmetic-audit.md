@@ -55,8 +55,7 @@ more), `ihb-bus` (tokens and sent-counts refuse at 2^64 instead of wrapping), `h
 on 400,000 generated texts), `ihb-validation` (`drop_empty_elements` compared with the offset version on 400,000
 generated texts; `insertion_point` counts from the end instead of `+ 1`), `hl7-pims-transformer` (a network-supplied chunk size was added to unchecked, as in
 `lookup-service`; the retry back-off now ends retrying instead of saturating), `hl7-soap-server` (`payload::extract` on `get`/`checked_*`; compared with the
-offset version on 800,000 generated texts), `ultra7` (its stale-range and lenient-chunk fallbacks are kept and listed under
-decisions below), `dashboard` (§7.4 of its spec; 32 findings and the saturating/clamp uses
+offset version on 800,000 generated texts), `ultra7` (its stale-range and lenient-chunk fallbacks are now refusals), `dashboard` (§7.4 of its spec; 32 findings and the saturating/clamp uses
 except the three decisions listed there), `lookup-service` (denied at the crate root; `jwks.rs` had a network-reachable
 overflow in the chunk-size arithmetic, fixed with tests) and `db-sender` (denied at the crate root; `sanitize.rs` rewritten on remainder
 slices, `msh.rs` salvage dropped, spec/10 §7.4 and §7.5).
@@ -73,24 +72,30 @@ code (2026-11-22):
 | `hl7-pims-transformer/src/reference_data.rs:504` | `2_u32.saturating_pow(retry - 1)` | done: `backoff_before` is `Option`, retrying ends |
 | `ultra7/src/iteration.rs:65-66` | `saturating_mul`, `saturating_add`, `try_from(..).unwrap_or(0)` | done: checked, original unchanged on overflow |
 | `hl7-rest-server/src/http.rs:120` | `limit.saturating_mul(6).saturating_add(1024)` | checked, refuse on overflow |
-| `dashboard/src/contacts.rs:454` | `(page.max(1) - 1).saturating_mul(per_page)` | **decision**: `page=0` is invalid input (RCA-IN-2) |
+| `dashboard/src/contacts.rs:454` | `(page.max(1) - 1).saturating_mul(per_page)` | done: `page=0` is a `400` |
 | `dashboard/src/azure/token.rs:195` | `Instant::now() + expires_in.saturating_sub(..)` | `checked_*`, declared fallback |
-| `dashboard/src/web.rs:444` | `.clamp(1, MAX_THROUGHPUT_HOURS)` | **decision**: an out-of-range query parameter is an error |
+| `dashboard/src/web.rs:444` | `.clamp(1, MAX_THROUGHPUT_HOURS)` | done: an out-of-range `hours` is a `400` |
 | `ihb-sender/src/main_loop.rs:85`, `throttle.rs:158` | `saturating_sub` | declared floor, or error (`throttle.rs:166` clamp done) |
 | `dashboard/src/azure/email.rs:164` | `backoff * 2_u32.saturating_pow(attempt)` | declared ceiling |
 | `hl7-server/src/listener.rs:199` | `len().saturating_sub(buffered())` | done: `checked_sub`, the connection closes on divergence |
 | `lookup-service/src/security.rs:753` | `len().saturating_sub(1)` | done: `der_integer` rewritten |
 
-## Decisions needed (rejection currently becomes a substitute, RCA-IN-2 / RCA-IN-7)
+## Decided and done: rejection no longer becomes a substitute (RCA-IN-2 / RCA-IN-7)
 
-Changing these alters behaviour, so they need a spec decision first and are
-**not** changed by the arithmetic pass:
+Approved by the user on 2026-11-23 ("fix & change"); each has its spec clause
+and a test that asserts the refusal. The tests that had asserted the old
+substitution were replaced, not edited to fit.
 
-- `ultra7/src/iteration.rs`, `ultra7/src/sender/http.rs`: an out-of-range iteration range
-  returns the content unchanged, and a damaged chunked reply is read leniently
-  (both on purpose for a tool that sends and reads broken messages; spec/ultra7 §4.2).
-- `lookup-service/src/pages.rs`: `extras.page.max(1)` turns page `0` into page 1.
-- `dashboard/src/contacts.rs`, `dashboard/src/web.rs`: as in the table above.
+- `dashboard`: `page`, `per_page` (spec/15 §10.3.5) and `hours` (§2.3.3) are
+  refused with a `400` naming the parameter; the network test's attempts are
+  `NonZeroUsize` (§10.4.1).
+- `lookup-service`: a query or form that is not valid percent-encoding is
+  `422 invalid_request` (spec/20 §4.3a); a malformed RSA key in the signing-key
+  document makes the fetch `Unavailable` (§12.2a); the table page's `page` is
+  no longer clamped (§9.1).
+- `ultra7`: an iteration that cannot be applied is a failed send, nothing is
+  sent (spec/ultra7 §4.2); a damaged chunked reply is `Malformed HTTP response`
+  (§7.4a).
 
 ## Plan (RCA-ENF-3: one module at a time, then deny at the crate root)
 

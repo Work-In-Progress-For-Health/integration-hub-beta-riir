@@ -23,7 +23,7 @@ use crate::admin::{
     update_table_settings,
 };
 use crate::error::{Kind, LookupError};
-use crate::form::{parse_pairs, percent_encode};
+use crate::form::{MalformedEncoding, parse_pairs, percent_encode};
 use crate::model::{CacheMode, Case, LookupResult, TableDetail, TableSummary};
 use crate::resolver::{LookupResolver, NAMED_KEY_PREFIX, named_key_params};
 use crate::security::{self, CSRF_FIELD_NAME, EDITOR_ROLES, Principal, ROLE_EDITOR};
@@ -373,7 +373,7 @@ async fn table_page<S: TableStore>(
     if !resolver.has_table(&table) {
         return Ok(not_found(&table, chrome));
     }
-    let pairs = parse_pairs(query.as_deref().unwrap_or_default());
+    let pairs = parse_pairs(query.as_deref().unwrap_or_default())?;
     let get_one = |name: &str| {
         pairs
             .iter()
@@ -454,7 +454,8 @@ async fn render_table<S: TableStore>(
 ) -> Result<Response, LookupError> {
     let detail: TableDetail = resolver.detail(table)?;
     let definition = resolver.definition(table)?;
-    let page_number = extras.page.max(1);
+    // `page` is at least 1: `table_page` refused anything else (`§9.1`).
+    let page_number = extras.page;
     // `page_number >= 1` above, so this cannot underflow; an offset that
     // overflows is a page that does not exist, refused as an invalid request.
     let offset = page_number
@@ -622,10 +623,10 @@ fn unit_choices(selected: &str) -> Vec<Choice> {
 
 /// Parse an urlencoded POST body into fields; the first of a repeat wins
 /// only where the Python's form dictionary would, which is the last.
-fn form_fields(bytes: &[u8]) -> HashMap<String, String> {
-    parse_pairs(&String::from_utf8_lossy(bytes))
-        .into_iter()
-        .collect()
+fn form_fields(bytes: &[u8]) -> Result<HashMap<String, String>, MalformedEncoding> {
+    // Not `from_utf8_lossy`: a body that is not UTF-8 is refused, not repaired.
+    let text = std::str::from_utf8(bytes).map_err(|_| MalformedEncoding)?;
+    Ok(parse_pairs(text)?.into_iter().collect())
 }
 
 /// `POST /tables/{table}/settings`.
@@ -644,7 +645,7 @@ async fn settings_submit<S: TableStore>(
     let bytes = axum::body::to_bytes(request.into_body(), 64 * 1024)
         .await
         .map_err(|_| LookupError::invalid_request("The form is too large or unreadable"))?;
-    let fields = form_fields(&bytes);
+    let fields = form_fields(&bytes)?;
     let outcome = async {
         // §12.5: the form must carry the token its cookie holds.
         security::verify_csrf(
@@ -788,7 +789,7 @@ async fn upload_page<S: TableStore>(
 ) -> Result<Response, LookupError> {
     let principal = security::require_reader(&state.config, &headers)?;
     let resolver = state.resolver()?;
-    let table = parse_pairs(query.as_deref().unwrap_or_default())
+    let table = parse_pairs(query.as_deref().unwrap_or_default())?
         .into_iter()
         .find(|(name, _)| name == "table")
         .map_or_default(|(_, value)| value);

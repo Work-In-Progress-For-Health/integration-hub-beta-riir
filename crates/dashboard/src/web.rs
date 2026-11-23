@@ -371,7 +371,10 @@ async fn api_service_bus<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Query(query): Query<ThroughputQuery>,
 ) -> Response {
-    let hours = query.hours_or_default();
+    let hours = match query.hours_or_default() {
+        Ok(hours) => hours,
+        Err(message) => return crate::pages::error_json(StatusCode::BAD_REQUEST, &message),
+    };
 
     let queues = state.queue_names();
     let (depths, series, topics) = tokio::join!(
@@ -435,13 +438,19 @@ pub struct ThroughputQuery {
 }
 
 impl ThroughputQuery {
-    /// The window asked for, bounded (§2.3.3).
-    fn hours_or_default(&self) -> u32 {
-        self.hours
-            .as_deref()
-            .and_then(|value| value.trim().parse::<u32>().ok())
-            .unwrap_or(DEFAULT_THROUGHPUT_HOURS)
-            .clamp(1, MAX_THROUGHPUT_HOURS)
+    /// The window asked for (§2.3.3): the default when `hours` is absent, a
+    /// whole number from 1 to [`MAX_THROUGHPUT_HOURS`] when it is supplied,
+    /// and an error naming the valid range for anything else. A value is
+    /// never moved to the nearest bound or to the default (RCA-IN-2).
+    fn hours_or_default(&self) -> Result<u32, String> {
+        let Some(text) = self.hours.as_deref() else {
+            return Ok(DEFAULT_THROUGHPUT_HOURS);
+        };
+        text.trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|hours| (1..=MAX_THROUGHPUT_HOURS).contains(hours))
+            .ok_or_else(|| format!("hours must be a whole number from 1 to {MAX_THROUGHPUT_HOURS}"))
     }
 }
 
@@ -461,7 +470,10 @@ async fn api_throughput<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Query(query): Query<ThroughputQuery>,
 ) -> Response {
-    let hours = query.hours_or_default();
+    let hours = match query.hours_or_default() {
+        Ok(hours) => hours,
+        Err(message) => return crate::pages::error_json(StatusCode::BAD_REQUEST, &message),
+    };
 
     let series = state
         .azure

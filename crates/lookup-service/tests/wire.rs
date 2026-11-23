@@ -5,28 +5,37 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use lookup_service::form::{
-    boundary_of, parse_multipart, parse_pairs, percent_decode, percent_encode,
+    MalformedEncoding, boundary_of, parse_multipart, parse_pairs, percent_decode, percent_encode,
 };
 
 #[test]
-fn percent_decoding_handles_plus_escapes_and_bad_input() {
-    assert_eq!(percent_decode("a+b%20c"), "a b c");
-    assert_eq!(percent_decode("%C5%B5"), "ŵ");
-    // An escape that is not hex, or is cut short, is kept literally.
-    assert_eq!(percent_decode("100%"), "100%");
-    assert_eq!(percent_decode("%zz"), "%zz");
-    assert_eq!(percent_decode("%4"), "%4");
+fn percent_decoding_handles_plus_and_escapes_and_refuses_bad_input() {
+    assert_eq!(percent_decode("a+b%20c").as_deref(), Ok("a b c"));
+    assert_eq!(percent_decode("%C5%B5").as_deref(), Ok("ŵ"));
+    // `spec/20-lookup-service.md` §4.3, RCA-IN-2: an escape that is not hex,
+    // or is cut short, and bytes that are not UTF-8, are refused. They are not
+    // kept literally or replaced with U+FFFD (the framework behaviour this
+    // replaces).
+    for malformed in ["100%", "%zz", "%4", "%", "a%2", "%FF", "%C5", "%E2%82"] {
+        assert_eq!(
+            percent_decode(malformed),
+            Err(MalformedEncoding),
+            "{malformed}"
+        );
+    }
+    assert!(parse_pairs("k=%zz").is_err());
+    assert!(parse_pairs("%FF=1").is_err());
 }
 
 #[test]
 fn encoding_round_trips() {
     let text = "a b/c?d=e&f ŵ";
-    assert_eq!(percent_decode(&percent_encode(text)), text);
+    assert_eq!(percent_decode(&percent_encode(text)).as_deref(), Ok(text));
 }
 
 #[test]
 fn pairs_keep_order_and_repeats() {
-    let pairs = parse_pairs("k=A&k=B&key.x=1&flag&=v");
+    let pairs = parse_pairs("k=A&k=B&key.x=1&flag&=v").unwrap();
     assert_eq!(
         pairs,
         [

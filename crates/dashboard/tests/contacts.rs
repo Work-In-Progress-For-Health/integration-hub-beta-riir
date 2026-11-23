@@ -219,15 +219,31 @@ async fn the_page_lists_filters_and_escapes() {
     assert!(none.contains("No contacts match"));
 }
 
+/// §10.3.5, RCA-IN-2/-3: a `page` or `per_page` that is supplied and is not a
+/// whole number of at least 1 is refused, naming the parameter. It is never
+/// read as 1 (the Flask behaviour this replaces), and absent still defaults.
 #[tokio::test]
-async fn a_page_number_that_is_not_a_number_is_page_one() {
-    // §10.3.5 -- upstream's behaviour: `?page=abc` is not a 400.
+async fn an_invalid_page_or_page_size_is_refused_not_replaced() {
     let app = app(InMemory::new());
-    app.json_request("POST", "/api/contacts", &contact()).await;
+    for (query, name) in [
+        ("page=0", "page"),
+        ("page=abc", "page"),
+        ("page=", "page"),
+        ("page=-1", "page"),
+        ("per_page=0", "per_page"),
+        ("per_page=lots", "per_page"),
+    ] {
+        let (status, body) = app.get_json(&format!("/api/contacts?{query}")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
+        let message = body["error"].as_str().unwrap_or_default();
+        assert!(message.starts_with(name), "{query}: {message}");
 
-    let (status, listed) = app.get_json("/api/contacts?page=abc&per_page=-3").await;
-
+        let (status, _) = app.get(&format!("/contacts?{query}")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "page {query}");
+    }
+    let (status, body) = app.get_json("/api/contacts").await;
+    assert_eq!(status, StatusCode::OK, "absent defaults");
+    assert_eq!(body["page"], 1);
+    let (status, _) = app.get_json("/api/contacts?page=2&per_page=5").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(listed["page"], 1);
-    assert_eq!(listed["per_page"], 25);
 }

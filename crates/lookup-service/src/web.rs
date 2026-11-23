@@ -281,7 +281,7 @@ async fn lookup<S: TableStore>(
     // as FastAPI solves route dependencies first.
     state.api_reader(&headers).await?;
     let resolver = state.resolver()?;
-    let pairs = parse_pairs(query.as_deref().unwrap_or_default());
+    let pairs = parse_pairs(query.as_deref().unwrap_or_default())?;
     let positional: Vec<String> = pairs
         .iter()
         .filter(|(name, _)| name == "k")
@@ -342,7 +342,7 @@ async fn list_rows<S: TableStore>(
     let mut search = None;
     let mut offset = 0_usize;
     let mut limit = 50_usize;
-    for (name, value) in parse_pairs(query.as_deref().unwrap_or_default()) {
+    for (name, value) in parse_pairs(query.as_deref().unwrap_or_default())? {
         match name.as_str() {
             "search" => {
                 if value.chars().count() > 200 {
