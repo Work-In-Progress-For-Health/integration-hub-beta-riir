@@ -339,7 +339,11 @@ async fn shutdown_stops_accepting_and_drains() {
     // spec/07-hl7-server.md §8.3 — in-flight messages complete. The
     // ordering here is what stops shutdown producing the one failure §5.3
     // forbids.
-    let server = start(&[]).await;
+    //
+    // The connection is left idle while the server stops, and a drain waits
+    // for an idle connection's read timeout (§2.6). The default of 30 s made
+    // this the slowest test in the workspace; 1 s exercises the same wait.
+    let server = start(&[("MLLP_TIMEOUT_SECONDS", "1")]).await;
     let mut stream = TcpStream::connect(server.address).await.unwrap();
     stream.write_all(&frame(&phw_sample())).await.unwrap();
 

@@ -55,7 +55,7 @@ task):
 
 ```sh
 cargo xtask gate                  # tier 1: fmt-check, clippy,
-                                  # checked-arithmetic, test, doc,
+                                  # checked-arithmetic, test (nextest), doctest, doc,
                                   # verify-dictionaries, verify-pipelines, deny;
                                   # the MSRV build too when Cargo.toml,
                                   # Cargo.lock or rust-toolchain.toml changed

@@ -111,7 +111,13 @@ fn steps(tier: Tier, msrv_version: &str) -> Vec<Step> {
                 // The calls the checked-arithmetic rule bans and Clippy cannot
                 // see (`spec/17` §2.4, RCA-ENF-5): cheap, so before the tests.
                 cargo("checked-arithmetic", &["xtask", "check-arithmetic"]),
-                cargo("test", &["test", "--workspace"]),
+                // `cargo nextest` runs the tests of every binary in parallel;
+                // `cargo test` runs one binary at a time and was about three
+                // times slower for the same tests. It does not run doctests,
+                // so those are their own step. Needs `cargo install
+                // cargo-nextest` (`spec/21` §2.4).
+                cargo("test", &["nextest", "run", "--workspace"]),
+                cargo("doctest", &["test", "--workspace", "--doc"]),
                 doc,
                 cargo("verify-dictionaries", &["xtask", "verify-dictionaries"]),
                 cargo("verify-pipelines", &["xtask", "verify-pipelines"]),
@@ -486,6 +492,7 @@ mod tests {
                 "clippy",
                 "checked-arithmetic",
                 "test",
+                "doctest",
                 "doc",
                 "verify-dictionaries",
                 "verify-pipelines",

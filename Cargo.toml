@@ -322,6 +322,12 @@ split-debuginfo = "unpacked"
 # Dependencies are never stepped through here.
 debug = false
 
+[profile.dev.package.uppsala]
+opt-level = 3
+
+[profile.dev.package.xsd-schema]
+opt-level = 3
+
 [profile.release]
 # The backstop for any operator the lints cannot see (a macro, a dependency):
 # an overflow panics, which is detectable, instead of wrapping, which is not.

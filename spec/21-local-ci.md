@@ -39,7 +39,7 @@ expensive ones when it matters:
 | Tier | Name | Runs | Needs | Typical time |
 | --- | --- | --- | --- | --- |
 | 0 | `fast` | `fmt-check` | nothing | seconds |
-| 1 | `gate` | §1's steps, `cargo xtask check-arithmetic` (`spec/17` §2.4a), `cargo doc`, `verify-dictionaries`, `verify-pipelines`, `cargo deny`; MSRV `check` when `Cargo.toml`, `Cargo.lock` or `rust-toolchain.toml` changed since the merge base | a toolchain | minutes |
+| 1 | `gate` | §1's steps (the tests under `cargo nextest`, §2.4), `cargo xtask check-arithmetic` (`spec/17` §2.4a), `cargo doc`, `verify-dictionaries`, `verify-pipelines`, `cargo deny`; MSRV `check` when `Cargo.toml`, `Cargo.lock` or `rust-toolchain.toml` changed since the merge base | a toolchain | minutes |
 | 2 | `stack` | the `emulator` and `sqlserver` feature tests (`17-testing-and-quality.md` §9.2) | Podman; the `bus` Compose profile | ~9 min |
 | 3 | `flows` | each `ihb-e2e` flow, **one Compose profile at a time** | Podman | ~4 min per flow, cold |
 
@@ -54,6 +54,15 @@ names none of this.
 §2.3 Tier 1 MUST NOT depend on tier 2 or 3. A machine without Podman can
 still run the gate; the record (§3) says which tiers ran, so a missing tier
 is visible rather than silently green.
+
+§2.4 Tier 1's `test` step MUST run under `cargo nextest run --workspace`,
+and a separate `doctest` step MUST run `cargo test --workspace --doc`,
+because nextest does not run doctests. `cargo test` runs one test binary at
+a time; on 2026-11-23 it took about 133 s of wall time for 35 s of CPU where
+nextest took about 47 s for the same 2,044 tests. The tests are unchanged and
+none is skipped. `cargo-nextest` is a prerequisite of the gate
+(`cargo install cargo-nextest --locked`); without it the `test` step fails
+with cargo's own "no such command" message.
 
 ## §3 The evidence of a run
 

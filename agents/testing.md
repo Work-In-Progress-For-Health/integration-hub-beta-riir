@@ -8,7 +8,8 @@
 
 | Layer | Needs | How to run |
 | --- | --- | --- |
-| Unit and doc tests | nothing | `cargo test --workspace` |
+| Unit and integration tests | nothing | `cargo nextest run --workspace` |
+| Doc tests | nothing | `cargo test --workspace --doc` |
 | Emulator-backed | Service Bus emulator | `--features emulator` |
 | SQL-backed | SQL Server container | `--features sqlserver` |
 | In-process end to end | emulator | `-p ihb-e2e --features emulator` |

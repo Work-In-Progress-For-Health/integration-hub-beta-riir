@@ -15,7 +15,8 @@ here interactively.
 
 ```sh
 cargo build --workspace
-cargo test  --workspace                  # includes doc tests
+cargo nextest run --workspace           # unit and integration, in parallel
+cargo test  --workspace --doc            # nextest does not run doc tests
 cargo test  -p ihb-bus                   # one crate
 cargo test  -p dashboard alarm           # one crate, filtered
 ```
