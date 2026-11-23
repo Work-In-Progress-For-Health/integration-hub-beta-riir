@@ -191,6 +191,32 @@ mod lookup {
         assert_eq!(get(&app.router, "/api/v1/tables/nope").await.status, 404);
     }
 
+    /// RCA-IN-2: a rows query the API cannot read is refused, naming the
+    /// parameter; none of them falls back to a default.
+    #[tokio::test]
+    async fn unreadable_rows_queries_are_refused() {
+        let app = read_only().await;
+        let long = "a".repeat(201);
+        for (query, parameter) in [
+            ("offset=-1".to_owned(), "offset"),
+            ("offset=x".to_owned(), "offset"),
+            ("limit=0".to_owned(), "limit"),
+            ("limit=x".to_owned(), "limit"),
+            (format!("search={long}"), "search"),
+        ] {
+            let reply = get(
+                &app.router,
+                &format!("/api/v1/tables/ward_map/rows?{query}"),
+            )
+            .await;
+            assert_eq!(reply.status, 422, "{query}");
+            assert!(
+                reply.json()["detail"].as_str().unwrap().contains(parameter),
+                "{query}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn rows_paging_and_search() {
         let app = read_only().await;
@@ -422,6 +448,33 @@ mod uploads {
         )
         .await;
         assert_eq!(bad_mapping.status, 422);
+    }
+
+    /// The `mapping` field must be JSON and an object, and each way it is
+    /// not is named; nothing is created from a refused upload.
+    #[tokio::test]
+    async fn an_unreadable_mapping_names_the_reason() {
+        let app = writable().await;
+        let csv = b"code,label\nA,B\n";
+        for (mapping, expected) in [
+            ("{nope", "mapping is not valid JSON"),
+            ("[1]", "mapping must be a JSON object"),
+            ("{\"key\": {}}", "mapping is invalid"),
+        ] {
+            let reply = upload(
+                &app,
+                "codes",
+                csv,
+                vec![
+                    text("definition", &json!({})),
+                    Field::Text("mapping", mapping.to_owned()),
+                ],
+            )
+            .await;
+            assert_eq!(reply.status, 422, "{mapping}");
+            assert_eq!(reply.json()["detail"], expected, "{mapping}");
+        }
+        assert!(app.state.store.record("codes").is_none());
     }
 
     #[tokio::test]
