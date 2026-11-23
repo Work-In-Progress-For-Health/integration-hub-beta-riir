@@ -304,6 +304,10 @@ pub fn evaluate(rule: &RuleConfig, state: &RuleState, trip: Trip, now: OffsetDat
 
         Trip::Tripped => {
             let gap = f64::from(rule.alerting_gap_minutes);
+            // RCA-EXC-2: `gap` is at most `u32::MAX` and `since` is a finite
+            // number of minutes, so their difference is finite.
+            #[expect(clippy::float_arithmetic, reason = "RCA-EXC-2: see above")]
+            let remaining_after = |since: f64| gap - since;
 
             match state.last_alarm_at {
                 // Step 5 — first trip: escalate and start the cooldown.
@@ -336,7 +340,7 @@ pub fn evaluate(rule: &RuleConfig, state: &RuleState, trip: Trip, now: OffsetDat
                             status: Status::Suppressed,
                             state: Some(state),
                             escalate: false,
-                            cooldown_remaining: Some(gap - since),
+                            cooldown_remaining: Some(remaining_after(since)),
                             pause_remaining: None,
                         }
                     }
@@ -360,6 +364,10 @@ fn store(state: RuleState) -> Option<RuleState> {
     clippy::arithmetic_side_effects,
     reason = "RCA-EXC-2: the difference of two OffsetDateTime always fits a Duration"
 )]
+#[expect(
+    clippy::float_arithmetic,
+    reason = "RCA-EXC-2: a Duration of seconds is finite, and dividing by 60 shrinks it"
+)]
 pub(crate) fn minutes_between(from: OffsetDateTime, to: OffsetDateTime) -> f64 {
     (to - from).as_seconds_f64() / 60.0
 }
@@ -380,9 +388,19 @@ pub(crate) fn minutes_between(from: OffsetDateTime, to: OffsetDateTime) -> f64 {
 /// assert_eq!(format_duration(150.0), "2.5 hours");
 /// assert_eq!(format_duration(60.0), "1.0 hour");
 /// assert_eq!(format_duration(2880.0), "2.0 days");
+/// assert_eq!(format_duration(f64::NAN), "unknown");
 /// ```
 #[must_use]
+#[expect(
+    clippy::float_arithmetic,
+    reason = "RCA-FLT-2: `minutes` is finite (checked first), and dividing by 60 and 24 shrinks it"
+)]
 pub fn format_duration(minutes: f64) -> String {
+    // A figure that is not a number is shown as unknown, never as a duration
+    // (RCA-FLT-4).
+    if !minutes.is_finite() {
+        return "unknown".to_string();
+    }
     if minutes < 1.0 {
         return "< 1 minute".to_string();
     }

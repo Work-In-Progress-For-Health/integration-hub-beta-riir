@@ -5,12 +5,20 @@
 mod http;
 mod mllp;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub use http::{send_rest, send_soap, url_host_port, wrap_in_envelope};
 pub use mllp::{extract_ack_code, send_mllp, to_er7};
 
 use crate::model::{Endpoint, EndpointKind, Message};
+
+/// Milliseconds since `start`.
+// RCA-EXC-2: a `Duration` is at most about 1.8e19 seconds, so the product is
+// finite, and an `Instant` difference is never negative.
+#[expect(clippy::float_arithmetic, reason = "RCA-EXC-2: bounded, see above")]
+fn elapsed_ms(start: Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
+}
 
 /// The outcome of one send (`§7.1`). A transport failure is a value here,
 /// not an `Err`, so a run can report it and carry on.

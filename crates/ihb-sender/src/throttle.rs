@@ -90,7 +90,8 @@ impl Throttle {
             None => None,
             Some(0) => return Err(InvalidRate),
             Some(rate) => {
-                Some(Duration::try_from_secs_f64(60.0 / f64::from(rate)).map_err(|_| InvalidRate)?)
+                let seconds = ihb_runtime::float::div(60.0, f64::from(rate)).ok_or(InvalidRate)?;
+                Some(Duration::try_from_secs_f64(seconds).map_err(|_| InvalidRate)?)
             }
         };
 
@@ -179,7 +180,8 @@ pub fn batch_size(configured: usize, interval: Option<Duration>) -> usize {
     let window = BATCH_WINDOW;
     // More than a `usize` of messages fit the window: no bound but the
     // configured one, which is the declared ceiling (`§2.4.3`).
-    let allowable = whole_floor(window.as_secs_f64() / interval.as_secs_f64())
+    let allowable = ihb_runtime::float::div(window.as_secs_f64(), interval.as_secs_f64())
+        .and_then(whole_floor)
         .and_then(|whole| whole.checked_add(1))
         .unwrap_or(usize::MAX);
 

@@ -522,7 +522,7 @@ pub fn backoff_before(retry: u32, backoff_seconds: f64) -> Option<f64> {
         return Some(0.0);
     }
     let factor = 2_u32.checked_pow(retry.checked_sub(1)?)?;
-    Some(backoff_seconds * f64::from(factor))
+    ihb_runtime::float::mul(backoff_seconds, f64::from(factor))
 }
 
 impl LookupClient {

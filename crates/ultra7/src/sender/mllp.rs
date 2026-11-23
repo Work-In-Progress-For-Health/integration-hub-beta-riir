@@ -54,7 +54,6 @@ pub fn send_mllp(endpoint: &Endpoint, message: &Message) -> SendResult {
 
     let timeout = timeout_of(endpoint);
     let start = Instant::now();
-    let ms = |s: Instant| s.elapsed().as_secs_f64() * 1000.0;
     let exchange = || -> std::io::Result<Vec<u8>> {
         let addr = (endpoint.host.as_str(), port)
             .to_socket_addrs()?
@@ -83,9 +82,11 @@ pub fn send_mllp(endpoint: &Endpoint, message: &Message) -> SendResult {
     };
     let response = match exchange() {
         Ok(r) => r,
-        Err(e) => return SendResult::failure(ms(start), String::new(), e.to_string()),
+        Err(e) => {
+            return SendResult::failure(super::elapsed_ms(start), String::new(), e.to_string());
+        }
     };
-    let latency = ms(start);
+    let latency = super::elapsed_ms(start);
     let text = String::from_utf8_lossy(&response)
         .trim_matches(|c| matches!(c, '\x0b' | '\x1c' | '\r' | '\n'))
         .to_owned();

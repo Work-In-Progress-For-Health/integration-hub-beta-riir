@@ -333,14 +333,20 @@ impl TokenVerifier {
         let (Some(now_f), Some(skew)) = (exact_f64(now), exact_f64(CLOCK_SKEW_SECONDS)) else {
             return Err(invalid("clock out of range"));
         };
-        if now_f > exp + skew {
+        let Some(latest) = ihb_runtime::float::add(exp, skew) else {
+            return Err(invalid("exp out of range"));
+        };
+        if now_f > latest {
             tracing::warn!(reason = "expired", "Rejected bearer token");
             return Err(LookupError::bearer_unauthorized("Token has expired"));
         }
-        if let Some(nbf) = claims.get("nbf").and_then(Value::as_f64)
-            && nbf > now_f + skew
-        {
-            return Err(invalid("not yet valid"));
+        if let Some(nbf) = claims.get("nbf").and_then(Value::as_f64) {
+            let Some(earliest) = ihb_runtime::float::add(now_f, skew) else {
+                return Err(invalid("clock out of range"));
+            };
+            if nbf > earliest {
+                return Err(invalid("not yet valid"));
+            }
         }
         let issuer_ok = claims
             .get("iss")

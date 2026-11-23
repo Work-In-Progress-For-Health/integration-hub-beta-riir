@@ -20,6 +20,8 @@
 use std::future::Future;
 use std::time::{Duration, Instant};
 
+use ihb_runtime::float;
+
 use crate::auth::Auth;
 use crate::error::DeliveryError;
 use crate::http::{Method, Request, Response, Transport};
@@ -203,7 +205,10 @@ impl<T: Transport, C: Clock> FhirClient<T, C> {
 
     /// Poll the status URL until `200`, an error, or the deadline.
     async fn poll(&mut self, status_url: &str) -> Result<(), DeliveryError> {
-        let deadline = self.clock.now() + self.settings.poll_timeout_seconds;
+        let deadline = float::add(self.clock.now(), self.settings.poll_timeout_seconds)
+            .ok_or_else(|| {
+                DeliveryError::Transient("The polling deadline cannot be computed".to_string())
+            })?;
         loop {
             let response = self
                 .request(Method::Get, status_url, None, Some(deadline))
@@ -218,7 +223,8 @@ impl<T: Transport, C: Clock> FhirClient<T, C> {
             let delay = retry_after_seconds(&response)
                 .unwrap_or(self.settings.poll_interval_seconds)
                 .min(self.settings.max_retry_after_seconds);
-            if self.clock.now() + delay > deadline {
+            // A moment that cannot be computed is past the deadline (RCA-FLT-2).
+            if float::add(self.clock.now(), delay).is_none_or(|at| at > deadline) {
                 return Err(DeliveryError::Transient(format!(
                     "Processing not complete after {:.0}s (X-Progress: {})",
                     self.settings.poll_timeout_seconds,
@@ -252,7 +258,8 @@ impl<T: Transport, C: Clock> FhirClient<T, C> {
         while attempt <= max {
             let mut timeout = self.settings.timeout_seconds;
             if let Some(deadline) = deadline {
-                let remaining = deadline - self.clock.now();
+                // A time left that cannot be computed is no time left.
+                let remaining = float::sub(deadline, self.clock.now()).unwrap_or(0.0);
                 if remaining <= 0.0 {
                     return Err(DeliveryError::Transient(format!(
                         "Polling deadline reached before {name} could complete: {last_error}"
@@ -305,8 +312,13 @@ impl<T: Transport, C: Clock> FhirClient<T, C> {
             }
             if status == 429 {
                 last_error = "HTTP 429 Too Many Requests".to_string();
-                let delay =
-                    retry_after_seconds(&response).unwrap_or_else(|| self.backoff_delay(attempt));
+                let Some(delay) =
+                    retry_after_seconds(&response).or_else(|| self.backoff_delay(attempt))
+                else {
+                    return Err(DeliveryError::Transient(
+                        "The retry wait cannot be computed".to_string(),
+                    ));
+                };
                 tracing::warn!(attempt, max, delay_seconds = delay, "rate limited");
                 if attempt < max {
                     self.wait(delay.min(self.settings.max_retry_after_seconds), deadline)
@@ -345,16 +357,25 @@ impl<T: Transport, C: Clock> FhirClient<T, C> {
     }
 
     /// The wait before attempt `attempt + 1`: doubles each time.
-    fn backoff_delay(&self, attempt: u32) -> f64 {
+    ///
+    /// `None` when it cannot be computed (it overflowed, or the base is not
+    /// a finite number): the caller stops retrying rather than wait `inf`.
+    fn backoff_delay(&self, attempt: u32) -> Option<f64> {
         // 2^(attempt - 1) as 2^attempt / 2: exact for a power of two, and
         // with no `attempt - 1` to underflow (`attempt` starts at 1).
-        self.settings.backoff_seconds * 2_f64.powi(i32::try_from(attempt).unwrap_or(i32::MAX)) / 2.0
+        let power = float::finite(2_f64.powi(i32::try_from(attempt).ok()?))?;
+        float::div(float::mul(self.settings.backoff_seconds, power)?, 2.0)
     }
 
     /// Wait the backoff, unless this was the last attempt.
     async fn backoff(&mut self, attempt: u32, deadline: Option<f64>) -> Result<(), DeliveryError> {
         if attempt < self.settings.max_attempts {
-            self.wait(self.backoff_delay(attempt), deadline).await?;
+            let Some(delay) = self.backoff_delay(attempt) else {
+                return Err(DeliveryError::Transient(
+                    "The retry wait cannot be computed".to_string(),
+                ));
+            };
+            self.wait(delay, deadline).await?;
         }
         Ok(())
     }
@@ -362,7 +383,8 @@ impl<T: Transport, C: Clock> FhirClient<T, C> {
     /// Wait, refusing to pass the polling deadline.
     async fn wait(&mut self, delay: f64, deadline: Option<f64>) -> Result<(), DeliveryError> {
         if let Some(deadline) = deadline
-            && self.clock.now() + delay >= deadline
+            // A moment that cannot be computed is past the deadline (RCA-FLT-2).
+            && float::add(self.clock.now(), delay).is_none_or(|at| at >= deadline)
         {
             return Err(DeliveryError::Transient(
                 "Polling deadline would be exceeded while waiting to retry".to_string(),
@@ -377,7 +399,7 @@ impl<T: Transport, C: Clock> FhirClient<T, C> {
 /// the IG, so it is ignored.
 fn retry_after_seconds(response: &Response) -> Option<f64> {
     let seconds: f64 = response.header("retry-after")?.trim().parse().ok()?;
-    (seconds > 0.0).then_some(seconds)
+    float::finite(seconds).filter(|s| *s > 0.0)
 }
 
 /// The failure class for a status that is not a success.
@@ -579,7 +601,8 @@ pub mod test_support {
         }
 
         pub fn advance(&self, seconds: f64) {
-            *self.now.lock().unwrap() += seconds;
+            let mut now = self.now.lock().unwrap();
+            *now = ihb_runtime::float::add(*now, seconds).unwrap();
         }
     }
 

@@ -60,8 +60,48 @@ fn count_f64(count: usize) -> Result<f64, InvalidTarget> {
         .map_err(|_| InvalidTarget)
 }
 
+/// A latency rounded to two places.
+#[expect(
+    clippy::float_arithmetic,
+    reason = "RCA-EXC-2: a latency is finite and at most about 1.8e24 ms, so times 100 is finite"
+)]
+fn round2(latency: f64) -> f64 {
+    (latency * 100.0).round() / 100.0
+}
+
+/// The loss percentage (to one place) and the average latency (to two), or
+/// `None` when either is not a finite number (RCA-FLT-2). `attempts` is not
+/// zero: a test makes at least one attempt.
+#[expect(
+    clippy::float_arithmetic,
+    reason = "RCA-FLT-2: every result goes through `finite`; the inputs are finite latencies and counts"
+)]
+fn summarise(
+    latencies: &[f64],
+    failures: f64,
+    attempts: f64,
+    measured: f64,
+) -> Option<(f64, Option<f64>)> {
+    use ihb_runtime::float::{div, finite};
+
+    let loss = finite((div(failures, attempts)? * 100.0 * 10.0).round() / 10.0)?;
+    let average = if latencies.is_empty() {
+        None
+    } else {
+        let total = latencies
+            .iter()
+            .try_fold(0.0_f64, |t, l| ihb_runtime::float::add(t, *l))?;
+        Some(finite((div(total, measured)? * 100.0).round() / 100.0)?)
+    };
+    Some((loss, average))
+}
+
 /// Seconds since the epoch with a fraction, only if the whole seconds are
 /// exact in an `f64` (at most 2^53, RCA-CONV-4).
+#[expect(
+    clippy::float_arithmetic,
+    reason = "RCA-EXC-2: at most 2^53 plus a fraction below 1, finite"
+)]
 fn epoch_seconds(at: OffsetDateTime) -> Result<f64, InvalidTarget> {
     const EXACT_LIMIT: u64 = 1 << 53;
     let seconds = at.unix_timestamp();
@@ -217,6 +257,10 @@ impl Default for Settings {
 }
 
 /// A duration in milliseconds, for display.
+#[expect(
+    clippy::float_arithmetic,
+    reason = "RCA-EXC-2: a Duration is at most about 1.8e19 seconds, so this is finite"
+)]
 fn millis(elapsed: Duration) -> f64 {
     (elapsed.as_secs_f64() * 1000.0 * 100.0).round() / 100.0
 }
@@ -322,20 +366,17 @@ pub async fn run(
 
     let latencies: Vec<f64> = results.iter().filter_map(|a| a.latency_ms).collect();
     let failure_count = results.iter().filter(|a| !a.success).count();
-    let round2 = |n: f64| (n * 100.0).round() / 100.0;
 
     // `InvalidTarget` doubles as "this test cannot be run" here: a count
     // that is not exact in an `f64` would make the percentages wrong (RCA-CONV-4).
     let attempt_total = count_f64(results.len())?;
-    let loss_percent = ((count_f64(failure_count)? / attempt_total) * 100.0 * 10.0).round() / 10.0;
-    let average = if latencies.is_empty() {
-        None
-    } else {
-        Some(round2(
-            latencies.iter().fold(0.0, |total, latency| total + latency)
-                / count_f64(latencies.len())?,
-        ))
-    };
+    let (loss_percent, average) = summarise(
+        &latencies,
+        count_f64(failure_count)?,
+        attempt_total,
+        count_f64(latencies.len())?,
+    )
+    .ok_or(InvalidTarget)?;
 
     Ok(TestResult {
         host,

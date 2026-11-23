@@ -255,7 +255,11 @@ impl FhirMock {
 fn purge_expired(state: &mut State, now: f64) {
     state.jobs.retain(|_, job| {
         job.completed_at
-            .is_none_or(|done| now - done <= TERMINAL_RETENTION_SECONDS)
+            // An age that cannot be computed is past the retention.
+            .is_none_or(|done| {
+                ihb_runtime::float::sub(now, done)
+                    .is_some_and(|age| age <= TERMINAL_RETENTION_SECONDS)
+            })
     });
 }
 

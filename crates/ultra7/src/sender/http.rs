@@ -125,7 +125,6 @@ fn post(endpoint: &Endpoint, body: &[u8], headers: &[(String, String)]) -> SendR
 
     let timeout = timeout_of(endpoint);
     let start = Instant::now();
-    let ms = || start.elapsed().as_secs_f64() * 1000.0;
     let exchange = || -> std::io::Result<Vec<u8>> {
         let addr = (target.host.as_str(), target.port)
             .to_socket_addrs()?
@@ -144,9 +143,11 @@ fn post(endpoint: &Endpoint, body: &[u8], headers: &[(String, String)]) -> SendR
     };
     let raw = match exchange() {
         Ok(r) => r,
-        Err(e) => return SendResult::failure(ms(), String::new(), e.to_string()),
+        Err(e) => {
+            return SendResult::failure(super::elapsed_ms(start), String::new(), e.to_string());
+        }
     };
-    let latency = ms();
+    let latency = super::elapsed_ms(start);
     let Some((status, response_body)) = parse_response(&raw) else {
         return SendResult::failure(latency, String::new(), "Malformed HTTP response");
     };

@@ -10,6 +10,7 @@ use std::fmt::Write as _;
 use std::time::Duration;
 
 use ihb_config::Secret;
+use ihb_runtime::float;
 
 use crate::client::Clock;
 use crate::error::DeliveryError;
@@ -105,7 +106,9 @@ impl Auth {
             Self::ApiKey(key) => Ok(vec![("X-API-Key".to_string(), key.expose().to_string())]),
             Self::OAuth2(oauth) => {
                 if oauth.token.is_none()
-                    || clock.now() >= oauth.expires_at - TOKEN_REFRESH_MARGIN_SECONDS
+                    // An expiry that cannot be computed is an expired token.
+                    || float::sub(oauth.expires_at, TOKEN_REFRESH_MARGIN_SECONDS)
+                        .is_none_or(|refresh_at| clock.now() >= refresh_at)
                 {
                     oauth.fetch(transport, clock).await?;
                 }
@@ -193,8 +196,10 @@ impl OAuth2 {
             Some(_) => return Err(unreadable()),
         };
 
+        // A lifetime that makes the expiry not a number is an unreadable answer.
+        let expires_at = float::add(clock.now(), lifetime).ok_or_else(unreadable)?;
         self.token = Some(Secret::new(token));
-        self.expires_at = clock.now() + lifetime;
+        self.expires_at = expires_at;
         tracing::info!(
             lifetime_seconds = lifetime,
             "obtained an OAuth2 access token"

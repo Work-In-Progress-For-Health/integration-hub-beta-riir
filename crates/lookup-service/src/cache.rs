@@ -151,11 +151,16 @@ impl TableCache {
                 self.entries.remove(&oldest);
             }
         }
+        // An expiry that is not a number means the entry is not cached: the
+        // next lookup is a miss, which is always correct (RCA-FLT-2).
+        let Some(expires_at) = ihb_runtime::float::add(now, f64::from(self.ttl_seconds)) else {
+            return;
+        };
         self.entries.insert(
             key,
             Entry {
                 row,
-                expires_at: now + f64::from(self.ttl_seconds),
+                expires_at,
                 used: self.tick,
             },
         );

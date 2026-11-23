@@ -72,6 +72,70 @@
     )
 )]
 
+/// Float arithmetic that answers `None` instead of `inf` or `NaN`.
+///
+/// Implements `rust-checked-arithmetic` RCA-FLT-2 (`spec/17-testing-and-quality.md`
+/// §2.4b): a float operation does not panic, it yields `inf` or `NaN`, which
+/// then spreads through every later figure. Every float result that is
+/// compared, stored or shown goes through one of these, and a `None` is an
+/// error or "unknown" at the caller, never a number (RCA-FLT-4).
+///
+/// # Examples
+///
+/// ```
+/// use ihb_runtime::float;
+///
+/// assert_eq!(float::add(1.5, 2.0), Some(3.5));
+/// assert_eq!(float::div(1.0, 0.0), None);
+/// assert_eq!(float::finite(f64::NAN), None);
+/// ```
+pub mod float {
+    /// `value` when it is finite.
+    #[must_use]
+    pub fn finite(value: f64) -> Option<f64> {
+        value.is_finite().then_some(value)
+    }
+
+    /// `a + b`, when both are finite and so is the sum.
+    #[must_use]
+    #[expect(clippy::float_arithmetic, reason = "RCA-FLT-2: the result is checked")]
+    pub fn add(a: f64, b: f64) -> Option<f64> {
+        finite(a)?;
+        finite(b)?;
+        finite(a + b)
+    }
+
+    /// `a - b`, when both are finite and so is the difference.
+    #[must_use]
+    #[expect(clippy::float_arithmetic, reason = "RCA-FLT-2: the result is checked")]
+    pub fn sub(a: f64, b: f64) -> Option<f64> {
+        finite(a)?;
+        finite(b)?;
+        finite(a - b)
+    }
+
+    /// `a * b`, when both are finite and so is the product.
+    #[must_use]
+    #[expect(clippy::float_arithmetic, reason = "RCA-FLT-2: the result is checked")]
+    pub fn mul(a: f64, b: f64) -> Option<f64> {
+        finite(a)?;
+        finite(b)?;
+        finite(a * b)
+    }
+
+    /// `a / b`, when both are finite, `b` is not zero, and the quotient is finite.
+    #[must_use]
+    #[expect(clippy::float_arithmetic, reason = "RCA-FLT-2: the result is checked")]
+    pub fn div(a: f64, b: f64) -> Option<f64> {
+        finite(a)?;
+        finite(b)?;
+        if b == 0.0 {
+            return None;
+        }
+        finite(a / b)
+    }
+}
+
 /// How long a failing receive waits before trying again.
 ///
 /// Implements `spec/03-message-bus.md` §5.4.
@@ -126,6 +190,24 @@ pub use shutdown::{Shutdown, Watcher};
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
+
+    use super::float;
+
+    /// RCA-FLT-2: a figure that is not finite is `None`, never a number.
+    #[test]
+    fn float_results_that_are_not_finite_are_refused() {
+        assert_eq!(float::add(1.0, 2.0), Some(3.0));
+        assert_eq!(float::sub(1.0, 3.0), Some(-2.0));
+        assert_eq!(float::mul(2.0, 4.0), Some(8.0));
+        assert_eq!(float::div(9.0, 3.0), Some(3.0));
+        assert_eq!(float::div(1.0, 0.0), None);
+        assert_eq!(float::div(0.0, 0.0), None);
+        assert_eq!(float::add(f64::MAX, f64::MAX), None);
+        assert_eq!(float::mul(f64::MAX, 2.0), None);
+        assert_eq!(float::sub(f64::INFINITY, 1.0), None);
+        assert_eq!(float::add(f64::NAN, 1.0), None);
+        assert_eq!(float::finite(f64::NEG_INFINITY), None);
+    }
 
     use super::backoff::{Backoff, INITIAL_DELAY, MAX_DELAY, MAX_WAIT};
     use super::shutdown::Shutdown;
