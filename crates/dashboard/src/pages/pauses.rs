@@ -260,7 +260,13 @@ async fn context<S: AlarmStore>(store: &S, now: OffsetDateTime) -> Context {
             (Vec::new(), true)
         }
     };
-    let catalogue = catalogue(store).await.unwrap_or_default();
+    let catalogue = match catalogue(store).await {
+        Ok(catalogue) => catalogue,
+        Err(error) => {
+            tracing::warn!(%error, "the flow catalogue could not be read for the page");
+            Vec::new()
+        }
+    };
     let (flows, rules) = options(&catalogue);
 
     Context {

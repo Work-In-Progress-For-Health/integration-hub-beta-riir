@@ -17,10 +17,11 @@ doc-valid-idents = [
 # What bypasses checking. `cargo xtask check-arithmetic` (spec/17 §2.4) bans
 # the `saturating_*` / `wrapping_*` / `overflowing_*` methods and `clamp`,
 # which no lint covers; these are the rest of RCA-ENF-2 that Clippy can see.
-# `Option::unwrap_or_default` (RCA-P-3) is not banned yet: about a hundred
-# uses read "absent is empty" for text, and each needs a declaration first
+# `Result::unwrap_or_default` is banned: it turns an error into a value
+# (RCA-IN-6). `Option::unwrap_or_default` is not: absent is not invalid input
 # (docs/checked-arithmetic-audit.md).
 disallowed-methods = [
+  { path = "core::result::Result::unwrap_or_default", reason = "RCA-IN-6: an error is not a value; handle it or return it" },
   { path = "core::iter::Iterator::sum", reason = "RCA-AGG-1: use try_fold with checked_add" },
   { path = "core::iter::Iterator::product", reason = "RCA-AGG-1: use try_fold with checked_mul" },
   { path = "core::time::Duration::from_secs_f64", reason = "RCA-TIME-2: use try_from_secs_f64" },

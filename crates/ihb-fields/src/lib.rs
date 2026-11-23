@@ -188,7 +188,9 @@ pub fn source_system(message: &Message) -> String {
 /// ```
 #[must_use]
 pub fn repetitions(message: &Message, path: &str) -> Vec<String> {
-    message.repetitions(path).unwrap_or_default()
+    // A malformed path reads as no repetitions, for the reason [`read`] gives:
+    // paths are constants.
+    message.repetitions(path).ok().unwrap_or_default()
 }
 
 /// Write a value, whatever was there before.

@@ -228,7 +228,7 @@ impl TableStore for MemoryTableStore {
             definition: definition.clone(),
             stats: TableStats {
                 row_count: rows.len(),
-                last_upload_at: Some(now_rfc3339()),
+                last_upload_at: now_rfc3339(),
                 last_upload_file: upload.file_name.clone(),
                 last_upload_by: Some(upload.actor.clone()),
             },

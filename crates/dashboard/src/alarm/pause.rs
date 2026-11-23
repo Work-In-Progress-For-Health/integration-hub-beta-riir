@@ -188,8 +188,10 @@ fn london() -> &'static time_tz::Tz {
     time_tz::timezones::db::europe::LONDON
 }
 
-fn rfc3339(at: OffsetDateTime) -> String {
-    at.format(&Rfc3339).unwrap_or_default()
+/// `None` when the moment cannot be written (a year outside 0..=9999), so a
+/// pause shows no time rather than an empty one (RCA-IN-6).
+fn rfc3339(at: OffsetDateTime) -> Option<String> {
+    at.format(&Rfc3339).ok()
 }
 
 fn parse_time(value: Option<&Value>) -> Option<OffsetDateTime> {
@@ -277,12 +279,12 @@ impl Pause {
             "pause_id": self.pause_id,
             "scope_type": self.scope.as_str(),
             "targets": self.targets_json(),
-            "start_at": self.start_at.map(rfc3339),
-            "end_at": self.end_at.map(rfc3339),
+            "start_at": self.start_at.and_then(rfc3339),
+            "end_at": self.end_at.and_then(rfc3339),
             "reason": self.reason,
             "requested_by": self.requested_by,
-            "created_at": self.created_at.map(rfc3339),
-            "cancelled_at": self.cancelled_at.map(rfc3339),
+            "created_at": self.created_at.and_then(rfc3339),
+            "cancelled_at": self.cancelled_at.and_then(rfc3339),
         })
     }
 
@@ -401,9 +403,10 @@ pub fn summarise(pauses: &[Pause], now: OffsetDateTime) -> PauseSummary {
     }
 }
 
-/// A moment in UK time, as the page shows it: `30 Sep 2026  15:05 BST`.
+/// A moment in UK time, as the page shows it: `30 Sep 2026  15:05 BST`, or
+/// `None` when it cannot be written (RCA-IN-6).
 #[must_use]
-pub fn format_london(at: OffsetDateTime) -> String {
+pub fn format_london(at: OffsetDateTime) -> Option<String> {
     use time_tz::OffsetDateTimeExt;
 
     let local = at.to_timezone(london());
@@ -413,9 +416,9 @@ pub fn format_london(at: OffsetDateTime) -> String {
         .format(&format_description!(
             "[day] [month repr:short] [year]  [hour]:[minute]"
         ))
-        .unwrap_or_default();
+        .ok()?;
 
-    format!("{body} {name}")
+    Some(format!("{body} {name}"))
 }
 
 /// What a status row says about the pause holding it (§10.2.9).
@@ -450,7 +453,7 @@ pub fn fields_for(pause: &Pause, now: OffsetDateTime) -> PauseFields {
             .map(|end| super::minutes_between(now, end))
             .map(f64::round),
         pause_indefinite: pause.end_at.is_none(),
-        paused_until: pause.end_at.map(format_london),
+        paused_until: pause.end_at.and_then(format_london),
     }
 }
 
@@ -468,7 +471,7 @@ pub struct ScheduledFields {
 pub fn scheduled_fields_for(pause: &Pause) -> ScheduledFields {
     ScheduledFields {
         pause_id: pause.pause_id.clone(),
-        start_display: pause.start_at.map(format_london).unwrap_or_default(),
+        start_display: pause.start_at.and_then(format_london).unwrap_or_default(),
     }
 }
 
@@ -516,15 +519,15 @@ pub fn to_view(pause: &Pause, now: OffsetDateTime) -> PauseView {
         pause_id: pause.pause_id.clone(),
         scope_type: pause.scope.as_str(),
         targets: pause.targets_json(),
-        start_at: pause.start_at.map(rfc3339),
-        end_at: pause.end_at.map(rfc3339),
-        start_display: pause.start_at.map(format_london),
-        end_display: pause.end_at.map(format_london),
+        start_at: pause.start_at.and_then(rfc3339),
+        end_at: pause.end_at.and_then(rfc3339),
+        start_display: pause.start_at.and_then(format_london),
+        end_display: pause.end_at.and_then(format_london),
         indefinite: pause.end_at.is_none(),
         reason: pause.reason.clone(),
         requested_by: pause.requested_by.clone(),
-        created_display: pause.created_at.map(format_london),
-        cancelled_display: pause.cancelled_at.map(format_london),
+        created_display: pause.created_at.and_then(format_london),
+        cancelled_display: pause.cancelled_at.and_then(format_london),
         cancelled_early: pause.cancelled_at.is_some() && state == PauseStatus::Ended,
         status: state.as_str(),
         remaining_minutes: match (pause.end_at, state) {
@@ -1359,12 +1362,12 @@ mod tests {
     #[test]
     fn times_are_shown_in_uk_time() {
         assert_eq!(
-            format_london(datetime!(2026-09-30 14:05 UTC)),
-            "30 Sep 2026  15:05 BST"
+            format_london(datetime!(2026-09-30 14:05 UTC)).as_deref(),
+            Some("30 Sep 2026  15:05 BST")
         );
         assert_eq!(
-            format_london(datetime!(2026-12-01 14:05 UTC)),
-            "01 Dec 2026  14:05 GMT"
+            format_london(datetime!(2026-12-01 14:05 UTC)).as_deref(),
+            Some("01 Dec 2026  14:05 GMT")
         );
     }
 

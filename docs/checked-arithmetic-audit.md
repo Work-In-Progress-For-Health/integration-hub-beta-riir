@@ -115,8 +115,15 @@ substitution were replaced, not edited to fit.
 
 **Not adopted, and why:**
 
-- A ban on `Option::unwrap_or_default` (RCA-P-3): about a hundred uses, mostly
-  "absent text is empty". Each needs a one-line declaration, or an error.
+- A ban on `Option::unwrap_or_default`: about a hundred uses, mostly "absent
+  text is empty". Absent is not invalid input, so it is not an error to
+  read it as empty. `Result::unwrap_or_default` **is** banned in
+  `clippy.toml` (RCA-IN-6: it turns an error into a value). Its eleven uses
+  became `None` / left-out / logged: unwritable timestamps are `None`
+  (`pause`, `contacts`, `cosmos_store`, `lookup-service` `now_rfc3339` and
+  `loaded_at`), `format_london` returns `Option`, a contact that cannot be
+  serialised is left off the page, the two page reads that failed open now
+  log why, and `keys::json_string` replaces a swallowed `serde_json` error.
 - `[lints] workspace = true` for `dashboard` and `xml-fhir-proms-transformer`:
   they do not inherit the workspace lints today, and opting in reports several
   hundred unrelated findings (`unwrap` in tests, missing docs).

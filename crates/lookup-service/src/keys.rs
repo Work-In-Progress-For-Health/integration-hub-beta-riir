@@ -65,7 +65,7 @@ pub fn encode_row_id(key: &[String]) -> String {
     let json = format!(
         "[{}]",
         key.iter()
-            .map(|part| serde_json::to_string(part).unwrap_or_default())
+            .map(|part| json_string(part))
             .collect::<Vec<_>>()
             .join(", ")
     );
@@ -75,6 +75,32 @@ pub fn encode_row_id(key: &[String]) -> String {
         let _ = write!(id, "{byte:02x}");
     }
     id
+}
+
+/// `json.dumps(part, ensure_ascii=False)` for one string: quote, backslash and
+/// control characters escaped, everything else literal. Written out so there
+/// is no serialiser error to swallow (RCA-IN-6); a test pins it to
+/// `serde_json`.
+fn json_string(part: &str) -> String {
+    let mut out = String::with_capacity(part.len());
+    out.push('"');
+    for ch in part.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            c if c < ' ' => {
+                let _ = write!(out, "\\u{:04x}", u32::from(c));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// The human-readable form of a key, used for display and admin search.
@@ -185,4 +211,29 @@ pub fn canonical_key(
 /// `(a, b)`, for the messages.
 fn describe(definition: &TableDefinition) -> String {
     format!("({})", definition.key_columns.join(", "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::json_string;
+
+    /// `json_string` is `json.dumps(.., ensure_ascii=False)` for a string, so
+    /// a hashed id stays the one the Python wrote (§4.4).
+    #[test]
+    fn json_string_matches_serde_json() {
+        for text in [
+            "",
+            "plain",
+            "quote \" and \\ slash",
+            "line\nreturn\rtab\t",
+            "\u{8}\u{c}\u{1}\u{1f}\u{7f}",
+            "caf\u{e9} \u{1f600} \u{2028}",
+        ] {
+            assert_eq!(
+                Ok(json_string(text)),
+                serde_json::to_string(text).map_err(|e| e.to_string()),
+                "{text:?}"
+            );
+        }
+    }
 }

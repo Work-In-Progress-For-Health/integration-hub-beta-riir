@@ -205,10 +205,17 @@ async fn contacts_page<O: Observatory, S: AlarmStore>(
     page(&ContactsPage {
         rows: selected
             .into_iter()
-            .map(|contact| Row {
-                flows: contact.flow_ids.iter().map(|id| flow_label(id)).collect(),
-                json: serde_json::to_string(&contact).unwrap_or_default(),
-                contact,
+            .filter_map(|contact| {
+                // A contact that cannot be written out is left off the page
+                // rather than shown with an empty edit form (RCA-IN-6).
+                let json = serde_json::to_string(&contact)
+                    .inspect_err(|error| tracing::warn!(%error, "a contact could not be shown"))
+                    .ok()?;
+                Some(Row {
+                    flows: contact.flow_ids.iter().map(|id| flow_label(id)).collect(),
+                    json,
+                    contact,
+                })
             })
             .collect(),
         total,

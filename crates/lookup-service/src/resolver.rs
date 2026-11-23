@@ -57,7 +57,7 @@ struct TableState {
     /// Definition and stats.
     record: TableRecord,
     /// When this replica loaded it, RFC 3339.
-    loaded_at: String,
+    loaded_at: Option<String>,
     /// The whole table, for a preloaded one (§5.2).
     snapshot: Option<HashMap<Vec<String>, Row>>,
     /// The TTL cache, for any other.

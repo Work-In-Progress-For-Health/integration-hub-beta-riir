@@ -122,7 +122,7 @@ pub struct LoadedTable {
     /// The file it came from.
     pub source_file: String,
     /// When it was loaded, RFC 3339 in UTC.
-    pub loaded_at: String,
+    pub loaded_at: Option<String>,
 }
 
 impl LoadedTable {
@@ -132,7 +132,7 @@ impl LoadedTable {
             definition: self.definition.clone(),
             stats: TableStats {
                 row_count: self.rows.len(),
-                last_upload_at: Some(self.loaded_at.clone()),
+                last_upload_at: self.loaded_at.clone(),
                 last_upload_file: Some(self.source_file.clone()),
                 last_upload_by: Some(SEED_ACTOR.to_owned()),
             },
@@ -140,12 +140,13 @@ impl LoadedTable {
     }
 }
 
-/// The current time as RFC 3339 in UTC.
+/// The current time as RFC 3339 in UTC, or `None` when it cannot be written:
+/// the time is then unknown, not an empty string (RCA-IN-6).
 #[must_use]
-pub fn now_rfc3339() -> String {
+pub fn now_rfc3339() -> Option<String> {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default()
+        .ok()
 }
 
 /// A read-only store over seed files (§3.3).

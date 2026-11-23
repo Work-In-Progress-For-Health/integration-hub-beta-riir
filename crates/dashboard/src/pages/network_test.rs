@@ -230,7 +230,16 @@ async fn api_list<O: Observatory, S: AlarmStore>(
         }
     };
     // A source list that cannot be read only costs the descriptions.
-    let sources = flow_sources::list(&state.alarms).await.unwrap_or_default();
+    let sources = match flow_sources::list(&state.alarms).await {
+        Ok(sources) => sources,
+        Err(error) => {
+            tracing::warn!(
+                error = error.message(),
+                "flow sources could not be read for the descriptions"
+            );
+            Vec::new()
+        }
+    };
 
     let endpoints: Vec<Value> = tested
         .into_iter()

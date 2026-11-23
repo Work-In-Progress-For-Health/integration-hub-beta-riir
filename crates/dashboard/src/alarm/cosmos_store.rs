@@ -454,11 +454,11 @@ pub fn state_document(
 
     for (id, held) in state {
         let mut entry = serde_json::Map::new();
-        if let Some(at) = held.last_alarm_at {
-            entry.insert("last_alarm_at".to_string(), rfc3339(at));
+        if let Some(stamp) = held.last_alarm_at.and_then(rfc3339) {
+            entry.insert("last_alarm_at".to_string(), stamp);
         }
-        if let Some(at) = held.paused_until {
-            entry.insert("paused_until".to_string(), rfc3339(at));
+        if let Some(stamp) = held.paused_until.and_then(rfc3339) {
+            entry.insert("paused_until".to_string(), stamp);
         }
         if let Some(reason) = &held.pause_reason {
             entry.insert(
@@ -479,9 +479,12 @@ pub fn state_document(
     })
 }
 
-/// A timestamp as the Python writes it.
-fn rfc3339(at: OffsetDateTime) -> serde_json::Value {
-    serde_json::Value::String(at.format(&Rfc3339).unwrap_or_default())
+/// A timestamp as the Python writes it, or `None` when it cannot be written
+/// (a year outside 0..=9999). An unwritable moment is left out of the
+/// document, never stored as an empty string that reads back as garbage
+/// (RCA-IN-6).
+fn rfc3339(at: OffsetDateTime) -> Option<serde_json::Value> {
+    at.format(&Rfc3339).ok().map(serde_json::Value::String)
 }
 
 /// Read the rules out of a `config` document.
@@ -865,11 +868,10 @@ mod write_failure_tests {
             // Cosmos has nothing stored, because every write was rejected.
             // §5.6.2's fallback is what makes this the remembered value
             // rather than an empty map.
-            Ok(self
-                .remembered
-                .lock()
-                .map(|held| held.clone())
-                .unwrap_or_default())
+            Ok(self.remembered.lock().map_or_else(
+                |poisoned| poisoned.into_inner().clone(),
+                |held| held.clone(),
+            ))
         }
 
         async fn put_state(

@@ -387,7 +387,7 @@ pub struct TableSummary {
     /// Last uploader.
     pub last_upload_by: Option<String>,
     /// When this replica loaded the table.
-    pub loaded_at: String,
+    pub loaded_at: Option<String>,
     /// Cache statistics.
     pub cache: CacheStats,
 }

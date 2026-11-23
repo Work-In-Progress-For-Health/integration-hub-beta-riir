@@ -140,9 +140,10 @@ defaulted or repaired. Enforced in three places, all in the gate:
   `#[cfg(test)]`).
 
 `[profile.release]` sets `overflow-checks = true` (RCA-ENF-4) as the backstop
-for an operator the lints cannot see. **Not adopted:** a ban on
-`Option::unwrap_or_default` (RCA-P-3; about a hundred uses read "absent is
-empty" for text and each needs a declaration first), and
+for an operator the lints cannot see. `Result::unwrap_or_default` is
+banned in `clippy.toml` (an error is not a value, RCA-IN-6).
+**Not adopted:** a ban on `Option::unwrap_or_default` (absent is not
+invalid input), and
 `[workspace.lints]` inheritance for `dashboard` and
 `xml-fhir-proms-transformer`, which do not inherit it today and would report
 several hundred unrelated findings. Both are in

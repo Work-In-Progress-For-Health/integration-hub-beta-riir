@@ -290,8 +290,10 @@ pub fn validate(data: &Value) -> Result<Fields, ContactError> {
     })
 }
 
-fn stamp_time(at: OffsetDateTime) -> String {
-    at.format(&Rfc3339).unwrap_or_default()
+/// `None` when the moment cannot be written (a year outside 0..=9999): the
+/// stamp is then unknown, not an empty string (RCA-IN-6).
+fn stamp_time(at: OffsetDateTime) -> Option<String> {
+    at.format(&Rfc3339).ok()
 }
 
 impl Contact {
@@ -533,8 +535,8 @@ pub async fn add<S: AlarmStore>(
         flow_ids: Vec::new(),
         deleted: false,
         deleted_at: None,
-        created_at: Some(stamp_time(now)),
-        updated_at: Some(stamp_time(now)),
+        created_at: stamp_time(now),
+        updated_at: stamp_time(now),
     };
     contact.apply(fields);
 
@@ -567,8 +569,10 @@ pub async fn update<S: AlarmStore>(
     require_persistence(store)?;
 
     contact.apply(fields);
-    contact.created_at.get_or_insert_with(|| stamp_time(now));
-    contact.updated_at = Some(stamp_time(now));
+    if contact.created_at.is_none() {
+        contact.created_at = stamp_time(now);
+    }
+    contact.updated_at = stamp_time(now);
 
     persist(store, &contact).await?;
     tracing::info!(contact_id = %contact.id, "contact updated");
@@ -592,8 +596,8 @@ pub async fn delete<S: AlarmStore>(
     require_persistence(store)?;
 
     contact.deleted = true;
-    contact.deleted_at = Some(stamp_time(now));
-    contact.updated_at = Some(stamp_time(now));
+    contact.deleted_at = stamp_time(now);
+    contact.updated_at = stamp_time(now);
 
     persist(store, &contact).await?;
     tracing::info!(contact_id = %contact.id, "contact deleted");
@@ -621,7 +625,7 @@ pub async fn restore<S: AlarmStore>(
 
     contact.deleted = false;
     contact.deleted_at = None;
-    contact.updated_at = Some(stamp_time(now));
+    contact.updated_at = stamp_time(now);
 
     persist(store, &contact).await?;
     tracing::info!(contact_id = %contact.id, "contact restored");
@@ -1029,7 +1033,7 @@ mod tests {
         assert_eq!(updated.first_name, "Augusta");
         assert!(updated.deleted, "an edit does not undelete");
         assert_eq!(updated.created_at, contact.created_at);
-        assert_eq!(updated.updated_at, Some(stamp_time(later)));
+        assert_eq!(updated.updated_at, stamp_time(later));
     }
 
     #[tokio::test]
