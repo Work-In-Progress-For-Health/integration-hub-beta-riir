@@ -146,6 +146,19 @@ banned in `clippy.toml` (an error is not a value, RCA-IN-6).
 invalid input); see `docs/checked-arithmetic-audit.md`. Every crate now
 inherits `[workspace.lints]` (§2.2).
 
+§2.4b **Floats** (`rust-checked-arithmetic` RCA-FLT). Every crate root
+denies `clippy::float_arithmetic`, `float_cmp` and `lossy_float_literal`
+outside `#[cfg(test)]`. Float arithmetic goes through
+`ihb_runtime::float::{add, sub, mul, div, finite}`, which answer `None` for
+`inf` and `NaN` (RCA-FLT-2); the caller treats `None` as an error or
+"unknown", never a number (RCA-FLT-4). A site whose bound is proved in the
+code (a `Duration` in seconds, a count at most `u32::MAX`) may carry
+`#[expect(clippy::float_arithmetic, reason = "RCA-EXC-2: …")]`. Floats stay
+for measurements only (latencies, backoff seconds, epoch seconds in the
+fhir-sender clock); money, counts and identifiers are integers (RCA-FLT-1).
+Equality on a computed float is compared as bits or not at all (RCA-FLT-3).
+A non-finite figure shown to a person is "unknown" (`format_duration`).
+
 ---
 
 ## §3 Documentation

@@ -128,8 +128,10 @@ substitution were replaced, not edited to fit.
   `[workspace.lints]`, spec/17 §2.2. Opting in reported 625 findings: test-only
   ones are allowed in test code, 158 missing docs were written, the rest were
   fixed or carry a reasoned `#[allow]`.)
-- The float rules (RCA-FLT): the audit measured integer arithmetic and
-  conversions only.
+- (Done since: the float rules, RCA-FLT, spec/17 §2.4b. 27 arithmetic sites
+  across nine crates went through `ihb_runtime::float` or carry a proved
+  bound; every crate root now denies `float_arithmetic`, `float_cmp` and
+  `lossy_float_literal`.)
 
 ## Plan (RCA-ENF-3: one module at a time, then deny at the crate root)
 

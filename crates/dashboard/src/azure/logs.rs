@@ -157,8 +157,8 @@ pub fn count(row: &Row, column: &str) -> Option<u64> {
 /// `value` as an `i64` if it is finite, integral and in range (RCA-CONV-3).
 fn exact_i64(value: f64) -> Option<i64> {
     // 2^63 is exactly representable; `i64::MAX as f64` rounds up to it.
-    const TWO_POW_63: f64 = 9_223_372_036_854_775_808.0;
-    const NEG_TWO_POW_63: f64 = -9_223_372_036_854_775_808.0;
+    const TWO_POW_63: f64 = f64::from_bits(0x43E0_0000_0000_0000);
+    const NEG_TWO_POW_63: f64 = f64::from_bits(0xC3E0_0000_0000_0000);
     // Integral when truncating changes nothing: compared as bits, not with `==`.
     let integral = value.trunc().to_bits() == value.to_bits();
     if !(value.is_finite() && integral && (NEG_TWO_POW_63..TWO_POW_63).contains(&value)) {

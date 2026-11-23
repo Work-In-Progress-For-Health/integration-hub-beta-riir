@@ -10,7 +10,10 @@
         clippy::indexing_slicing,
         clippy::string_slice,
         clippy::integer_division,
-        clippy::unreachable
+        clippy::unreachable,
+        clippy::float_arithmetic,
+        clippy::float_cmp,
+        clippy::lossy_float_literal
     )
 )]
 //! PHW → MPI.

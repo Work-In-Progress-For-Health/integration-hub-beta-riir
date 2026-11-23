@@ -9,7 +9,10 @@
         clippy::indexing_slicing,
         clippy::string_slice,
         clippy::integer_division,
-        clippy::unreachable
+        clippy::unreachable,
+        clippy::float_arithmetic,
+        clippy::float_cmp,
+        clippy::lossy_float_literal
     )
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
