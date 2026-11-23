@@ -1143,6 +1143,25 @@ mod file_store {
         parts.iter().map(|p| (*p).to_owned()).collect()
     }
 
+    /// `spec/20-lookup-service.md` §7: a seed directory that is not there is
+    /// refused by name, not read as an empty set of tables.
+    #[test]
+    fn a_missing_seed_directory_is_refused() {
+        let dir = SeedDir::new();
+        let missing = dir.path.join("absent");
+        let error = SeedSource::from_dir(&missing).unwrap_err().to_string();
+        assert!(error.contains("does not exist"), "{error}");
+    }
+
+    /// A manifest that cannot be read is an error, not an absent manifest.
+    #[test]
+    fn an_unreadable_manifest_is_refused() {
+        let dir = SeedDir::new();
+        std::fs::create_dir(dir.path.join("tables.json")).unwrap();
+        let error = SeedSource::from_dir(&dir.path).unwrap_err().to_string();
+        assert!(error.contains("tables.json could not be read"), "{error}");
+    }
+
     fn assert_fails(dir: &SeedDir, message: &str) {
         let error = load(dir).unwrap_err().to_string();
         assert!(error.contains(message), "{message:?} not in {error:?}");
