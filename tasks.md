@@ -943,12 +943,12 @@ and gate-checked except where noted.
   [`spec/15`](spec/15-dashboard.md) §5.6.4).
   **Written and unit-tested, not run:** the gate (`cargo xtask gate`) and the
   `lims-to-trrr` compose flow have not been run for this batch.
-- [ ] **Not ported from that batch:** the CAV PMS to WCRS local flow (`#463`:
-  needs a PMS SOAP topic this stack does not have); `#464`/`#463` mock-db
-  edits (the local stack uses SQL Edge, not `mock-db-receiver`); `5673db8`'s
-  regenerated dictionaries and `hl7apy` fidelity helper (Python-side), and its
-  `hl7_mock_receiver_rust` (this workspace has its own `hl7-mock-receiver`;
-  not compared).
+- [x] **Ported since:** the CAV PMS to WCRS local flow (`#463`: PMS topic and
+  subscriptions, `pms-soap-hl7-server`, `wcrs-idupd-dbsender`, `sql/init-ndr-db.sql`,
+  sample message; profile `cav-pms-to-wcrs`, **not run**: no Podman VM). `5673db8`:
+  dictionaries are byte-identical, the mock receiver is this workspace's own, and the
+  `hl7apy` fidelity concern is pinned for this parser. `#464`/mock-db edits do not
+  apply (SQL Edge). See `docs/upstream-sync-2026-10.md`.
 - [ ] **Open:** nothing here has run against a real Service Bus or SQL Server.
 
 ---

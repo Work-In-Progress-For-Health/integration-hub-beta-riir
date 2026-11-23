@@ -206,6 +206,38 @@ services:
         aliases:
           - "lims-soap-hl7-server"
 
+  # CAV PMS SOAP ingress (upstream #463 `pms-hl7-soap-server`): the same generic pipeline as
+  # lims-soap-hl7-server, publishing to the PMS topic (assigning authority 140). Host port 8086:
+  # `just send-soap ./sample_messages/cav-pms-to-wcrs.sample.xml 8086` upstream, here a POST of
+  # the sample to http://localhost:8086/soap.
+  pms-soap-hl7-server:
+    container_name: "ihb-rs-pms-soap-hl7-server"
+    image: "ihb-rs/rest-server:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: rest-server
+    env_file:
+      - ./rest-server-pms.env
+    ports:
+      - "8086:8080"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+    profiles:
+      - cav-pms-to-wcrs
+    networks:
+      integration-hub:
+        aliases:
+          - "pms-soap-hl7-server"
+
   phw-hl7-transformer:
     container_name: "ihb-rs-phw-hl7-transformer"
     image: "ihb-rs/hl7-phw-transformer:${IHB_TAG:-dev}"
@@ -577,6 +609,37 @@ services:
       integration-hub:
         aliases:
           - "wrrs-idupd-dbsender"
+
+  # WCRS identifier update (spec/10-senders.md section 7.9; upstream #462, #463): the generic
+  # db-sender calling dbo.spUpdateIdentifier in NDR for CAV PMS A40 merges. `sql/init-ndr-db.sql`
+  # creates the database and the procedure; nothing applies it on start-up (no sqlcmd in Edge).
+  wcrs-idupd-dbsender:
+    container_name: "ihb-rs-wcrs-idupd-dbsender"
+    image: "ihb-rs/db-sender:${IHB_TAG:-dev}"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BIN: db-sender
+    env_file:
+      - ./wcrs-idupd-dbsender.env
+      - ./.secrets
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - sb-emulator
+      - sqledge
+    profiles:
+      - cav-pms-to-wcrs
+    networks:
+      integration-hub:
+        aliases:
+          - "wcrs-idupd-dbsender"
 
   # TRRR identifier update (spec/10-senders.md section 7.10; upstream #458, `db_sender_trrr`): the
   # generic db-sender, NHS-ID-update instance, calling dbo.TRRRIDUpdate in Clinical_Results.

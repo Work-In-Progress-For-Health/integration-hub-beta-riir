@@ -745,6 +745,26 @@ pub fn ensure_repetitions(message: &mut Message, path: &str, count: usize) {
 mod tests {
     use super::*;
 
+    /// Upstream `5673db8` (`hl7apy_fidelity`): hl7apy re-rendered a numeric
+    /// field through `Decimal`, so `PID-3` `1000000001^03^^^NI` came out as
+    /// `^3^`. The Hub passes values through; one it did not set must not
+    /// change. This parser keeps the text, and this pins it, including the
+    /// forms a number would not render back as (`03`, `0003`, `+5`).
+    #[test]
+    fn numeric_looking_values_keep_their_text() -> Result<(), hl7_2::Error> {
+        let source = concat!(
+            "MSH|^~\\&|252|252|100|100|20260729095037||ADT^A28^ADT_A05|MSG1|P|2.5\r",
+            "PID|1||1000000001^03^^^NI~0003^+5^^^X||SURNAME^FORENAME||19990101|M\r",
+        );
+        let message = hl7_2::parse(source)?;
+
+        assert_eq!(read(&message, "PID-3.2"), "03");
+        assert_eq!(read(&message, "PID-3.1"), "1000000001");
+        assert_eq!(repetitions(&message, "PID-3")[1], "0003^+5^^^X");
+        assert!(message.to_er7().contains("1000000001^03^^^NI~0003^+5^^^X"));
+        Ok(())
+    }
+
     /// A message with the shapes the mapping tables actually meet.
     const MESSAGE: &str = concat!(
         "MSH|^~\\&|252|252|100|100|20260729095037||ADT^A28^ADT_A05|MSG1|P|2.5\r",
