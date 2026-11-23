@@ -523,7 +523,7 @@ impl LiveSender {
 
                 // Flush and start again with this message.
                 send_batch_inner(&mut sender, batch, &self.entity).await?;
-                sent += in_batch;
+                sent = counted(sent, in_batch, &self.entity)?;
 
                 batch = sender
                     .create_message_batch(azservicebus::CreateMessageBatchOptions::default())
@@ -542,17 +542,29 @@ impl LiveSender {
                     });
                 }
             }
-            in_batch += 1;
+            in_batch = counted(in_batch, 1, &self.entity)?;
         }
 
         if in_batch > 0 {
             send_batch_inner(&mut sender, batch, &self.entity).await?;
-            sent += in_batch;
+            sent = counted(sent, in_batch, &self.entity)?;
         }
         drop(sender);
 
         Ok(sent)
     }
+}
+
+/// `count + more`, or a send error: a tally of messages sent that cannot be
+/// represented is refused, never wrapped or held, so the caller is not told a
+/// wrong number (RCA-INT-1).
+fn counted(count: usize, more: usize, destination: &str) -> Result<usize, BusError> {
+    count.checked_add(more).ok_or_else(|| BusError::Send {
+        destination: destination.to_string(),
+        attempts: 1,
+        reason: "the count of messages sent is out of range".to_string(),
+        disposition: Disposition::Fatal,
+    })
 }
 
 /// Send one assembled batch.
@@ -689,8 +701,16 @@ impl LiveReceiver {
 
         let mut out = Vec::with_capacity(received.len());
         for message in received {
-            state.next_token += 1;
-            let token = Token(state.next_token);
+            // A token that wrapped would name two in-flight messages and
+            // settle the wrong one: refuse at 2^64, never reuse.
+            let Some(next_token) = state.next_token.checked_add(1) else {
+                return Err(BusError::Receive {
+                    entity: self.entity.clone(),
+                    reason: "the token counter is exhausted".to_string(),
+                });
+            };
+            state.next_token = next_token;
+            let token = Token(next_token);
             out.push(to_incoming(&message, token));
             state.in_flight.push((token, message));
         }

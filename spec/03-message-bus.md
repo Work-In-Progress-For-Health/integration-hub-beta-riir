@@ -176,6 +176,15 @@ processing succeeded.
 §5.1.2 The maximum wait for a receive is **60 seconds**
 (`MAX_WAIT_TIME_SECONDS`). An empty result is not an error.
 
+§5.1.2b **Checked arithmetic** (`rust-checked-arithmetic`; the crate denies
+`arithmetic_side_effects`, `as_conversions`, `indexing_slicing`, `string_slice`,
+`integer_division` and `unreachable`). A settlement token that cannot be
+advanced (2^64) is **refused**, never reused: a reused token would settle the
+wrong in-flight message. A count of messages sent that cannot be represented is
+a send error, not a wrong number. Two declared holds: the lock-renewal failure
+count holds at `MAX_CONSECUTIVE_FAILURES`, which is exact because reaching it
+ends renewal, and a redelivery count that cannot go higher stays where it is.
+
 §5.1.2a A caller MAY receive with a **shorter** wait, and an interactive one
 MUST: sixty seconds costs a receive loop nothing when the queue is empty and
 costs an HTTP response everything

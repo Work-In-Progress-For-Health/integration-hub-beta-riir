@@ -103,8 +103,18 @@ impl FakeBus {
             return Err(error);
         }
 
-        state.next_token += 1;
-        let token = Token(state.next_token);
+        // A token that wrapped or held would name two messages; at 2^64 sends
+        // that is refused, never reused.
+        let Some(next_token) = state.next_token.checked_add(1) else {
+            return Err(BusError::Send {
+                destination: entity.to_string(),
+                attempts: 1,
+                reason: "the token counter is exhausted".to_string(),
+                disposition: crate::retry::Disposition::Fatal,
+            });
+        };
+        state.next_token = next_token;
+        let token = Token(next_token);
 
         let incoming = Incoming {
             body: message.body,
@@ -224,7 +234,10 @@ impl FakeBus {
         match outcome {
             Outcome::Accepted | Outcome::Rejected => entity.completed.push(held),
             Outcome::Deferred => {
-                held.delivery_count = Some(held.delivery_count.unwrap_or(1) + 1);
+                // A count that cannot go higher stays where it is: it only
+                // reports how often the message has been delivered.
+                let delivered = held.delivery_count.unwrap_or(1);
+                held.delivery_count = Some(delivered.checked_add(1).unwrap_or(delivered));
                 // Front, not back: a session preserves order, and a
                 // redelivered message is still the next one.
                 entity.pending.push_front(held);
@@ -325,7 +338,10 @@ impl FakeBus {
             "expected exactly one message on {entity}, found {}",
             sent.len()
         );
-        sent[0].properties.clone()
+        // The assertion above is what makes this the only one; `first` keeps
+        // the read free of indexing (RCA-LEN-2).
+        sent.first()
+            .map_or_else(Properties::default, |only| only.properties.clone())
     }
 
     /// Make the next send fail.

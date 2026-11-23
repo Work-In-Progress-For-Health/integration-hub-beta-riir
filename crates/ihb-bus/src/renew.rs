@@ -133,7 +133,7 @@ impl LockRenewer {
 
         let task = tokio::spawn(async move {
             let started = tokio::time::Instant::now();
-            let mut failures = 0;
+            let mut failures = 0_u32;
 
             loop {
                 let waited = tokio::select! {
@@ -158,7 +158,10 @@ impl LockRenewer {
                 if renew().await {
                     failures = 0;
                 } else {
-                    failures += 1;
+                    // Any count at or past the threshold ends renewal on the
+                    // next line, so a count that cannot go higher is already
+                    // at it: the declared hold is exact (`§5.1.2`).
+                    failures = failures.checked_add(1).unwrap_or(MAX_CONSECUTIVE_FAILURES); // §5.1.2
                     tracing::warn!(failures, "a session lock renewal failed");
                     if failures >= MAX_CONSECUTIVE_FAILURES {
                         return Ended::Failed;
