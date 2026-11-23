@@ -81,6 +81,7 @@ async fn catalogue<S: AlarmStore>(
     Ok(out)
 }
 
+/// Index the catalogue by rule so a request can be checked against it.
 fn known_rules(catalogue: &[(&'static str, String, String, String)]) -> KnownRules {
     let mut known = KnownRules::new();
     for (alarm_type, id, _, workflow_id) in catalogue {
@@ -190,31 +191,49 @@ fn target_labels(
 
 /// The page's rows.
 struct PageGroup {
+    /// The heading of the group.
     title: &'static str,
+    /// What the group says when it is empty.
     empty: &'static str,
+    /// Whether its pauses can be cancelled from the page.
     cancellable: bool,
+    /// The pauses in it.
     pauses: Vec<PageRow>,
 }
 
+/// One pause as the page shows it.
 struct PageRow {
+    /// The pause.
     view: PauseView,
+    /// Display labels for what it targets.
     labels: Vec<String>,
+    /// Its start, in UK time.
     start: String,
+    /// Its end, in UK time.
     end: String,
+    /// When it was cancelled, in UK time.
     cancelled: String,
 }
 
+/// What the pauses page template renders.
 #[derive(Template)]
 #[template(path = "alarm-pauses.html")]
 struct PausesPage {
+    /// Active, scheduled and recently ended pauses.
     groups: Vec<PageGroup>,
+    /// The counts in the summary line.
     summary: PauseSummary,
+    /// The flows a pause can target.
     flow_options: Vec<FlowOption>,
+    /// The rules a pause can target.
     rule_options: Vec<RuleOption>,
+    /// Whether a store is configured; the page says so when it is not.
     persistence_configured: bool,
+    /// Whether pauses could not be read; the page says so rather than showing none.
     unavailable: bool,
 }
 
+/// One group of the page, ready to render.
 fn page_group(
     title: &'static str,
     empty: &'static str,
@@ -242,14 +261,21 @@ fn page_group(
 
 /// What the page and the list API both need.
 struct Context {
+    /// The pauses grouped for the page.
     groups: Groups,
+    /// The counts in the summary line.
     summary: PauseSummary,
+    /// The flows a pause can target.
     flows: Vec<FlowOption>,
+    /// The rules a pause can target.
     rules: Vec<RuleOption>,
+    /// The flow and rule catalogue the options came from.
     catalogue: Vec<(&'static str, String, String, String)>,
+    /// Whether pauses could not be read.
     unavailable: bool,
 }
 
+/// Read everything the page needs; a failed read is reported in `unavailable`, never as an empty list.
 async fn context<S: AlarmStore>(store: &S, now: OffsetDateTime) -> Context {
     // The page reads fail-open (§10.2.6) but says so, rather than showing an
     // empty list that reads as "nothing is paused".
@@ -279,6 +305,7 @@ async fn context<S: AlarmStore>(store: &S, now: OffsetDateTime) -> Context {
     }
 }
 
+/// Handler: the pauses page.
 async fn pauses_page<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
 ) -> Response {
@@ -343,6 +370,7 @@ fn labelled(
     value
 }
 
+/// Handler: list pauses (JSON).
 async fn api_list<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
 ) -> Response {
@@ -375,6 +403,7 @@ async fn api_list<O: Observatory, S: AlarmStore>(
     .into_response()
 }
 
+/// Handler: the flows and rules a pause can target.
 async fn api_options<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
 ) -> Response {
@@ -398,6 +427,7 @@ fn failure(error: &PauseError) -> Response {
         .into_response()
 }
 
+/// Handler: create a pause.
 async fn api_create<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
@@ -424,6 +454,7 @@ async fn api_create<O: Observatory, S: AlarmStore>(
     }
 }
 
+/// Handler: cancel a pause.
 async fn api_cancel<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Path(pause_id): Path<String>,

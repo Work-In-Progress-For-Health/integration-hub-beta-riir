@@ -124,9 +124,10 @@ substitution were replaced, not edited to fit.
   `loaded_at`), `format_london` returns `Option`, a contact that cannot be
   serialised is left off the page, the two page reads that failed open now
   log why, and `keys::json_string` replaces a swallowed `serde_json` error.
-- `[lints] workspace = true` for `dashboard` and `xml-fhir-proms-transformer`:
-  they do not inherit the workspace lints today, and opting in reports several
-  hundred unrelated findings (`unwrap` in tests, missing docs).
+- (Done since: `dashboard` and `xml-fhir-proms-transformer` now inherit
+  `[workspace.lints]`, spec/17 §2.2. Opting in reported 625 findings: test-only
+  ones are allowed in test code, 158 missing docs were written, the rest were
+  fixed or carry a reasoned `#[allow]`.)
 - The float rules (RCA-FLT): the audit measured integer arithmetic and
   conversions only.
 

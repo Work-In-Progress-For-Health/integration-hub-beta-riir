@@ -54,9 +54,12 @@ pub fn routes<O: Observatory, S: AlarmStore>() -> Router<Arc<AppState<O, S>>> {
         )
 }
 
+/// The test page script, served as `network-test.js`.
 const TEST_SCRIPT: &str = include_str!("../../static/network-test.js");
+/// The source-configuration page script, served as `network-test-config.js`.
 const CONFIG_SCRIPT: &str = include_str!("../../static/network-test-config.js");
 
+/// A source refusal as the JSON response the page shows.
 fn source_failure(error: &SourceError) -> Response {
     let status = match error {
         SourceError::Invalid(_) => StatusCode::BAD_REQUEST,
@@ -65,6 +68,7 @@ fn source_failure(error: &SourceError) -> Response {
     error_json(status, error.message())
 }
 
+/// The refusal for a host or port that is not valid.
 fn invalid_target() -> Response {
     error_json(
         StatusCode::BAD_REQUEST,
@@ -72,21 +76,29 @@ fn invalid_target() -> Response {
     )
 }
 
+/// What the test page template renders.
 #[derive(Template)]
 #[template(path = "network-test.html")]
 struct TestPage {
+    /// The configured sources.
     sources: Vec<Source>,
+    /// Whether the sources could not be read.
     unavailable: bool,
 }
 
+/// What the source-configuration page template renders.
 #[derive(Template)]
 #[template(path = "network-test-config.html")]
 struct ConfigPage {
+    /// The configured sources.
     sources: Vec<Source>,
+    /// Whether the sources could not be read.
     unavailable: bool,
+    /// Whether a store is configured; the page says so when it is not.
     persistence_configured: bool,
 }
 
+/// Handler: the network test page.
 async fn test_page<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
 ) -> Response {
@@ -100,6 +112,7 @@ async fn test_page<O: Observatory, S: AlarmStore>(
     })
 }
 
+/// Handler: the source configuration page.
 async fn config_page<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
 ) -> Response {
@@ -114,8 +127,10 @@ async fn config_page<O: Observatory, S: AlarmStore>(
     })
 }
 
+/// The body of a JSON request, or the rejection when it is not JSON.
 type JsonBody = Result<Json<Value>, axum::extract::rejection::JsonRejection>;
 
+/// The body as a JSON object, or the 400 response when it is not one.
 fn object(body: JsonBody) -> Result<Value, Box<Response>> {
     match body {
         Ok(Json(v)) if v.is_object() => Ok(v),
@@ -126,6 +141,7 @@ fn object(body: JsonBody) -> Result<Value, Box<Response>> {
     }
 }
 
+/// Handler: run a test against a host and port.
 async fn api_run<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     body: JsonBody,
@@ -160,12 +176,15 @@ async fn api_run<O: Observatory, S: AlarmStore>(
 /// `?host=&port=` (§10.4.4).
 #[derive(Debug, Default, Deserialize)]
 pub struct Target {
+    /// The host asked for.
     #[serde(default)]
     host: String,
+    /// The port asked for, as text, so a non-number can be refused by name.
     #[serde(default)]
     port: String,
 }
 
+/// The host and port from the query, or the 400 response naming what is wrong.
 fn target(query: &Target) -> Result<(String, u16), Box<Response>> {
     let host = network_test::validate_host(&query.host).map_err(|_| Box::new(invalid_target()))?;
     let port = network_test::validate_port(&Value::String(query.port.clone()))
@@ -173,6 +192,7 @@ fn target(query: &Target) -> Result<(String, u16), Box<Response>> {
     Ok((host, port))
 }
 
+/// Handler: read the history for a host and port.
 async fn api_history<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Query(query): Query<Target>,
@@ -194,6 +214,7 @@ async fn api_history<O: Observatory, S: AlarmStore>(
     }
 }
 
+/// Handler: clear the history for a host and port.
 async fn api_history_delete<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Query(query): Query<Target>,
@@ -216,6 +237,7 @@ async fn api_history_delete<O: Observatory, S: AlarmStore>(
     }
 }
 
+/// Handler: list tested endpoints with their descriptions.
 async fn api_list<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
 ) -> Response {
@@ -257,6 +279,7 @@ async fn api_list<O: Observatory, S: AlarmStore>(
     Json(serde_json::json!({ "endpoints": endpoints })).into_response()
 }
 
+/// Handler: list the configured sources.
 async fn api_sources<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
 ) -> Response {
@@ -266,6 +289,7 @@ async fn api_sources<O: Observatory, S: AlarmStore>(
     }
 }
 
+/// The description, URL and port in a source request body.
 fn fields(payload: &Value) -> (String, String, Value) {
     (
         payload
@@ -282,6 +306,7 @@ fn fields(payload: &Value) -> (String, String, Value) {
     )
 }
 
+/// Handler: create a source.
 async fn api_source_create<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     body: JsonBody,
@@ -298,6 +323,7 @@ async fn api_source_create<O: Observatory, S: AlarmStore>(
     }
 }
 
+/// Handler: update a source.
 async fn api_source_update<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Path(id): Path<String>,
@@ -315,6 +341,7 @@ async fn api_source_update<O: Observatory, S: AlarmStore>(
     }
 }
 
+/// Handler: delete a source.
 async fn api_source_delete<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Path(id): Path<String>,
@@ -325,6 +352,7 @@ async fn api_source_delete<O: Observatory, S: AlarmStore>(
     }
 }
 
+/// Handler: import sources from CSV.
 async fn api_import<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     body: Bytes,

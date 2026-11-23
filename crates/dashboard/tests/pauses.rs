@@ -2,7 +2,11 @@
 //!
 //! Implements `spec/15-dashboard.md` §10.2.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::needless_pass_by_value
+)]
 
 mod common;
 

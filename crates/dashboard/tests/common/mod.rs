@@ -1,7 +1,7 @@
 //! A tiny HTTP harness shared by the upstream-sync route tests
 //! (`spec/15-dashboard.md` §10).
 
-#![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
+#![allow(dead_code, unreachable_pub, clippy::unwrap_used, clippy::expect_used)]
 
 use std::sync::Arc;
 
@@ -16,6 +16,7 @@ use tower::ServiceExt;
 
 /// An application over [`Unconfigured`] Azure and the given store.
 pub struct App<S: AlarmStore> {
+    /// The application state the router was built over.
     pub state: Arc<AppState<Unconfigured, S>>,
 }
 
@@ -30,7 +31,7 @@ pub fn app<S: AlarmStore>(store: S) -> App<S> {
 
 impl<S: AlarmStore> App<S> {
     /// Any request; the body is the status and the text.
-    pub async fn send(
+    pub(crate) async fn send(
         &self,
         method: &str,
         path: &str,
@@ -52,11 +53,11 @@ impl<S: AlarmStore> App<S> {
         (status, String::from_utf8_lossy(&bytes).into_owned())
     }
 
-    pub async fn get(&self, path: &str) -> (StatusCode, String) {
+    pub(crate) async fn get(&self, path: &str) -> (StatusCode, String) {
         self.send("GET", path, None, Vec::new()).await
     }
 
-    pub async fn json_request(
+    pub(crate) async fn json_request(
         &self,
         method: &str,
         path: &str,
@@ -77,7 +78,7 @@ impl<S: AlarmStore> App<S> {
         )
     }
 
-    pub async fn get_json(&self, path: &str) -> (StatusCode, serde_json::Value) {
+    pub(crate) async fn get_json(&self, path: &str) -> (StatusCode, serde_json::Value) {
         let (status, text) = self.get(path).await;
 
         (
@@ -106,4 +107,4 @@ pub fn rule(
 }
 
 #[allow(unused)]
-fn _unused<O: Observatory>() {}
+const fn _unused<O: Observatory>() {}

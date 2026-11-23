@@ -403,9 +403,8 @@ impl AlarmStore for CosmosStore {
         let url = document_url(&self.endpoint, &self.database, &self.container, id);
 
         match self.client.delete_with(&url, &borrowed).await {
-            Ok(_) => Ok(()),
-            // Already gone is the outcome that was asked for.
-            Err(HttpError::Status { code: 404, .. }) => Ok(()),
+            // Already gone (404) is the outcome that was asked for.
+            Ok(_) | Err(HttpError::Status { code: 404, .. }) => Ok(()),
             Err(error) => Err(self.failed(&error)),
         }
     }
@@ -430,8 +429,7 @@ pub fn parse_query_response(response: &serde_json::Value) -> Vec<serde_json::Val
     response
         .get("Documents")
         .and_then(serde_json::Value::as_array)
-        .map(|documents| documents.iter().map(strip).collect())
-        .unwrap_or_default()
+        .map_or_default(|documents| documents.iter().map(strip).collect())
 }
 
 impl CosmosStore {

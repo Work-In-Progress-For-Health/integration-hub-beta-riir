@@ -51,16 +51,13 @@ const ROUTING_KEYS: [&str; 3] = ["id", "pk", "type"];
 /// ```
 #[must_use]
 pub fn stamp(partition_key: &str, id: &str, doc_type: &str, payload: &Value) -> Value {
-    let mut document: Map<String, Value> = payload
-        .as_object()
-        .map(|object| {
-            object
-                .iter()
-                .filter(|(key, _)| !ROUTING_KEYS.contains(&key.as_str()))
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut document: Map<String, Value> = payload.as_object().map_or_default(|object| {
+        object
+            .iter()
+            .filter(|(key, _)| !ROUTING_KEYS.contains(&key.as_str()))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect()
+    });
 
     document.insert("id".to_string(), Value::String(id.to_string()));
     document.insert("pk".to_string(), Value::String(partition_key.to_string()));

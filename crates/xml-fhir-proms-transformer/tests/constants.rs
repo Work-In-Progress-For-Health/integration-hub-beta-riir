@@ -10,7 +10,16 @@
 //! by a `Wales` suffix. That is why they are checked against the source
 //! rather than eyeballed.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::assert_is_empty,
+    clippy::unused_async_trait_impl,
+    clippy::missing_docs_in_private_items,
+    clippy::needless_pass_by_value,
+    clippy::needless_collect
+)]
 
 use std::collections::BTreeMap;
 

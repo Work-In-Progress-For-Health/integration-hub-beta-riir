@@ -56,6 +56,8 @@ impl<O: Observatory> AppState<O, crate::alarm::store::Disabled> {
     /// Build state around an observatory, with alarms not persisted.
     ///
     /// §5.6's first row, which §1.2 makes the normal state on a laptop.
+    // Not `const`: `O` may have a destructor, which a `const fn` cannot drop.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn new(azure: O, config: Config) -> Self {
         Self::with_alarms(azure, crate::alarm::store::Disabled, config)
     }
@@ -63,7 +65,7 @@ impl<O: Observatory> AppState<O, crate::alarm::store::Disabled> {
 
 impl<O: Observatory, S: AlarmStore> AppState<O, S> {
     /// Build state around an observatory and an alarm store.
-    pub fn with_alarms(azure: O, alarms: S, config: Config) -> Self {
+    pub const fn with_alarms(azure: O, alarms: S, config: Config) -> Self {
         let ttl = config.api_cache_ttl;
         Self {
             azure,
@@ -241,6 +243,8 @@ impl<O: Observatory, S: AlarmStore> AppState<O, S> {
     /// resolves these from the environment (`spec/01-architecture.md`
     /// §2.1.1); this is what an unconfigured one asks for so that every
     /// flow appears on the page as Unknown rather than being absent.
+    // The trait method takes `&self`; an unconfigured observatory has no state.
+    #[allow(clippy::unused_self)]
     fn queue_names(&self) -> Vec<String> {
         FLOWS
             .iter()
@@ -542,19 +546,29 @@ struct ServiceBusPage {
 
 /// One topic, as the page shows it.
 struct TopicRow {
+    /// The queue or topic name.
     name: String,
+    /// Active messages, when they could be read.
     active: Option<u64>,
+    /// Dead-lettered messages, when they could be read.
     dead_letter: Option<u64>,
+    /// The health derived from the depths.
     health: crate::health::Health,
+    /// Whether the subscriptions could be read.
     subscriptions_read: bool,
+    /// The topic's subscriptions.
     subscriptions: Vec<SubscriptionRow>,
 }
 
 /// One subscription, as the page shows it.
 struct SubscriptionRow {
+    /// The subscription name.
     name: String,
+    /// Active messages, when they could be read.
     active: Option<u64>,
+    /// Dead-lettered messages, when they could be read.
     dead_letter: Option<u64>,
+    /// The health derived from the depths.
     health: crate::health::Health,
 }
 
@@ -772,6 +786,7 @@ struct AlarmRow {
     scheduled_note: Option<String>,
 }
 
+/// Handler: the overview page.
 async fn overview<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
 ) -> Response {
@@ -780,6 +795,7 @@ async fn overview<O: Observatory, S: AlarmStore>(
     page(&OverviewPage { status })
 }
 
+/// Handler: the flows page.
 async fn flows_page<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
 ) -> Response {
@@ -791,6 +807,7 @@ async fn flows_page<O: Observatory, S: AlarmStore>(
 /// How far back the exceptions page looks.
 const EXCEPTION_HOURS: u32 = 24;
 
+/// Handler: the exceptions page.
 async fn exceptions_page<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
 ) -> Response {
@@ -803,6 +820,7 @@ async fn exceptions_page<O: Observatory, S: AlarmStore>(
     })
 }
 
+/// Handler: the Service Bus page.
 async fn service_bus_page<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
 ) -> Response {
@@ -853,6 +871,7 @@ pub struct MessageQuery {
     pub workflow_id: Option<String>,
 }
 
+/// Handler: the messages page.
 async fn messages_page<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Query(query): Query<MessageQuery>,
@@ -872,6 +891,7 @@ async fn messages_page<O: Observatory, S: AlarmStore>(
     })
 }
 
+/// Handler: the trace page.
 async fn trace_page<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Path(operation_id): Path<String>,
@@ -958,6 +978,7 @@ async fn api_alarms<O: Observatory, S: AlarmStore>(
     .into_response()
 }
 
+/// Handler: the alarms page.
 async fn alarms_page<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
 ) -> Response {
@@ -1001,6 +1022,7 @@ async fn alarms_page<O: Observatory, S: AlarmStore>(
     })
 }
 
+/// Handler: the stylesheet.
 async fn stylesheet() -> Response {
     (
         [(

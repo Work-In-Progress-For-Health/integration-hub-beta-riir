@@ -15,7 +15,16 @@
 //! Azure outage is worse than a page that says it cannot see, because an
 //! operator would believe it.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::assert_is_empty,
+    clippy::unused_async_trait_impl,
+    clippy::missing_docs_in_private_items,
+    clippy::needless_pass_by_value,
+    clippy::needless_collect
+)]
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

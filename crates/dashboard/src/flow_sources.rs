@@ -19,8 +19,11 @@ use crate::network_test::{validate_host, validate_port};
 /// The Cosmos partition (§10.4.5).
 pub const PARTITION: &str = "flow-source-server";
 
+/// Longest source description, in characters.
 const MAX_DESCRIPTION_LENGTH: usize = 200;
+/// What the caller is told when no store is configured.
 const NOT_CONFIGURED: &str = "Source persistence is not configured.";
+/// What the caller is told when the store cannot be reached.
 const UNAVAILABLE: &str = "Source persistence is currently unavailable.";
 
 /// Why a source operation did not happen.
@@ -42,6 +45,7 @@ impl SourceError {
     }
 }
 
+/// A store failure as the refusal the caller sees; the cause is logged, not shown.
 fn persistence(error: &StoreError) -> SourceError {
     tracing::error!(%error, "flow source persistence failed");
     SourceError::Persistence(UNAVAILABLE.to_string())
@@ -63,18 +67,23 @@ pub struct Source {
 /// A source plus the storage id it lives under.
 #[derive(Debug, Clone)]
 struct Stored {
+    /// The source as stored.
     source: Source,
+    /// The document id it is stored under.
     storage_id: String,
 }
 
+/// The identity of a source: its URL and port.
 fn key(url: &str, port: u16) -> (String, u16) {
     (url.to_lowercase(), port)
 }
 
+/// The document id a source is stored under, derived from its identity.
 fn storage_id(url: &str, port: u16) -> String {
     format!("flow-source:{}:{port}", url.to_lowercase())
 }
 
+/// Check a source and return it normalised, or the refusal naming what is wrong.
 fn validated(
     description: &str,
     url: &str,
@@ -96,6 +105,7 @@ fn validated(
     Ok((description.to_string(), url, port))
 }
 
+/// Refuse early when there is no store to write to.
 fn require<S: AlarmStore>(store: &S) -> Result<(), SourceError> {
     if store.is_enabled() {
         Ok(())
@@ -104,6 +114,7 @@ fn require<S: AlarmStore>(store: &S) -> Result<(), SourceError> {
     }
 }
 
+/// Every stored source with the id it is stored under.
 async fn stored<S: AlarmStore>(store: &S) -> Result<Vec<Stored>, SourceError> {
     let mut all: Vec<Stored> = store
         .documents(PARTITION)
@@ -137,6 +148,7 @@ async fn stored<S: AlarmStore>(store: &S) -> Result<Vec<Stored>, SourceError> {
     Ok(all)
 }
 
+/// The document written for a source.
 fn document(source: &Source, storage_id: &str) -> Value {
     serde_json::json!({
         "source_id": source.id,
@@ -156,6 +168,7 @@ pub async fn list<S: AlarmStore>(store: &S) -> Result<Vec<Source>, SourceError> 
     Ok(stored(store).await?.into_iter().map(|s| s.source).collect())
 }
 
+/// Store a new source; the id it was stored under, or a refusal when it already exists.
 async fn create<S: AlarmStore>(store: &S, source: &Source) -> Result<String, SourceError> {
     let id = storage_id(&source.url, source.port);
     let made = store

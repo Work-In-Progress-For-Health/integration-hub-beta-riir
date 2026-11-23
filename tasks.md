@@ -972,7 +972,7 @@ Recorded so the omission is deliberate rather than forgotten.
 
 - [ ] Convert the 303 production-code findings in `docs/checked-arithmetic-audit.md`
       crate by crate, denying the lints at each crate root once it is clean
-      (RCA-ENF-3). `db-sender`, `lookup-service` and `dashboard` are done; all crates and `xtask` are done and enforced in the gate (spec/17 §2.4a). `Result::unwrap_or_default` is banned (11 uses fixed); `Option::unwrap_or_default` is deliberately not. Open: `[lints] workspace` for `dashboard` and `xml-fhir-proms-transformer`, and the float rules (RCA-FLT).
+      (RCA-ENF-3). `db-sender`, `lookup-service` and `dashboard` are done; all crates and `xtask` are done and enforced in the gate (spec/17 §2.4a). `Result::unwrap_or_default` is banned (11 uses fixed); `Option::unwrap_or_default` is deliberately not. `dashboard` and `xml-fhir-proms-transformer` now inherit `[workspace.lints]`. Open: the float rules (RCA-FLT).
 - [ ] Then move the lints to `[workspace.lints.clippy]` and add the `clippy.toml`
       bans so the gate enforces them (RCA-ENF-1, -2). Not done: the gate cannot
       see any of this today.

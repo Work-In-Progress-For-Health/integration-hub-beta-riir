@@ -216,10 +216,12 @@ impl Default for Settings {
     }
 }
 
+/// A duration in milliseconds, for display.
 fn millis(elapsed: Duration) -> f64 {
     (elapsed.as_secs_f64() * 1000.0 * 100.0).round() / 100.0
 }
 
+/// Resolve a host name, timed; the outcome is a value, not an error, because a failed lookup is a result of the test.
 async fn resolve(host: &str, timeout: Duration) -> Dns {
     let started = Instant::now();
 
@@ -250,6 +252,7 @@ async fn resolve(host: &str, timeout: Duration) -> Dns {
     }
 }
 
+/// One timed connection attempt to an address; failure and timeout are results, not errors.
 async fn connect_once(address: IpAddr, port: u16, timeout: Duration) -> Attempt {
     let started = Instant::now();
 
@@ -397,11 +400,13 @@ pub async fn save_sample<S: AlarmStore>(store: &S, result: &TestResult) -> Resul
         .await
 }
 
+/// Whether a stored document records the given host and port.
 fn document_is(document: &Value, host: &str, port: u16) -> bool {
     document.get("host").and_then(Value::as_str) == Some(host)
         && document.get("port").and_then(Value::as_u64) == Some(u64::from(port))
 }
 
+/// The samples a stored document holds; none when it is absent or malformed.
 fn samples_of(document: Option<&Value>) -> Vec<Value> {
     document
         .and_then(|d| d.get("samples"))
@@ -446,7 +451,7 @@ pub async fn delete_history<S: AlarmStore>(
 }
 
 /// A tested endpoint and its latest sample (§10.4.4).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tested {
     /// Host.
     pub host: String,

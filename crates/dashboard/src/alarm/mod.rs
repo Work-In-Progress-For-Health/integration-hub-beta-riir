@@ -94,12 +94,14 @@ impl RuleState {
     /// that has returned to healthy leaves no document behind to be
     /// misread as a stale cooldown.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.last_alarm_at.is_none() && self.paused_until.is_none()
     }
 }
 
 /// The settings every rule shares.
+// Four independent switches the spec names one by one; a state enum would hide them.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleConfig {
     /// The rule's key in its Cosmos document.

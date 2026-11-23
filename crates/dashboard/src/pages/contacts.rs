@@ -48,8 +48,10 @@ pub fn routes<O: Observatory, S: AlarmStore>() -> Router<Arc<AppState<O, S>>> {
         .route("/static/contacts.js", get(|| async { script(SCRIPT) }))
 }
 
+/// The page script, served as `contacts.js`.
 const SCRIPT: &str = include_str!("../../static/contacts.js");
 
+/// A contact refusal as the JSON response the page shows.
 fn failure(error: &ContactError) -> Response {
     let status = match error {
         ContactError::Invalid(_) => StatusCode::BAD_REQUEST,
@@ -85,14 +87,14 @@ impl ListParams {
     /// at least 1. Absent takes its default; one that is supplied and invalid
     /// (empty, text, `0`) is refused, never replaced (RCA-IN-2, RCA-IN-3).
     fn query(&self) -> Result<ContactQuery, &'static str> {
-        let number = |text: &Option<String>, default: usize, name: &'static str| match text {
-            None => Ok(default),
-            Some(text) => text
-                .trim()
-                .parse::<usize>()
-                .ok()
-                .filter(|n| *n >= 1)
-                .ok_or(name),
+        let number = |text: &Option<String>, default: usize, name: &'static str| {
+            text.as_ref().map_or(Ok(default), |text| {
+                text.trim()
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|n| *n >= 1)
+                    .ok_or(name)
+            })
         };
         let clean = |text: &Option<String>| {
             text.as_deref()
@@ -124,34 +126,53 @@ impl ListParams {
     }
 }
 
+/// One row of the contacts table.
 struct Row {
+    /// The contact.
     contact: Contact,
+    /// The display labels of its flows.
     flows: Vec<String>,
     /// The contact as JSON, for the edit button (escaped in the attribute).
     json: String,
 }
 
+/// One flow in the filter and the edit form.
 struct FlowChoice {
+    /// The flow id.
     id: &'static str,
+    /// The label shown for it.
     label: &'static str,
 }
 
+/// What the contacts page template renders.
 #[derive(Template)]
 #[template(path = "contacts.html")]
 struct ContactsPage {
+    /// The rows on this page.
     rows: Vec<Row>,
+    /// How many contacts match the filter, across all pages.
     total: usize,
+    /// The page shown, from 1.
     page: usize,
+    /// How many pages there are.
     pages: usize,
+    /// The search text, echoed back into the box.
     q: String,
+    /// The flow filter, echoed back.
     flow: String,
+    /// Whether a search or flow filter is applied.
     filtered: bool,
+    /// The flows that can be chosen.
     flow_options: Vec<FlowChoice>,
+    /// The organisation types that can be chosen.
     organisation_types: [&'static str; 3],
+    /// Whether a store is configured; the page says so when it is not.
     persistence_configured: bool,
+    /// Whether the store could not be read; the page says so rather than showing an empty list.
     unavailable: bool,
 }
 
+/// The label for a flow id; an unknown id is shown as it is.
 fn flow_label(id: &str) -> String {
     FLOWS
         .iter()
@@ -185,6 +206,7 @@ async fn purge_if_due<O: Observatory, S: AlarmStore>(state: &AppState<O, S>) {
     }
 }
 
+/// Handler: the contacts page.
 async fn contacts_page<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Query(params): Query<ListParams>,
@@ -195,10 +217,9 @@ async fn contacts_page<O: Observatory, S: AlarmStore>(
     };
     purge_if_due(&state).await;
 
-    let (all, unavailable) = match contacts::list_all(&state.alarms).await {
-        Ok(all) => (all, false),
-        Err(_) => (Vec::new(), true),
-    };
+    let (all, unavailable) = contacts::list_all(&state.alarms)
+        .await
+        .map_or_else(|_| (Vec::new(), true), |all| (all, false));
     let (selected, total) = contacts::select(all, &query);
     let pages = total.div_ceil(query.per_page).max(1);
 
@@ -237,6 +258,7 @@ async fn contacts_page<O: Observatory, S: AlarmStore>(
     })
 }
 
+/// Handler: list contacts (JSON).
 async fn api_list<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Query(params): Query<ListParams>,
@@ -273,6 +295,7 @@ fn object(
     }
 }
 
+/// Handler: create a contact.
 async fn api_create<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
@@ -288,6 +311,7 @@ async fn api_create<O: Observatory, S: AlarmStore>(
     }
 }
 
+/// Handler: read one contact.
 async fn api_get<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Path(id): Path<String>,
@@ -299,6 +323,7 @@ async fn api_get<O: Observatory, S: AlarmStore>(
     }
 }
 
+/// Handler: update a contact.
 async fn api_update<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Path(id): Path<String>,
@@ -315,6 +340,7 @@ async fn api_update<O: Observatory, S: AlarmStore>(
     }
 }
 
+/// Handler: delete a contact (soft).
 async fn api_delete<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Path(id): Path<String>,
@@ -325,6 +351,7 @@ async fn api_delete<O: Observatory, S: AlarmStore>(
     }
 }
 
+/// Handler: restore a deleted contact.
 async fn api_restore<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     Path(id): Path<String>,
@@ -335,6 +362,7 @@ async fn api_restore<O: Observatory, S: AlarmStore>(
     }
 }
 
+/// Handler: import contacts from CSV.
 async fn api_import<O: Observatory, S: AlarmStore>(
     State(state): State<Arc<AppState<O, S>>>,
     body: Bytes,

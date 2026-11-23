@@ -212,10 +212,10 @@ impl Mailer {
             })
         })?;
 
-        let signed = signer.sign("POST", path, &host, &acs_signature::now(), body.as_bytes());
+        let request = signer.sign("POST", path, &host, &acs_signature::now(), body.as_bytes());
 
         self.client
-            .post_json_with(url, &signed.headers(), body.to_string())
+            .post_json_with(url, &request.headers(), body.to_string())
             .await
             .map(|_| ())
     }

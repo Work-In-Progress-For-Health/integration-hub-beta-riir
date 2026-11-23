@@ -456,7 +456,7 @@ mod tests {
             "{query}"
         );
         // Two quotes per filter clause, none of them injected.
-        assert!(!query.contains(r#"or 1==1"#), "{query}");
+        assert!(!query.contains("or 1==1"), "{query}");
     }
 
     #[test]

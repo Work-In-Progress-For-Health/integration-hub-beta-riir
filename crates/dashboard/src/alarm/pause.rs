@@ -75,6 +75,7 @@ impl Scope {
         }
     }
 
+    /// Read a scope name as written on the wire; `None` for an unknown one.
     fn parse(text: &str) -> Option<Self> {
         match text {
             "rule" => Some(Self::Rule),
@@ -170,6 +171,7 @@ impl PauseError {
         }
     }
 
+    /// A refusal of the request itself (400), as opposed to a persistence failure.
     fn invalid(message: impl Into<String>) -> Self {
         Self::Invalid(message.into())
     }
@@ -181,10 +183,13 @@ impl std::fmt::Display for PauseError {
     }
 }
 
+/// What the caller is told when the store cannot be reached.
 const UNAVAILABLE: &str = "Pause persistence is currently unavailable.";
+/// What the caller is told when no store is configured.
 const NOT_CONFIGURED: &str = "Pause persistence is not configured.";
 
-fn london() -> &'static time_tz::Tz {
+/// The zone every displayed pause time is shown in.
+const fn london() -> &'static time_tz::Tz {
     time_tz::timezones::db::europe::LONDON
 }
 
@@ -194,6 +199,7 @@ fn rfc3339(at: OffsetDateTime) -> Option<String> {
     at.format(&Rfc3339).ok()
 }
 
+/// Read a stored timestamp; `None` when it is absent or not RFC 3339.
 fn parse_time(value: Option<&Value>) -> Option<OffsetDateTime> {
     OffsetDateTime::parse(value?.as_str()?, &Rfc3339).ok()
 }
@@ -288,6 +294,7 @@ impl Pause {
         })
     }
 
+    /// The pause targets as stored: flows and rules, each only when present.
     fn targets_json(&self) -> Value {
         match self.scope {
             Scope::All => Value::Array(Vec::new()),
@@ -458,7 +465,7 @@ pub fn fields_for(pause: &Pause, now: OffsetDateTime) -> PauseFields {
 }
 
 /// A scheduled pause, as a row mentions it (§10.2.9).
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ScheduledFields {
     /// The pause.
     pub pause_id: String,
@@ -592,6 +599,7 @@ pub fn group_for_display(pauses: &[Pause], now: OffsetDateTime) -> Groups {
 /// (§10.2.7's "must name an existing rule").
 pub type KnownRules = BTreeMap<String, BTreeMap<String, String>>;
 
+/// A required text field, trimmed and bounded by `max`; `label` names it in the refusal.
 fn text_field(payload: &Value, name: &str, label: &str, max: usize) -> Result<String, PauseError> {
     let Some(value) = payload.get(name).and_then(Value::as_str) else {
         return Err(PauseError::invalid(format!("{label} is required.")));
@@ -616,12 +624,17 @@ fn is_workflow_id(text: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
+/// What a pause is aimed at, once the request has been validated.
 enum Targets {
+    /// Everything (a scope of `all`).
     None,
+    /// These flows.
     Flows(Vec<String>),
+    /// These rules.
     Rules(Vec<RuleTarget>),
 }
 
+/// Check that the named flows and rules exist in the catalogue and match the scope.
 fn validate_targets(
     scope: Scope,
     targets: Option<&Value>,
@@ -722,6 +735,7 @@ pub fn parse_london(raw: &str, label: &str) -> Result<OffsetDateTime, PauseError
     }
 }
 
+/// The pause start: the given time, or `now` when none was given.
 fn resolve_start(payload: &Value, now: OffsetDateTime) -> Result<OffsetDateTime, PauseError> {
     let raw = match payload.get("start") {
         None | Some(Value::Null) => return Ok(now),
@@ -757,6 +771,7 @@ fn resolve_start(payload: &Value, now: OffsetDateTime) -> Result<OffsetDateTime,
     Ok(start.max(now))
 }
 
+/// The pause end from an explicit time or a duration; refused when it is not after the start.
 fn resolve_end(
     payload: &Value,
     start: OffsetDateTime,
@@ -867,6 +882,7 @@ pub async fn list<S: AlarmStore>(store: &S) -> Result<Vec<Pause>, StoreError> {
         .collect())
 }
 
+/// A store failure as the refusal the caller sees; the cause is logged, not shown.
 fn persistence(error: &StoreError) -> PauseError {
     tracing::error!(%error, "alarm pause persistence failed");
     PauseError::Persistence(UNAVAILABLE.to_string())

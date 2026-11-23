@@ -186,15 +186,15 @@ pub const ETHNIC_CATEGORY_EXTENSION: &str =
 pub const ETHNICITY_SYSTEM: &str =
     "https://wpas-integration-ig.tools.labs.promptly.health/CodeSystem/wpas-ethnicity";
 
-/// `Encounter.class.system` (§6.7): HL7 v3 ActCode, from which
+/// `Encounter.class.system` (§6.7): HL7 v3 `ActCode`, from which
 /// [`ENCOUNTER_CLASSES`] draws its codes.
 pub const ENCOUNTER_CLASS_SYSTEM: &str = "http://terminology.hl7.org/CodeSystem/v3-ActCode";
 
 /// `Encounter.identifier.system` (§6.7, upstream #346).
 ///
 /// Still on the `tools.labs.promptly.health` host that §9.11 criticised for
-/// the other two; upstream moved only the ServiceRequest and
-/// PractitionerRole systems.
+/// the other two; upstream moved only the `ServiceRequest` and
+/// `PractitionerRole` systems.
 pub const ENCOUNTER_IDENTIFIER_SYSTEM: &str =
     "https://wpas-integration-ig.tools.labs.promptly.health/id/wpas-encounter";
 
@@ -227,7 +227,7 @@ pub const APPOINTMENT_PARTICIPANT_STATUS: &str = "accepted";
 /// mapper literals emit and what HL7's own v3-ActCode spells. The last two
 /// (outpatient, discharge) are the **capitalised** `fhir_constants.py`
 /// copies, because upstream #346 wrote them that way (§6.7.1). The
-/// discharge row reuses the `IMP` code: v3 ActCode has no discharge class,
+/// discharge row reuses the `IMP` code: v3 `ActCode` has no discharge class,
 /// so only `status` differs (a TEMP placeholder upstream).
 pub const ENCOUNTER_CLASSES: [(&str, &str, &str, &str); 4] = [
     (

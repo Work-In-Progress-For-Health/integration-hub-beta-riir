@@ -20,7 +20,7 @@ use time_tz::{OffsetDateTimeExt, Tz};
 ///
 /// Not the *host's* local zone: a container in Azure runs in UTC, and the
 /// rule is about the working day in Wales either way.
-fn london() -> &'static Tz {
+const fn london() -> &'static Tz {
     time_tz::timezones::db::europe::LONDON
 }
 

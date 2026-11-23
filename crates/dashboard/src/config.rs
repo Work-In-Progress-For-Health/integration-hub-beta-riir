@@ -185,13 +185,13 @@ impl AzureTargets {
     ///
     /// The gate §4.2 and §4.5 turn into empty results rather than errors.
     #[must_use]
-    pub fn has_log_analytics(&self) -> bool {
+    pub const fn has_log_analytics(&self) -> bool {
         self.log_analytics_workspace_id.is_some()
     }
 
     /// Whether the Service Bus management API can be reached.
     #[must_use]
-    pub fn has_service_bus(&self) -> bool {
+    pub const fn has_service_bus(&self) -> bool {
         self.subscription_id.is_some()
             && self.resource_group.is_some()
             && self.service_bus_namespace.is_some()

@@ -108,6 +108,8 @@ impl TokenSource {
     /// empty result for the caller rather than a failed page — but the
     /// reason is returned so it can be logged, because otherwise nobody
     /// ever finds out why every panel is blank.
+    // The guard is held across the fetch on purpose: that is the single flight.
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn token(&self, scope: &str) -> Result<String, HttpError> {
         // §4.6.2: the identity endpoint is `http://localhost:<port>/...` in
         // Container Apps, and `HttpsClient` refuses plaintext, so the
@@ -122,6 +124,7 @@ impl TokenSource {
         // The lock is held across the fetch, so a page fanning out to four
         // integrations at once makes **one** token request rather than
         // four. That is the whole point of §4.6.3.
+        // The guard must outlive the fetch below: that is the single-flight.
         let mut held = self.held.lock().await;
 
         if let Some(token) = held.get(scope)

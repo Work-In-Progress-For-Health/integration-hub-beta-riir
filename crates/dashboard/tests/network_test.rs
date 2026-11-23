@@ -56,7 +56,7 @@ async fn a_run_connects_records_history_and_lists_the_endpoint() {
         .await;
     assert_eq!(status, StatusCode::OK, "{deleted}");
     let (_, list) = app.get_json("/api/network-test/list").await;
-    assert!(list["endpoints"].as_array().unwrap().is_empty());
+    assert_eq!(list["endpoints"].as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]
@@ -177,7 +177,7 @@ async fn sources_can_be_added_edited_and_deleted_and_duplicates_are_refused() {
         .await;
     assert_eq!(status, StatusCode::OK);
     let (_, listed) = app.get_json("/api/network-test/sources").await;
-    assert!(listed["sources"].as_array().unwrap().is_empty());
+    assert_eq!(listed["sources"].as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]

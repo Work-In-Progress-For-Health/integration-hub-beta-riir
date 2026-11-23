@@ -26,6 +26,21 @@
 //! carries an absent case, and it is not there for tidiness.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::assert_is_empty,
+        clippy::cast_precision_loss,
+        clippy::duration_suboptimal_units,
+        clippy::unused_async_trait_impl,
+        clippy::missing_docs_in_private_items,
+        clippy::too_many_lines,
+        clippy::needless_pass_by_value
+    )
+)]
 // Checked arithmetic (`rust-checked-arithmetic`, RCA-ENF-3): denied for the
 // whole crate. Tests may use plain operators and indexing (RCA-EXC-5).
 #![cfg_attr(

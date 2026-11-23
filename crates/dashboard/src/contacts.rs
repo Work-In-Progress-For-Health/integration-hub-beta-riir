@@ -27,11 +27,16 @@ pub const ORGANISATION_TYPES: [&str; 3] = ["Team", "Health Board", "Supplier"];
 /// Contacts per page unless asked otherwise (§10.3.5).
 pub const DEFAULT_PAGE_SIZE: usize = 25;
 
+/// Longest contact name, in characters.
 const MAX_NAME_LENGTH: usize = 100;
+/// Longest organisation name, in characters.
 const MAX_ORGANISATION_LENGTH: usize = 200;
+/// Longest notes text, in characters.
 const MAX_NOTES_LENGTH: usize = 2000;
 
+/// What the caller is told when no store is configured.
 const NOT_CONFIGURED: &str = "Contact persistence is not configured.";
+/// What the caller is told when the store cannot be reached.
 const UNAVAILABLE: &str =
     "Contact persistence is currently unavailable — please try again shortly.";
 
@@ -56,6 +61,7 @@ impl ContactError {
         }
     }
 
+    /// A refusal of the request itself (400), as opposed to a persistence failure.
     fn invalid(message: impl Into<String>) -> Self {
         Self::Invalid(message.into())
     }
@@ -67,6 +73,7 @@ impl std::fmt::Display for ContactError {
     }
 }
 
+/// A store failure as the refusal the caller sees; the cause is logged, not shown.
 fn persistence(error: &StoreError) -> ContactError {
     // The store's error names a status and a URL, never a contact.
     tracing::error!(%error, "contact persistence failed");
@@ -125,6 +132,7 @@ pub struct Fields {
     pub flow_ids: Vec<String>,
 }
 
+/// A required name field, trimmed and bounded by `max`; `label` names it in the refusal.
 fn name(value: Option<&Value>, label: &str, max: usize) -> Result<String, ContactError> {
     let text = match value {
         None | Some(Value::Null) => "",
@@ -171,6 +179,7 @@ fn is_email(text: &str) -> bool {
     runs(local) && runs(domain) && domain.contains('.')
 }
 
+/// Whether the text looks like a phone number: digits and the usual separators.
 fn is_phone(text: &str) -> bool {
     (5..=30).contains(&text.chars().count())
         && text
@@ -178,6 +187,7 @@ fn is_phone(text: &str) -> bool {
             .all(|c| c.is_ascii_digit() || matches!(c, '+' | '(' | ')' | '-') || c.is_whitespace())
 }
 
+/// The flow ids on a contact: a list of known flow ids, or a refusal naming the bad one.
 fn flow_ids(value: Option<&Value>) -> Result<Vec<String>, ContactError> {
     let list = match value {
         None | Some(Value::Null) => return Ok(Vec::new()),
@@ -297,6 +307,7 @@ fn stamp_time(at: OffsetDateTime) -> Option<String> {
 }
 
 impl Contact {
+    /// Read a stored document back into a contact; `None` when it is not one.
     fn from_document(document: &Value) -> Option<Self> {
         let text = |name: &str| {
             document
@@ -328,12 +339,11 @@ impl Contact {
             flow_ids: document
                 .get("flow_ids")
                 .and_then(Value::as_array)
-                .map(|list| {
+                .map_or_default(|list| {
                     list.iter()
                         .filter_map(|v| v.as_str().map(ToString::to_string))
                         .collect()
-                })
-                .unwrap_or_default(),
+                }),
             deleted: document
                 .get("deleted")
                 .and_then(Value::as_bool)
@@ -363,6 +373,7 @@ impl Contact {
         })
     }
 
+    /// Overwrite the editable fields, leaving the identity and the stamps alone.
     fn apply(&mut self, fields: Fields) {
         self.first_name = fields.first_name;
         self.last_name = fields.last_name;
@@ -374,6 +385,7 @@ impl Contact {
         self.flow_ids = fields.flow_ids;
     }
 
+    /// The lower-cased text a search matches against.
     fn haystack(&self) -> String {
         [
             &self.first_name,
@@ -495,6 +507,7 @@ pub fn by_flow(contacts: Vec<Contact>) -> std::collections::BTreeMap<String, Vec
     grouped
 }
 
+/// Refuse early when there is no store to write to.
 fn require_persistence<S: AlarmStore>(store: &S) -> Result<(), ContactError> {
     if store.is_enabled() {
         Ok(())
@@ -503,6 +516,7 @@ fn require_persistence<S: AlarmStore>(store: &S) -> Result<(), ContactError> {
     }
 }
 
+/// Write the contact to the store, mapping a failure to the refusal the caller sees.
 async fn persist<S: AlarmStore>(store: &S, contact: &Contact) -> Result<(), ContactError> {
     store
         .upsert_document(PARTITION, &contact.id, CONTACT, &contact.to_document())
@@ -700,6 +714,7 @@ pub struct ImportResult {
     pub persistence_failed: bool,
 }
 
+/// The columns an import file must carry.
 const REQUIRED_COLUMNS: [&str; 4] = [
     "first_name",
     "last_name",

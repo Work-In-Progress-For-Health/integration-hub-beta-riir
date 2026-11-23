@@ -20,7 +20,16 @@
 //! This is a deliberate reading of §8.5, and it caught four keys and two
 //! whole response shapes that were wrong.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::assert_is_empty,
+    clippy::unused_async_trait_impl,
+    clippy::missing_docs_in_private_items,
+    clippy::needless_pass_by_value,
+    clippy::needless_collect
+)]
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

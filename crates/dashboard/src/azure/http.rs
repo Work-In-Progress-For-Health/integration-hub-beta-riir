@@ -265,17 +265,15 @@ impl HttpsClient {
         // The timeout wraps connect, send and read together. Three separate
         // deadlines would let a slow server take three times as long as any
         // one of them allows.
-        match tokio::time::timeout(
+        tokio::time::timeout(
             REQUEST_TIMEOUT,
             self.send_inner(method, url, token, body, headers),
         )
         .await
-        {
-            Ok(result) => result,
-            Err(_) => Err(HttpError::Timeout),
-        }
+        .unwrap_or(Err(HttpError::Timeout))
     }
 
+    /// The request itself, which `send` wraps in the overall timeout.
     async fn send_inner(
         &self,
         method: Method,

@@ -66,6 +66,8 @@ pub struct Container {
 }
 
 /// Serialise a [`ContainerState`] as the string the browser expects.
+// serde calls `serialize_with` functions with a reference.
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn container_state<S: serde::Serializer>(
     state: &ContainerState,
     serializer: S,
@@ -314,6 +316,9 @@ pub trait Observatory: Send + Sync + 'static {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Unconfigured;
 
+// The trait is async because the real implementation awaits the network; this one has
+// nothing to wait for.
+#[allow(clippy::unused_async_trait_impl)]
 impl Observatory for Unconfigured {
     async fn queue_depths(&self, queues: &[String]) -> BTreeMap<String, QueueDepths> {
         // Present, with nothing known. An *absent* entry would let a caller

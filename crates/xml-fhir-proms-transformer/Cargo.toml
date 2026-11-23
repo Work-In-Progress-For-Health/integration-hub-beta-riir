@@ -34,3 +34,6 @@ uuid.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 tokio-test.workspace = true
+
+[lints]
+workspace = true

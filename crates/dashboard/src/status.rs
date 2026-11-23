@@ -95,7 +95,7 @@ pub struct FlowQueue {
 
 impl FlowQueue {
     /// A queue that was not found.
-    fn absent() -> Self {
+    const fn absent() -> Self {
         Self {
             name: None,
             active: 0,
@@ -118,6 +118,8 @@ impl FlowQueue {
 }
 
 /// Serialise [`Health`] as the lowercase string `dashboard.js` expects.
+// serde calls `serialize_with` functions with a reference.
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn health_string<S: serde::Serializer>(health: &Health, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(health.css_class())
 }
@@ -503,7 +505,7 @@ mod tests {
 
     #[test]
     fn a_healthy_estate_reads_healthy() {
-        let quiet: Vec<(String, QueueDepths)> = FLOWS
+        let quiet: BTreeMap<String, QueueDepths> = FLOWS
             .iter()
             .map(|f| {
                 (
@@ -512,7 +514,6 @@ mod tests {
                 )
             })
             .collect();
-        let quiet: BTreeMap<String, QueueDepths> = quiet.into_iter().collect();
 
         // Every transformer running, so no container row trips.
         let containers: Vec<Container> = FLOWS

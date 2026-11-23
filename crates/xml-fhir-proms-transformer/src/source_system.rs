@@ -4,7 +4,7 @@
 //!
 //! # Seven boards, all named
 //!
-//! §5.2. Upstream #423 (`source_systems.py`, from the "Amy_Questions"
+//! §5.2. Upstream #423 (`source_systems.py`, from the "`Amy_Questions`"
 //! mapping spreadsheet) trimmed the table to the seven WPAS boards and gave
 //! every one a name; the endpoint is derived from the id
 //! ([`crate::fhir::WPAS_SOURCE_ENDPOINT_BASE`] plus `/{id}`) rather than

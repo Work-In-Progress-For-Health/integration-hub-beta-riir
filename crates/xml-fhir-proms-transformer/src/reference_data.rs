@@ -106,7 +106,7 @@ pub trait ReferenceDataResolver {
     /// per-board table.
     fn resolve_gender(&self, code: &str, system_id: &str) -> Option<&'static str>;
 
-    /// A UKCore `HumanLanguage` code, or `None` for a code that cannot be
+    /// A `UKCore` `HumanLanguage` code, or `None` for a code that cannot be
     /// resolved (§7.2). The interim resolver always returns `None`.
     fn resolve_language(&self, code: &str, system_id: &str) -> Option<String>;
 }

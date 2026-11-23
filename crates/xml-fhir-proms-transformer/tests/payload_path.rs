@@ -10,7 +10,16 @@
 //! the binary runs takes WPAS XML through it, including the one body shape
 //! upstream found awkward.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::assert_is_empty,
+    clippy::unused_async_trait_impl,
+    clippy::missing_docs_in_private_items,
+    clippy::needless_pass_by_value,
+    clippy::needless_collect
+)]
 
 use ihb_transformer::PayloadTransformer;
 use serde_json::Value;

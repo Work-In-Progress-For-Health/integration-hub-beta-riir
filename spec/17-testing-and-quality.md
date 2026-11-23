@@ -143,11 +143,8 @@ defaulted or repaired. Enforced in three places, all in the gate:
 for an operator the lints cannot see. `Result::unwrap_or_default` is
 banned in `clippy.toml` (an error is not a value, RCA-IN-6).
 **Not adopted:** a ban on `Option::unwrap_or_default` (absent is not
-invalid input), and
-`[workspace.lints]` inheritance for `dashboard` and
-`xml-fhir-proms-transformer`, which do not inherit it today and would report
-several hundred unrelated findings. Both are in
-`docs/checked-arithmetic-audit.md`.
+invalid input); see `docs/checked-arithmetic-audit.md`. Every crate now
+inherits `[workspace.lints]` (§2.2).
 
 ---
 

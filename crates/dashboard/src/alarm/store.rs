@@ -198,6 +198,9 @@ pub trait AlarmStore: Send + Sync + 'static {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Disabled;
 
+// The trait is async because the real implementation awaits the network; this one has
+// nothing to wait for.
+#[allow(clippy::unused_async_trait_impl)]
 impl AlarmStore for Disabled {
     async fn rules(&self, _partition: Partition) -> Result<Vec<RuleConfig>, StoreError> {
         // Empty rather than an error: nothing is configured, which is a
@@ -301,6 +304,9 @@ impl InMemory {
     }
 }
 
+// The trait is async because the real implementation awaits the network; this one has
+// nothing to wait for.
+#[allow(clippy::unused_async_trait_impl)]
 impl AlarmStore for InMemory {
     async fn rules(&self, partition: Partition) -> Result<Vec<RuleConfig>, StoreError> {
         if let Some(error) = self.failure() {
@@ -394,6 +400,8 @@ impl AlarmStore for InMemory {
         Ok(())
     }
 
+    // The guard is held across the check and the insert so they are atomic.
+    #[allow(clippy::significant_drop_tightening)]
     async fn create_document(
         &self,
         partition_key: &str,
@@ -408,6 +416,7 @@ impl AlarmStore for InMemory {
             return Err(StoreError::Unavailable(reason));
         }
 
+        // The guard is held across the check and the insert so they are atomic.
         let mut docs = self
             .docs
             .lock()

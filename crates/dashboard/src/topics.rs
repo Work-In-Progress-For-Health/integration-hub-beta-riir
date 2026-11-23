@@ -45,6 +45,7 @@ pub struct Topic {
     pub subscriptions_read: bool,
 }
 
+/// The depths of one queue or subscription entity, as the management API reports them.
 fn depths_of(entity: &Value) -> QueueDepths {
     let counts = entity.get("properties").and_then(|p| p.get("countDetails"));
     QueueDepths {
@@ -63,7 +64,7 @@ pub fn parse_topics(document: &Value) -> Vec<Topic> {
     let mut topics: Vec<Topic> = document
         .get("value")
         .and_then(Value::as_array)
-        .map(|values| {
+        .map_or_default(|values| {
             values
                 .iter()
                 .filter_map(|t| {
@@ -75,8 +76,7 @@ pub fn parse_topics(document: &Value) -> Vec<Topic> {
                     })
                 })
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     topics.sort_by(|a, b| a.name.cmp(&b.name));
     topics
 }
@@ -87,7 +87,7 @@ pub fn parse_subscriptions(document: &Value, topic: &str) -> Vec<Subscription> {
     let mut subscriptions: Vec<Subscription> = document
         .get("value")
         .and_then(Value::as_array)
-        .map(|values| {
+        .map_or_default(|values| {
             values
                 .iter()
                 .filter_map(|s| {
@@ -98,8 +98,7 @@ pub fn parse_subscriptions(document: &Value, topic: &str) -> Vec<Subscription> {
                     })
                 })
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     subscriptions.sort_by(|a, b| a.name.cmp(&b.name));
     subscriptions
 }

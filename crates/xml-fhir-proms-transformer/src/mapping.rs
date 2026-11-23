@@ -180,7 +180,7 @@ impl PersonName {
     /// Whether anything usable was found; an empty name is omitted from the
     /// resource rather than emitted as `{}` (§6.0.1).
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.prefixes.is_empty() && self.given.is_empty() && self.family.is_empty()
     }
 }
@@ -399,7 +399,7 @@ mod tests {
 
         assert_eq!(name.family, "Jones");
         assert_eq!(name.given, vec!["Hannah"]);
-        assert!(name.prefixes.is_empty());
+        assert_eq!(name.prefixes, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -443,7 +443,7 @@ mod tests {
         let name = split_person_name("Chess");
 
         assert_eq!(name.family, "Chess");
-        assert!(name.given.is_empty());
+        assert_eq!(name.given, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -453,8 +453,8 @@ mod tests {
         let name = split_person_name("Dr");
 
         assert_eq!(name.prefixes, vec!["Dr"]);
-        assert!(name.family.is_empty());
-        assert!(name.given.is_empty());
+        assert_eq!(name.family, "");
+        assert_eq!(name.given, [] as [std::string::String; 0]);
     }
 
     #[test]

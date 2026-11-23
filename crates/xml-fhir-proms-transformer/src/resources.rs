@@ -108,6 +108,9 @@ pub fn health_board_name(message: &PromsMessage) -> Option<String> {
 /// `destination_endpoint` is the `PROMPTLY_DESTINATION_ENDPOINT` value
 /// (§10.3), read once by the caller so this function stays pure; `None`
 /// uses [`fhir::PROMPTLY_ENDPOINT`].
+// One resource, field by field as the mapping table lists them; splitting it
+// would scatter a table that is read top to bottom.
+#[allow(clippy::too_many_lines)]
 #[must_use]
 pub fn message_header(
     message: &PromsMessage,

@@ -69,7 +69,7 @@ pub struct SequentialUuids {
 impl SequentialUuids {
     /// A factory starting at one.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { next: Cell::new(1) }
     }
 
@@ -80,7 +80,7 @@ impl SequentialUuids {
         clippy::arithmetic_side_effects,
         reason = "RCA-EXC-2: `next` starts at 1 and only grows, so `next - 1` cannot underflow"
     )]
-    pub fn issued(&self) -> u64 {
+    pub const fn issued(&self) -> u64 {
         self.next.get() - 1
     }
 }
@@ -175,6 +175,6 @@ mod tests {
             take(&SequentialUuids::new()),
             "00000000-0000-4000-8000-000000000001"
         );
-        assert!(!take(&RandomUuids).is_empty());
+        assert_ne!(take(&RandomUuids), "");
     }
 }
