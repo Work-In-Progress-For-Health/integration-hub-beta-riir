@@ -484,6 +484,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_disabled_store_has_no_documents_and_accepts_every_write() {
+        // §5.6 first row: with no database, the document operations are
+        // no-ops that succeed, and an exclusive create reports "created".
+        let store = Disabled;
+        let payload = serde_json::json!({"a": 1});
+
+        assert!(store.documents("pk").await.unwrap().is_empty());
+        assert!(
+            store
+                .upsert_document("pk", "id", "t", &payload)
+                .await
+                .is_ok()
+        );
+        assert!(
+            store
+                .create_document("pk", "id", "t", &payload)
+                .await
+                .unwrap()
+        );
+        assert!(store.delete_document("pk", "id").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn an_outage_fails_every_in_memory_operation() {
+        // §5.6.2: a total outage refuses reads and writes alike, naming the
+        // reason, and nothing is written while it lasts.
+        let store = InMemory::new();
+        let payload = serde_json::json!({"a": 1});
+        store.fail("down");
+
+        let refused = |result: Result<(), StoreError>| {
+            assert!(matches!(result, Err(StoreError::Unavailable(r)) if r == "down"));
+        };
+        refused(store.rules(Partition::Alarm1).await.map(drop));
+        refused(store.state(Partition::Alarm1).await.map(drop));
+        refused(store.put_state(Partition::Alarm1, &BTreeMap::new()).await);
+        refused(store.documents("pk").await.map(drop));
+        refused(store.upsert_document("pk", "id", "t", &payload).await);
+        refused(
+            store
+                .create_document("pk", "id", "t", &payload)
+                .await
+                .map(drop),
+        );
+        refused(store.delete_document("pk", "id").await);
+    }
+
+    #[tokio::test]
+    async fn write_failures_refuse_writes_and_still_serve_reads() {
+        // §5.6.2 and §9.9: RU exhaustion throttles writes first; reads of
+        // what is already stored keep working.
+        let store = InMemory::new();
+        let payload = serde_json::json!({"a": 1});
+        assert!(
+            store
+                .upsert_document("pk", "kept", "t", &payload)
+                .await
+                .is_ok()
+        );
+        store.fail_writes("throttled");
+
+        let refused = |result: Result<(), StoreError>| {
+            assert!(matches!(result, Err(StoreError::Unavailable(r)) if r == "throttled"));
+        };
+        refused(store.put_state(Partition::Alarm1, &BTreeMap::new()).await);
+        refused(store.upsert_document("pk", "new", "t", &payload).await);
+        refused(
+            store
+                .create_document("pk", "new", "t", &payload)
+                .await
+                .map(drop),
+        );
+        refused(store.delete_document("pk", "kept").await);
+        assert_eq!(store.documents("pk").await.unwrap().len(), 1);
+        assert!(store.state(Partition::Alarm1).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn an_in_memory_store_keeps_state_across_cycles() {
         // §5.1.3 — the cooldown surviving one evaluation to the next is the
         // whole point of persisting anything.
