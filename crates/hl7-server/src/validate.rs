@@ -219,9 +219,13 @@ pub fn check_phw(message: &Message) -> Result<(), Rejection> {
         return Err(malformed());
     }
 
-    let year: i32 = dob[0..4].parse().map_err(|_| malformed())?;
-    let month: u8 = dob[4..6].parse().map_err(|_| malformed())?;
-    let day: u8 = dob[6..8].parse().map_err(|_| malformed())?;
+    // Eight ASCII digits, so every cut is on a boundary; `split_at_checked`
+    // keeps the read free of slicing all the same.
+    let (year_text, rest) = dob.split_at_checked(4).ok_or_else(malformed)?;
+    let (month_text, day_text) = rest.split_at_checked(2).ok_or_else(malformed)?;
+    let year: i32 = year_text.parse().map_err(|_| malformed())?;
+    let month: u8 = month_text.parse().map_err(|_| malformed())?;
+    let day: u8 = day_text.parse().map_err(|_| malformed())?;
 
     let month = time::Month::try_from(month).map_err(|_| malformed())?;
     // A real date, so 20250230 is rejected rather than rounded. The Python

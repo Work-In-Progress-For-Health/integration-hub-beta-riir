@@ -168,7 +168,12 @@ where
             }
         };
 
-        accumulated.extend_from_slice(&chunk[..read]);
+        // `read` never exceeds the buffer; a `Read` that says otherwise is an
+        // error, not a panic (RCA-LEN-2).
+        let received = chunk
+            .get(..read)
+            .ok_or_else(|| io::Error::other("a read reported more than the buffer"))?;
+        accumulated.extend_from_slice(received);
 
         // §2.3 — checked before framing, so the limit is this server's
         // rather than the framer's, and so the accumulated bytes are still
@@ -186,7 +191,7 @@ where
             return Ok(());
         }
 
-        framer.push(&chunk[..read]);
+        framer.push(received);
 
         // §2.5 — every frame in this read gets its own reply. The Python
         // read until its buffer *ended* with <FS><CR> and so answered two
@@ -196,7 +201,13 @@ where
                 Ok(Some(frame)) => {
                     // Keep `accumulated` aligned with what the framer still
                     // holds, which is exactly its tail.
-                    let consumed = accumulated.len().saturating_sub(framer.buffered());
+                    // The framer cannot hold more than was read; if it claims
+                    // to, the two have diverged and the connection is closed
+                    // rather than draining a wrong amount (RCA-INT-4).
+                    let consumed = accumulated
+                        .len()
+                        .checked_sub(framer.buffered())
+                        .ok_or_else(|| io::Error::other("the framer holds more than was read"))?;
                     accumulated.drain(..consumed);
 
                     if !serve_frame(&mut stream, pipeline, &events, &frame).await? {
@@ -342,8 +353,14 @@ fn report_oversize(events: &EventLogger, accumulated: &[u8], limit: usize) {
 /// defect, but anyone sizing a log budget from `MAX_PARTIAL_MESSAGE_LOG_SIZE`
 /// should know the real ceiling is three times it.
 fn partial_for_log(accumulated: &[u8]) -> String {
-    let cut = accumulated.len().min(MAX_PARTIAL_MESSAGE_LOG_SIZE);
-    String::from_utf8_lossy(&accumulated[..cut]).into_owned()
+    // `take` rather than a slice: the cap is enforced by construction, with no
+    // fallback that could log more than it allows (`§2.3`).
+    let head: Vec<u8> = accumulated
+        .iter()
+        .take(MAX_PARTIAL_MESSAGE_LOG_SIZE)
+        .copied()
+        .collect();
+    String::from_utf8_lossy(&head).into_owned()
 }
 
 #[cfg(test)]

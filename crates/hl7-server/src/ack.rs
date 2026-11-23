@@ -238,7 +238,12 @@ pub fn sniff_control_id(raw: &str) -> Option<String> {
 /// A fresh `MSH-10`: the first 20 hex characters of a UUID.
 #[must_use]
 pub fn generate_control_id() -> String {
-    uuid::Uuid::new_v4().simple().to_string()[..GENERATED_CONTROL_ID_LENGTH].to_string()
+    uuid::Uuid::new_v4()
+        .simple()
+        .to_string()
+        .chars()
+        .take(GENERATED_CONTROL_ID_LENGTH)
+        .collect()
 }
 
 /// `spec/07-hl7-server.md` §4.3.3: no line breaks, delimiters escaped,

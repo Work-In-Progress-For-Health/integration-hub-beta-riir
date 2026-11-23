@@ -23,7 +23,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `ihb-validation` | **0** (was 13) | | | | | | |
 | `http-mock-receiver` | **0** (was 11) | | | | | | |
 | `ihb-bus` | **0** (was 8) | | | | | | |
-| `hl7-server` | 7 |  | 4 | 3 |  |  |  |
+| `hl7-server` | **0** (was 7) | | | | | | |
 | `soap-sender` | 7 | 2 | 5 |  |  |  |  |
 | `ihb-fields` | 6 | 4 |  | 2 |  |  |  |
 | `fhir-sender` | 6 | 4 | 2 |  |  |  |  |
@@ -44,7 +44,8 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
-**Done:** `ihb-bus` (tokens and sent-counts refuse at 2^64 instead of wrapping), `http-mock-receiver` (`soap::extract_payload` on remainders; identical to the offset version
+**Done:** `hl7-server` (the partial-message log cap is enforced by `take`, with no fallback that could log
+more), `ihb-bus` (tokens and sent-counts refuse at 2^64 instead of wrapping), `http-mock-receiver` (`soap::extract_payload` on remainders; identical to the offset version
 on 400,000 generated texts), `ihb-validation` (`drop_empty_elements` compared with the offset version on 400,000
 generated texts; `insertion_point` counts from the end instead of `+ 1`), `hl7-pims-transformer` (a network-supplied chunk size was added to unchecked, as in
 `lookup-service`; the retry back-off now ends retrying instead of saturating), `hl7-soap-server` (`payload::extract` on `get`/`checked_*`; compared with the
@@ -71,7 +72,7 @@ code (2026-11-22):
 | `dashboard/src/web.rs:444` | `.clamp(1, MAX_THROUGHPUT_HOURS)` | **decision**: an out-of-range query parameter is an error |
 | `ihb-sender/src/main_loop.rs:85`, `throttle.rs:158,166` | `saturating_sub`, `allowable.clamp(1, ..)` | declared floor, or error |
 | `dashboard/src/azure/email.rs:164` | `backoff * 2_u32.saturating_pow(attempt)` | declared ceiling |
-| `hl7-server/src/listener.rs:199` | `len().saturating_sub(buffered())` | `checked_sub`, the invariant is the point |
+| `hl7-server/src/listener.rs:199` | `len().saturating_sub(buffered())` | done: `checked_sub`, the connection closes on divergence |
 | `lookup-service/src/security.rs:753` | `len().saturating_sub(1)` | done: `der_integer` rewritten |
 
 ## Decisions needed (rejection currently becomes a substitute, RCA-IN-2 / RCA-IN-7)
@@ -120,13 +121,6 @@ crates/hl7-lims-wrrs-transformer/src/classifier.rs:93 string_slice
 crates/hl7-mock-receiver/src/server.rs:117 indexing_slicing
 crates/hl7-rest-server/src/ack.rs:124 string_slice
 crates/hl7-sender/src/client.rs:220 indexing_slicing
-crates/hl7-server/src/ack.rs:241 string_slice
-crates/hl7-server/src/listener.rs:171 indexing_slicing
-crates/hl7-server/src/listener.rs:189 indexing_slicing
-crates/hl7-server/src/listener.rs:346 indexing_slicing
-crates/hl7-server/src/validate.rs:222 string_slice
-crates/hl7-server/src/validate.rs:223 string_slice
-crates/hl7-server/src/validate.rs:224 string_slice
 crates/ihb-fields/src/lib.rs:345 arithmetic_side_effects
 crates/ihb-fields/src/lib.rs:345 indexing_slicing
 crates/ihb-fields/src/lib.rs:555 arithmetic_side_effects

@@ -37,6 +37,18 @@
 // rather than boxed away; these three calls happen once, at startup, so
 // even the allocation argument does not arise.
 #![allow(clippy::large_futures)]
+// Checked arithmetic (`rust-checked-arithmetic`, RCA-ENF-3): see `lib.rs`.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::integer_division,
+        clippy::unreachable
+    )
+)]
 
 use std::process::ExitCode;
 use std::sync::Arc;

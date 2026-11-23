@@ -28,6 +28,14 @@ Framing is `hl7-2-mllp`.
 NACK (§4.3.2) is sent, the connection is closed and the event is logged as
 `MESSAGE_FAILED`.
 
+§2.2z **Checked arithmetic** (`rust-checked-arithmetic`; the crate denies
+`arithmetic_side_effects`, `as_conversions`, `indexing_slicing`, `string_slice`,
+`integer_division` and `unreachable`). The partial-message log is the first
+`MAX_PARTIAL_MESSAGE_LOG_SIZE` bytes taken with `take`, so the cap holds by
+construction and there is no fallback that could log more. A read that reports
+more than its buffer, or a framer that claims to hold more than was read, is an
+I/O error that closes the connection; nothing drains a wrong amount.
+
 §2.3 **Frame size.** A frame that would exceed `MAX_MESSAGE_SIZE_BYTES` MUST
 cause a generic `AE` NACK (§4.3.2) to be sent and the connection to close.
 Before closing, the service MUST log at error
