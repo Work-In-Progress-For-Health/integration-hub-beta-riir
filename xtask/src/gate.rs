@@ -108,6 +108,9 @@ fn steps(tier: Tier, msrv_version: &str) -> Vec<Step> {
                         "warnings",
                     ],
                 ),
+                // The calls the checked-arithmetic rule bans and Clippy cannot
+                // see (`spec/17` §2.4, RCA-ENF-5): cheap, so before the tests.
+                cargo("checked-arithmetic", &["xtask", "check-arithmetic"]),
                 cargo("test", &["test", "--workspace"]),
                 doc,
                 cargo("verify-dictionaries", &["xtask", "verify-dictionaries"]),
@@ -481,6 +484,7 @@ mod tests {
             [
                 "fmt-check",
                 "clippy",
+                "checked-arithmetic",
                 "test",
                 "doc",
                 "verify-dictionaries",

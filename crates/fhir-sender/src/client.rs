@@ -68,7 +68,11 @@ impl Clock for TokioClock {
     }
 
     async fn sleep(&mut self, seconds: f64) {
-        tokio::time::sleep(Duration::from_secs_f64(seconds.max(0.0))).await;
+        // A negative wait is no wait; one that is not a finite duration cannot
+        // be slept and is not (it was bounded by `max_retry_after_seconds`).
+        if let Ok(wait) = Duration::try_from_secs_f64(seconds.max(0.0)) {
+            tokio::time::sleep(wait).await;
+        }
     }
 }
 
@@ -270,7 +274,11 @@ impl<T: Transport, C: Clock> FhirClient<T, C> {
                     url: url.to_string(),
                     headers,
                     body: data.map(<[u8]>::to_vec),
-                    timeout: Duration::from_secs_f64(timeout.max(0.001)),
+                    timeout: Duration::try_from_secs_f64(timeout.max(0.001)).map_err(|_| {
+                        DeliveryError::Transient(
+                            "the request timeout is not a valid duration".to_string(),
+                        )
+                    })?,
                 })
                 .await;
 

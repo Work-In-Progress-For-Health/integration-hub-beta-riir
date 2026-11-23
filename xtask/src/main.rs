@@ -44,6 +44,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+mod arithmetic;
+mod counting;
 mod gate;
 mod hooks;
 mod schedule;
@@ -177,6 +179,7 @@ fn main() -> ExitCode {
         Some("stack") => stack::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         Some("gate") => gate::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         Some("verify-pipelines") => verify_pipelines(),
+        Some("check-arithmetic") => arithmetic::run(),
         Some(other) => {
             eprintln!("xtask: unknown task {other:?}");
             usage();
@@ -201,7 +204,7 @@ fn main() -> ExitCode {
 fn usage() {
     eprintln!(
         "usage: cargo xtask \
-         <build-dictionaries|verify-dictionaries|fmt|fmt-check|msrv|verify-pipelines|gate|install-hooks|stack>"
+         <build-dictionaries|verify-dictionaries|fmt|fmt-check|msrv|verify-pipelines|check-arithmetic|gate|install-hooks|stack>"
     );
 }
 

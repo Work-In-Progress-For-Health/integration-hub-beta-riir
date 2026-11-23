@@ -35,6 +35,15 @@ is logged and swallowed; a failure to forward stops everything and returns
 no acknowledgement, so the source system retries. Backwards, this loses a
 clinical message silently — the one failure this system must not produce.
 
+**Arithmetic on an external figure never panics, wraps, saturates or invents
+a number, and invalid input is an error, never repaired.** A result that does
+not fit is `None` or an error, handled where it happens; a fallback is used
+only where a `spec/` clause declares it. A value that is out of range or
+malformed is refused, naming the figure, not clamped, defaulted or replaced.
+Use `checked_*`, `get`, `split_at_checked` and `try_from`, not `+`, `[..]`
+or `as`. The gate enforces it (`spec/17` §2.4a); the exceptions and the open
+items are in `docs/checked-arithmetic-audit.md`.
+
 ---
 
 ## The gate
@@ -45,7 +54,8 @@ steps are in `xtask/src/gate.rs`, and the hosted workflow calls the same
 task):
 
 ```sh
-cargo xtask gate                  # tier 1: fmt-check, clippy, test, doc,
+cargo xtask gate                  # tier 1: fmt-check, clippy,
+                                  # checked-arithmetic, test, doc,
                                   # verify-dictionaries, verify-pipelines, deny;
                                   # the MSRV build too when Cargo.toml,
                                   # Cargo.lock or rust-toolchain.toml changed

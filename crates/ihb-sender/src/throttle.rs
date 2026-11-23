@@ -26,6 +26,21 @@ pub const LOCK_RENEWAL_DURATION: Duration = Duration::from_secs(300);
 /// sends themselves.
 pub const RENEWAL_MARGIN: Duration = Duration::from_secs(30);
 
+/// What a whole batch has to fit inside (`§2.3`).
+///
+/// The lock-renewal duration less the margin. A constant, and checked at
+/// compile time that the margin leaves something (RCA-EXC-1), so there is no
+/// saturating subtraction at run time.
+pub const BATCH_WINDOW: Duration = match LOCK_RENEWAL_DURATION.checked_sub(RENEWAL_MARGIN) {
+    Some(window) => window,
+    None => Duration::ZERO,
+};
+
+const _: () = assert!(
+    !BATCH_WINDOW.is_zero(),
+    "the renewal margin must be shorter than the lock-renewal duration"
+);
+
 /// A rate limit, or the absence of one.
 ///
 /// # Examples
@@ -74,7 +89,9 @@ impl Throttle {
         let interval = match messages {
             None => None,
             Some(0) => return Err(InvalidRate),
-            Some(rate) => Some(Duration::from_secs_f64(60.0 / f64::from(rate))),
+            Some(rate) => {
+                Some(Duration::try_from_secs_f64(60.0 / f64::from(rate)).map_err(|_| InvalidRate)?)
+            }
         };
 
         Ok(Self {
@@ -159,7 +176,7 @@ pub fn batch_size(configured: usize, interval: Option<Duration>) -> usize {
         return configured;
     }
 
-    let window = LOCK_RENEWAL_DURATION.saturating_sub(RENEWAL_MARGIN);
+    let window = BATCH_WINDOW;
     // More than a `usize` of messages fit the window: no bound but the
     // configured one, which is the declared ceiling (`§2.4.3`).
     let allowable = whole_floor(window.as_secs_f64() / interval.as_secs_f64())
@@ -282,7 +299,7 @@ mod tests {
         throttle.acquire().await;
 
         assert_eq!(
-            Instant::now().duration_since(started),
+            Instant::now().checked_duration_since(started).unwrap(),
             Duration::from_secs(1),
             "the second send lands one interval after the first, not one \
              interval after the work finished"
@@ -308,7 +325,7 @@ mod tests {
         // been reset to now, not carried forward from ten minutes ago.
         throttle.acquire().await;
         assert_eq!(
-            Instant::now().duration_since(before),
+            Instant::now().checked_duration_since(before).unwrap(),
             Duration::from_secs(1),
             "the next one is spaced from now, not from the overdue schedule"
         );

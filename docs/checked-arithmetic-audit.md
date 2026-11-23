@@ -97,6 +97,32 @@ substitution were replaced, not edited to fit.
   sent (spec/ultra7 §4.2); a damaged chunked reply is `Malformed HTTP response`
   (§7.4a).
 
+## Enforcement now in the gate (RCA-ENF-1 to -5), 2026-11-23
+
+- Every crate and `xtask` denies the six lints outside tests (per crate, not
+  `[workspace.lints]`, so test code keeps plain operators: spec/17 §2.4a).
+- `clippy.toml` disallows `sum`, `product`, `Duration::from_secs_f64/f32`,
+  `Instant::duration_since` (std and tokio) and `Saturating` / `Wrapping`.
+- `cargo xtask check-arithmetic` is a gate step: no `.saturating_*`,
+  `.wrapping_*`, `.overflowing_*`, `.strict_*`, `.clamp(`, `unwrap_unchecked`
+  or unwrapped `checked_*` in production code.
+- `[profile.release] overflow-checks = true`.
+- The last `saturating_*` / `clamp` / `sum` / `from_secs_f64` uses were fixed
+  to get here: `hl7-rest-server` (cap 6x+1024), `ihb-sender` (the batch window
+  is a compile-time constant, a zero margin fails the build), `fhir-sender`,
+  `hl7-pims-transformer`, `lookup-service` (overview totals),
+  `dashboard` (latency mean).
+
+**Not adopted, and why:**
+
+- A ban on `Option::unwrap_or_default` (RCA-P-3): about a hundred uses, mostly
+  "absent text is empty". Each needs a one-line declaration, or an error.
+- `[lints] workspace = true` for `dashboard` and `xml-fhir-proms-transformer`:
+  they do not inherit the workspace lints today, and opting in reports several
+  hundred unrelated findings (`unwrap` in tests, missing docs).
+- The float rules (RCA-FLT): the audit measured integer arithmetic and
+  conversions only.
+
 ## Plan (RCA-ENF-3: one module at a time, then deny at the crate root)
 
 1. Convert a crate until `-W` reports nothing; then add the `deny` block (as in

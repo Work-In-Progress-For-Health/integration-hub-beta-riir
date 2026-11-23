@@ -117,7 +117,13 @@ impl<E: MessageSink, S: MessageSink, M: Mint> Hl7Http<E, S, M> {
 
         // §2.1 — bounded, because JSON can expand a control character
         // sixfold and the limit applies to the decoded content.
-        let cap = limit.saturating_mul(6).saturating_add(1024);
+        // A cap that cannot be represented is the largest one: the decoded
+        // content is still held to `limit` below (`§2.1`), so no message
+        // larger than that is accepted.
+        let cap = limit
+            .checked_mul(6)
+            .and_then(|n| n.checked_add(1024))
+            .unwrap_or(usize::MAX); // §2.1
         let body = match Limited::new(request.into_body(), cap).collect().await {
             Ok(collected) => collected.to_bytes(),
             Err(error) => {

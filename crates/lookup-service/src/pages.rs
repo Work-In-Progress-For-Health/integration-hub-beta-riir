@@ -222,6 +222,12 @@ struct OverviewPage {
     uploads_blocked: Option<String>,
 }
 
+/// A total the overview cannot represent is an error, not a wrapped number
+/// (RCA-INT-1, `spec/20-lookup-service.md` §9.1).
+fn total_out_of_range() -> LookupError {
+    LookupError::backend_unavailable("a total on the overview is out of range", None)
+}
+
 /// `GET /`.
 async fn overview<S: TableStore>(
     State(state): State<Arc<AppState<S>>>,
@@ -234,13 +240,16 @@ async fn overview<S: TableStore>(
         chrome: Chrome::for_request(&state, &headers),
         active: "tables",
         asset_version: ASSET_VERSION,
-        total_rows: summaries.iter().map(|t| t.row_count).sum(),
+        total_rows: summaries
+            .iter()
+            .try_fold(0_usize, |total, t| total.checked_add(t.row_count))
+            .ok_or_else(total_out_of_range)?,
         composite_count: summaries.iter().filter(|t| t.key_columns.len() > 1).count(),
         cached_entries: summaries
             .iter()
             .filter(|t| t.cache.mode == CacheMode::Ttl)
-            .map(|t| t.cache.entries)
-            .sum(),
+            .try_fold(0_usize, |total, t| total.checked_add(t.cache.entries))
+            .ok_or_else(total_out_of_range)?,
         source: resolver.store().source().to_owned(),
         uploads_blocked: uploads_blocked(&principal, &resolver),
         tables: summaries

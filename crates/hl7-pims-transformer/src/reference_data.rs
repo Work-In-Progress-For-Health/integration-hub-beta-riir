@@ -219,8 +219,11 @@ impl ReferenceDataConfig {
         // Upstream accepts anything `float()` does and lets urllib3 fail
         // later; a zero or negative deadline here would make every lookup
         // fail instantly or panic in `Duration::from_secs_f64`.
-        let timeout = if timeout.is_finite() && timeout > 0.0 {
-            Duration::from_secs_f64(timeout)
+        let timeout = if let Some(duration) = Duration::try_from_secs_f64(timeout)
+            .ok()
+            .filter(|duration| !duration.is_zero())
+        {
+            duration
         } else {
             reader.invalid(
                 "REFERENCE_DATA_API_TIMEOUT_SECONDS",

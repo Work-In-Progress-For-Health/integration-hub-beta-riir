@@ -39,7 +39,7 @@ expensive ones when it matters:
 | Tier | Name | Runs | Needs | Typical time |
 | --- | --- | --- | --- | --- |
 | 0 | `fast` | `fmt-check` | nothing | seconds |
-| 1 | `gate` | §1's steps, `cargo doc`, `verify-dictionaries`, `verify-pipelines`, `cargo deny`; MSRV `check` when `Cargo.toml`, `Cargo.lock` or `rust-toolchain.toml` changed since the merge base | a toolchain | minutes |
+| 1 | `gate` | §1's steps, `cargo xtask check-arithmetic` (`spec/17` §2.4a), `cargo doc`, `verify-dictionaries`, `verify-pipelines`, `cargo deny`; MSRV `check` when `Cargo.toml`, `Cargo.lock` or `rust-toolchain.toml` changed since the merge base | a toolchain | minutes |
 | 2 | `stack` | the `emulator` and `sqlserver` feature tests (`17-testing-and-quality.md` §9.2) | Podman; the `bus` Compose profile | ~9 min |
 | 3 | `flows` | each `ihb-e2e` flow, **one Compose profile at a time** | Podman | ~4 min per flow, cold |
 

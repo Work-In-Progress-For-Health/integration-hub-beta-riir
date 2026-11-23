@@ -329,7 +329,8 @@ pub async fn run(
         None
     } else {
         Some(round2(
-            latencies.iter().sum::<f64>() / count_f64(latencies.len())?,
+            latencies.iter().fold(0.0, |total, latency| total + latency)
+                / count_f64(latencies.len())?,
         ))
     };
 

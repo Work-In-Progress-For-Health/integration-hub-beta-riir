@@ -124,7 +124,8 @@ impl AppConfig {
                 client_id,
                 client_secret.clone(),
                 scope,
-                Duration::from_secs_f64(self.settings.timeout_seconds),
+                Duration::try_from_secs_f64(self.settings.timeout_seconds)
+                    .map_err(|_| "the timeout is not a valid duration".to_string())?,
             ),
         }
     }

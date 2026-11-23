@@ -81,9 +81,7 @@ where
         tracing::warn!(
             configured = config.max_batch_size,
             reduced_to = batch,
-            window_seconds = crate::throttle::LOCK_RENEWAL_DURATION
-                .saturating_sub(crate::throttle::RENEWAL_MARGIN)
-                .as_secs(),
+            window_seconds = crate::throttle::BATCH_WINDOW.as_secs(),
             interval = ?throttle.interval(),
             "the batch size was reduced so a whole batch fits inside the lock-renewal window"
         );

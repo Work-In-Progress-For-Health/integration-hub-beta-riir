@@ -114,6 +114,40 @@ mistaken for a blanket exemption.
 §2.4 `#![forbid(unsafe_code)]` at the top of every crate. There is no FFI in
 this workspace and there is not going to be.
 
+§2.4a **Checked arithmetic** (`rust-checked-arithmetic`). Arithmetic on an
+external figure never panics, wraps, saturates or invents a number: a result
+that does not fit is `None` or an error, handled where it happens, with a
+fallback only where a `spec/` clause declares it and says why it is correct.
+An input that is out of range or malformed is an error, never clamped,
+defaulted or repaired. Enforced in three places, all in the gate:
+
+- **Every crate and `xtask`** carries
+  `#![cfg_attr(not(test), deny(clippy::arithmetic_side_effects,
+  clippy::as_conversions, clippy::indexing_slicing, clippy::string_slice,
+  clippy::integer_division, clippy::unreachable))]`. Per crate and outside
+  tests, not in `[workspace.lints]`, because that would also deny them in
+  test code, where plain operators and indexing are allowed (RCA-EXC-5).
+  An exception is one `#[expect(lint, reason = "RCA-EXC-n: ...")]` on one
+  statement, never an `#[allow]` and never a whole module.
+- **`clippy.toml`** disallows `Iterator::sum` and `product`,
+  `Duration::from_secs_f64` / `from_secs_f32` and `Instant::duration_since`
+  (use `try_fold` with `checked_add`, `try_from_secs_f64`,
+  `checked_duration_since`), and the `Saturating` and `Wrapping` types.
+- **`cargo xtask check-arithmetic`** (the `checked-arithmetic` gate step,
+  RCA-ENF-5) fails on `.saturating_*`, `.wrapping_*`, `.overflowing_*`,
+  `.strict_*`, `.clamp(`, `unwrap_unchecked` and an unwrapped or defaulted
+  `checked_*` result, in production code only (`src/`, up to the first
+  `#[cfg(test)]`).
+
+`[profile.release]` sets `overflow-checks = true` (RCA-ENF-4) as the backstop
+for an operator the lints cannot see. **Not adopted:** a ban on
+`Option::unwrap_or_default` (RCA-P-3; about a hundred uses read "absent is
+empty" for text and each needs a declaration first), and
+`[workspace.lints]` inheritance for `dashboard` and
+`xml-fhir-proms-transformer`, which do not inherit it today and would report
+several hundred unrelated findings. Both are in
+`docs/checked-arithmetic-audit.md`.
+
 ---
 
 ## §3 Documentation

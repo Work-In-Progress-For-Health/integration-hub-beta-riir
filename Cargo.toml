@@ -323,6 +323,11 @@ split-debuginfo = "unpacked"
 debug = false
 
 [profile.release]
+# The backstop for any operator the lints cannot see (a macro, a dependency):
+# an overflow panics, which is detectable, instead of wrapping, which is not.
+# `panic = "abort"` below stops the container. `rust-checked-arithmetic`
+# RCA-ENF-4; the production code itself uses checked operations (RCA-P-1).
+overflow-checks = true
 # A panic in a clinical message path should stop the container, not unwind
 # into a half-processed state that acknowledges what it did not deliver.
 panic = "abort"
