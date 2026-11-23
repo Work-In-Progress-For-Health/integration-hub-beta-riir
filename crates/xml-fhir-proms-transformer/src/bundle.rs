@@ -244,8 +244,10 @@ impl Builder {
             "type": "message",
             "entry": entries,
         });
-        if let Some(profile) = self.profile {
-            bundle["meta"] = json!({ "profile": [profile] });
+        if let Some(profile) = self.profile
+            && let Some(object) = bundle.as_object_mut()
+        {
+            object.insert("meta".to_string(), json!({ "profile": [profile] }));
         }
         bundle
     }

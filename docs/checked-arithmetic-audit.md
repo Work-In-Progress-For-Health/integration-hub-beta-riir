@@ -27,8 +27,8 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `soap-sender` | **0** (was 7) | | | | | | |
 | `ihb-fields` | **0** (was 6) | | | | | | |
 | `fhir-sender` | **0** (was 6) | | | | | | |
-| `xml-fhir-proms-transformer` | 5 | 2 |  | 3 |  |  |  |
-| `integration-hub-tester` | 5 | 3 |  | 2 |  |  |  |
+| `xml-fhir-proms-transformer` | **0** (was 5) | | | | | | |
+| `integration-hub-tester` | **0** (was 5) | | | | | | |
 | `message-store-service` | 3 | 3 |  |  |  |  |  |
 | `message-replay-job` | 3 | 3 |  |  |  |  |  |
 | `buswatch` | 3 | 3 |  |  |  |  |  |
@@ -44,7 +44,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
-**Done:** `fhir-sender`, `ihb-fields` (a path with position `0` underflowed `index - 1`, reachable from a
+**Done:** `xml-fhir-proms-transformer`, `integration-hub-tester`, `fhir-sender`, `ihb-fields` (a path with position `0` underflowed `index - 1`, reachable from a
 mapping path; now reads as nothing), `soap-sender`, `hl7-server` (the partial-message log cap is enforced by `take`, with no fallback that could log
 more), `ihb-bus` (tokens and sent-counts refuse at 2^64 instead of wrapping), `http-mock-receiver` (`soap::extract_payload` on remainders; identical to the offset version
 on 400,000 generated texts), `ihb-validation` (`drop_empty_elements` compared with the offset version on 400,000
@@ -124,11 +124,6 @@ crates/ihb-sql/src/chunk.rs:15 integer_division
 crates/ihb-sql/src/connection.rs:157 unreachable
 crates/ihb-telemetry/src/clock.rs:160 arithmetic_side_effects
 crates/ihb-transformer/src/runtime.rs:262 arithmetic_side_effects
-crates/integration-hub-tester/src/cli.rs:109 indexing_slicing
-crates/integration-hub-tester/src/cli.rs:136 indexing_slicing
-crates/integration-hub-tester/src/plugins/senders.rs:50 arithmetic_side_effects
-crates/integration-hub-tester/src/plugins/senders.rs:103 arithmetic_side_effects
-crates/integration-hub-tester/src/plugins/senders.rs:104 arithmetic_side_effects
 crates/message-replay-job/src/job.rs:223 arithmetic_side_effects
 crates/message-replay-job/src/main.rs:174 arithmetic_side_effects
 crates/message-replay-job/src/sql.rs:85 arithmetic_side_effects
@@ -138,9 +133,4 @@ crates/message-store-service/src/insert.rs:96 arithmetic_side_effects
 crates/rest-server/src/xml.rs:146 string_slice
 crates/rest-server/src/xml.rs:148 arithmetic_side_effects
 crates/rest-server/src/xml.rs:149 string_slice
-crates/xml-fhir-proms-transformer/src/bundle.rs:248 indexing_slicing
-crates/xml-fhir-proms-transformer/src/identity.rs:80 arithmetic_side_effects
-crates/xml-fhir-proms-transformer/src/identity.rs:87 arithmetic_side_effects
-crates/xml-fhir-proms-transformer/src/resources.rs:143 indexing_slicing
-crates/xml-fhir-proms-transformer/src/resources.rs:144 indexing_slicing
 ```

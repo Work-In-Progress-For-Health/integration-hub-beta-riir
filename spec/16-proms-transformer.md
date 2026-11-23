@@ -799,3 +799,9 @@ need the `SURGERY-PERF`, `SURGERY-DN`, `PREOP-VIS` and `PREOP-AR` routing
 upstream added in `8a7f6f3`; the tester's `proms_samples` is otherwise as
 before. §9.5's `ServiceRequest` and `PractitionerRole` rows and §9.6 (the
 referrer's code under the GMC system) are **retired** by this section.
+
+**Checked arithmetic** (`rust-checked-arithmetic`): the crate denies
+`arithmetic_side_effects`, `as_conversions`, `indexing_slicing`, `string_slice`,
+`integer_division` and `unreachable`. The bundle's `meta` is inserted through
+the object, not by indexing; the sequential-UUID test double keeps two
+`#[expect]`s (a counter only its own calls advance, RCA-EXC-2).

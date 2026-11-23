@@ -106,7 +106,8 @@ pub fn run(args: &[String], stdin: &mut dyn Read, out: &mut dyn Write, err: &mut
                 }
             }
         }
-        "run" => run_plugin(&args[1..], stdin, out, err),
+        // `args[0]` is `run`; with nothing after it `run_plugin` answers with usage.
+        "run" => run_plugin(args.get(1..).unwrap_or(&[]), stdin, out, err),
         other => usage(&format!("unknown command '{other}'")),
     }
 }
@@ -133,7 +134,7 @@ fn run_plugin(
     };
 
     let (mut sample, mut file, mut output) = (None, None, None);
-    let mut rest = args[1..].iter();
+    let mut rest = args.get(1..).unwrap_or(&[]).iter();
     while let Some(flag) = rest.next() {
         let slot = match flag.as_str() {
             "--sample" => &mut sample,

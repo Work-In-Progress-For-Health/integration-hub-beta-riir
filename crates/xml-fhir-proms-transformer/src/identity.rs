@@ -76,12 +76,20 @@ impl SequentialUuids {
     /// How many have been handed out; lets a test assert the slot count
     /// (including slots that ended up unfilled).
     #[must_use]
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "RCA-EXC-2: `next` starts at 1 and only grows, so `next - 1` cannot underflow"
+    )]
     pub fn issued(&self) -> u64 {
         self.next.get() - 1
     }
 }
 
 impl UuidFactory for SequentialUuids {
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "RCA-EXC-2: a test double that counts its own calls; 2^64 of them are unreachable"
+    )]
     fn next(&self) -> String {
         let n = self.next.get();
         self.next.set(n + 1);

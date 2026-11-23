@@ -140,8 +140,10 @@ pub fn message_header(
         ]),
     })];
     // Drop a null display rather than emitting one.
-    if focus[0]["display"].is_null() {
-        focus[0].as_object_mut().map(|o| o.remove("display"));
+    if let Some(first) = focus.first_mut()
+        && first["display"].is_null()
+    {
+        first.as_object_mut().map(|o| o.remove("display"));
     }
 
     // The Referral's practitioners follow the ServiceRequest (upstream `#435`).

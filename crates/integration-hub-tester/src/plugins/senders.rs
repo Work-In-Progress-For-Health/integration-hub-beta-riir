@@ -44,10 +44,20 @@ EVN||20250703120000
 PID|||fail^^^^NH||TRIGGER^FAULT^^^Mr||19800115|M
 PV1||U";
 
+/// The 0-based index of the byte `from_end` before the end of a frame of
+/// `length` bytes, as text; `?` when the frame is too short to have one. An
+/// unknown position is shown as unknown, never as a number (RCA-P-3).
+fn position_from_end(length: usize, from_end: usize) -> String {
+    length
+        .checked_sub(from_end)
+        .map_or_else(|| "?".to_string(), |at| at.to_string())
+}
+
 /// The MLLP frame of `payload` (`spec/integration-hub-tester-component-preview.md` §4.9).
 #[must_use]
 pub fn mllp_frame(payload: &[u8]) -> Vec<u8> {
-    let mut frame = Vec::with_capacity(payload.len() + 3);
+    // Capacity is a hint; the three framing bytes cost one reallocation at most.
+    let mut frame = Vec::with_capacity(payload.len());
     frame.push(MLLP_START);
     frame.extend_from_slice(payload);
     frame.push(MLLP_END);
@@ -100,8 +110,14 @@ impl Plugin for Hl7SenderPlugin {
             String::new(),
             "  Byte 0      : 0x0B  <- MLLP Start Block (VT)".to_string(),
             format!("  Bytes 1-{n}  : HL7 ER7 payload ({n} bytes, UTF-8)"),
-            format!("  Byte {}    : 0x1C  <- MLLP End Block (FS)", n + 1),
-            format!("  Byte {}    : 0x0D  <- Carriage Return", n + 2),
+            format!(
+                "  Byte {}    : 0x1C  <- MLLP End Block (FS)",
+                position_from_end(frame.len(), 2)
+            ),
+            format!(
+                "  Byte {}    : 0x0D  <- Carriage Return",
+                position_from_end(frame.len(), 1)
+            ),
             String::new(),
             heading("HL7 PAYLOAD  (as transmitted - segment separator = CR 0x0D)"),
             String::new(),

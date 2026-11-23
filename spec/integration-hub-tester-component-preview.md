@@ -256,6 +256,12 @@ terminate: `Ctrl+C` stops the tester and its child together.
 
 ---
 
+§7.1 **Checked arithmetic** (`rust-checked-arithmetic`): the crate denies
+`arithmetic_side_effects`, `as_conversions`, `indexing_slicing`, `string_slice`,
+`integer_division` and `unreachable`. In the MLLP frame view, a byte position
+that cannot be computed is shown as `?`, never as a number; `run` with nothing
+after it answers with usage.
+
 ## §8 Tests
 
 §8.1 There are no upstream tests for the Python tester (`find` finds none),
