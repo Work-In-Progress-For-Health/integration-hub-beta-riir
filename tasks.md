@@ -978,3 +978,18 @@ Recorded so the omission is deliberate rather than forgotten.
       see any of this today.
 - [x] Applied to the upstream-sync code: `count_segments`, the Cosmos back-off,
       `trrr.rs` (denied from the start).
+
+## Coverage (spec/17 §7.3; measured, not a target)
+
+- Baseline 2026-11-23, `cargo llvm-cov nextest --workspace` without services:
+  **83.2 % of lines** (36,285 of 43,593). §7.1 sets no percentage target, so
+  this is a map of what no test reaches, not a number to raise.
+- What is unreached is almost all code that needs a broker or database:
+  `ihb-bus/src/live.rs` (9 %), every `main_loop.rs` and `main.rs` (0 %),
+  `db-sender/src/db.rs` (42 %), `buswatch/src/live.rs`, and `xtask` gate/main
+  (the gate runs the tools it wraps). The emulator, sqlserver and compose tiers
+  exercise these but need Podman; re-measure with `--features emulator,sqlserver`
+  once the stack is up.
+- [ ] Re-run the measurement with the stack up, then look at the remaining
+      uncovered lines in `dashboard` (999) and `lookup-service` (396), the two
+      largest crates that need no services.
