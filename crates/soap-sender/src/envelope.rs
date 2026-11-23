@@ -242,8 +242,12 @@ fn status_element(body: &str) -> Option<String> {
     let mut rest = body;
 
     while let Some(open) = rest.find("Status") {
-        let before = &rest[..open];
-        let after = &rest[open + "Status".len()..];
+        let Some((before, from_name)) = rest.split_at_checked(open) else {
+            break;
+        };
+        let Some(after) = from_name.strip_prefix("Status") else {
+            break;
+        };
         rest = after;
 
         // The character before must end a tag name's prefix, and the one
@@ -254,16 +258,16 @@ fn status_element(body: &str) -> Option<String> {
         if before.ends_with(':') && !before.trim_end_matches(|c: char| c != '<').ends_with('<') {
             continue;
         }
-        let Some(close) = after.find('>') else {
+        let Some((attributes, text)) = after.split_once('>') else {
             continue;
         };
-        if !after[..close].trim().is_empty() {
+        if !attributes.trim().is_empty() {
             continue;
         }
 
-        let text = &after[close + 1..];
-        let end = text.find('<')?;
-        return Some(text[..end].trim().to_string());
+        return text
+            .split_once('<')
+            .map(|(text, _)| text.trim().to_string());
     }
 
     None

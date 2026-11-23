@@ -24,7 +24,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `http-mock-receiver` | **0** (was 11) | | | | | | |
 | `ihb-bus` | **0** (was 8) | | | | | | |
 | `hl7-server` | **0** (was 7) | | | | | | |
-| `soap-sender` | 7 | 2 | 5 |  |  |  |  |
+| `soap-sender` | **0** (was 7) | | | | | | |
 | `ihb-fields` | 6 | 4 |  | 2 |  |  |  |
 | `fhir-sender` | 6 | 4 | 2 |  |  |  |  |
 | `xml-fhir-proms-transformer` | 5 | 2 |  | 3 |  |  |  |
@@ -44,7 +44,7 @@ offsets and counters, byte-offset string slicing, indexing, and a few `as`.
 | `hl7-lims-wrrs-transformer` | 1 |  | 1 |  |  |  |  |
 | **all** | **303** | |||||| 
 
-**Done:** `hl7-server` (the partial-message log cap is enforced by `take`, with no fallback that could log
+**Done:** `soap-sender`, `hl7-server` (the partial-message log cap is enforced by `take`, with no fallback that could log
 more), `ihb-bus` (tokens and sent-counts refuse at 2^64 instead of wrapping), `http-mock-receiver` (`soap::extract_payload` on remainders; identical to the offset version
 on 400,000 generated texts), `ihb-validation` (`drop_empty_elements` compared with the offset version on 400,000
 generated texts; `insertion_point` counts from the end instead of `+ 1`), `hl7-pims-transformer` (a network-supplied chunk size was added to unchecked, as in
@@ -149,13 +149,6 @@ crates/message-store-service/src/insert.rs:96 arithmetic_side_effects
 crates/rest-server/src/xml.rs:146 string_slice
 crates/rest-server/src/xml.rs:148 arithmetic_side_effects
 crates/rest-server/src/xml.rs:149 string_slice
-crates/soap-sender/src/envelope.rs:245 string_slice
-crates/soap-sender/src/envelope.rs:246 arithmetic_side_effects
-crates/soap-sender/src/envelope.rs:246 string_slice
-crates/soap-sender/src/envelope.rs:260 string_slice
-crates/soap-sender/src/envelope.rs:264 arithmetic_side_effects
-crates/soap-sender/src/envelope.rs:264 string_slice
-crates/soap-sender/src/envelope.rs:266 string_slice
 crates/xml-fhir-proms-transformer/src/bundle.rs:248 indexing_slicing
 crates/xml-fhir-proms-transformer/src/identity.rs:80 arithmetic_side_effects
 crates/xml-fhir-proms-transformer/src/identity.rs:87 arithmetic_side_effects

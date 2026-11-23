@@ -203,6 +203,12 @@ with `SOAP connection error: {e}`.
 an empty body. It is also the reason the `Fault` substring check in row 2
 exists at all — a fault must not slip through as "no status element".
 
+§4.4.1a **Checked arithmetic** (`rust-checked-arithmetic`): `soap-sender` denies
+`arithmetic_side_effects`, `as_conversions`, `indexing_slicing`, `string_slice`,
+`integer_division` and `unreachable`. `status_element` reads the `Status`
+element on remainders, not byte offsets, with the same results as before on
+400,000 generated bodies.
+
 §4.4.2 At most 500 characters of a faulted body, and 200 of an unparseable
 one, are logged. Response bodies may echo message content, so what is logged
 MUST pass through redaction.
