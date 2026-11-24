@@ -444,3 +444,43 @@ fn soap_sender_refuses_a_non_http_scheme_before_opening_anything() {
         out.output
     );
 }
+
+#[test]
+fn every_plugin_describes_itself_for_its_tab() {
+    // §4: the page is built from these six accessors, so a plugin with a
+    // blank one would render an empty tab, and a repeated id or label would
+    // make two tabs indistinguishable.
+    let mut ids = Vec::new();
+    let mut labels = Vec::new();
+    for category in categories() {
+        assert_ne!(category.name.len(), 0);
+        for plugin in category.plugins {
+            for (what, text) in [
+                ("id", plugin.id()),
+                ("tab label", plugin.tab_label()),
+                ("description", plugin.description()),
+                ("input label", plugin.input_label()),
+                ("output label", plugin.output_label()),
+            ] {
+                assert!(
+                    !text.trim().is_empty(),
+                    "{} has a blank {what}",
+                    plugin.id()
+                );
+            }
+            assert!(
+                !plugin.samples().is_empty(),
+                "{} has no samples",
+                plugin.id()
+            );
+            ids.push(plugin.id());
+            labels.push(plugin.tab_label());
+        }
+    }
+    for list in [&mut ids, &mut labels] {
+        let before = list.len();
+        list.sort_unstable();
+        list.dedup();
+        assert_eq!(list.len(), before, "a plugin id or tab label is repeated");
+    }
+}
