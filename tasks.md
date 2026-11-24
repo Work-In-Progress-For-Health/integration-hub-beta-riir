@@ -988,6 +988,8 @@ Recorded so the omission is deliberate rather than forgotten.
   **83.6 %** (36,517 of 43,709). What remains in `dashboard` and `lookup-service`
   is the live Azure and network code (`azure/token`, `arm`, `http`, `live`)
   and the `main.rs` files, which need a TLS endpoint or a running stack.
+  After the sender, WRDS and tester tests (2026-11-24): **84.0 %** (36,927 of
+  43,949).
 - What is unreached is almost all code that needs a broker or database:
   `ihb-bus/src/live.rs` (9 %), every `main_loop.rs` and `main.rs` (0 %),
   `db-sender/src/db.rs` (42 %), `buswatch/src/live.rs`, and `xtask` gate/main
