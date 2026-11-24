@@ -84,8 +84,9 @@ fn message_id(label: &str) -> String {
         "{label}-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|since| since.as_nanos() % 1_000_000_000)
-            .unwrap_or_default()
+            .expect("the clock is after the epoch")
+            .as_nanos()
+            % 1_000_000_000
     )
 }
 
@@ -334,7 +335,7 @@ async fn a_session_lock_is_renewed_while_a_batch_is_held() {
 
     let receiver = accept_session(&bus, SESSION_QUEUE, &session).await;
     let delivered = receiver.receive(10).await.unwrap();
-    assert!(!delivered.is_empty());
+    assert_ne!(delivered.len(), 0);
 
     let renewer = receiver
         .renew_session_lock()
@@ -437,7 +438,7 @@ async fn an_empty_queue_returns_nothing_rather_than_failing() {
 
     drain(&receiver).await;
 
-    assert!(receiver.receive(10).await.unwrap().is_empty());
+    assert_eq!(receiver.receive(10).await.unwrap().len(), 0);
     receiver.close().await.unwrap();
 }
 
