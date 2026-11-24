@@ -990,6 +990,14 @@ Recorded so the omission is deliberate rather than forgotten.
   and the `main.rs` files, which need a TLS endpoint or a running stack.
   After the sender, WRDS and tester tests (2026-11-24): **84.0 %** (36,927 of
   43,949).
+- Service tiers run 2026-11-24 with Podman up: `ihb-bus` emulator 8/8,
+  `ihb-sql --features sqlserver` 23/23, `ihb-e2e --features emulator` 1/1.
+  Notes for the next run: this machine reaches Podman only through the VM's
+  API socket (`DOCKER_HOST`, `docker-compose`) because another process held the
+  VM's state port; the compose `message-store-service` must be stopped for the
+  in-process e2e (it consumes the queue the test reads); `MSSQL_SA_PASSWORD` comes
+  from `local/.secrets`. Not run: the `compose` tier, and coverage with these
+  tiers included.
 - What is unreached is almost all code that needs a broker or database:
   `ihb-bus/src/live.rs` (9 %), every `main_loop.rs` and `main.rs` (0 %),
   `db-sender/src/db.rs` (42 %), `buswatch/src/live.rs`, and `xtask` gate/main
