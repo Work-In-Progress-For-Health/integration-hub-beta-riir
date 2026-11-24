@@ -1,0 +1,10 @@
+# nextest runs every test in its own process, so an in-process lock (the
+# `OnceCell` in `crates/ihb-sql/tests/against_sql_server.rs`) cannot stop two
+# tests creating the same schema at once on a fresh database
+# (`spec/17-testing-and-quality.md` §9.2). One at a time restores that.
+[test-groups.shared-sql-server]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = "binary(against_sql_server)"
+test-group = "shared-sql-server"
