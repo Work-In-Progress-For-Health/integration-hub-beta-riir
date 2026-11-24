@@ -1271,6 +1271,71 @@ mod tests {
     }
 
     #[test]
+    fn validation_also_refuses_what_is_missing_or_malformed() {
+        // §10.2.7: absent is not blank is not wrong-typed; each is refused
+        // with its own reason and none is read as a default.
+        let refused = |payload: Value, fragment: &str| {
+            let error = build(&payload, &known(), NOW).unwrap_err();
+            assert!(error.message().contains(fragment), "{error}");
+            assert_eq!(error.to_string(), error.message());
+        };
+        let without = |name: &str| {
+            let mut payload = request(serde_json::json!({}));
+            payload.as_object_mut().unwrap().remove(name);
+            payload
+        };
+        refused(without("reason"), "Reason is required");
+        refused(without("requested_by"), "Requested by is required");
+        refused(without("scope_type"), "Invalid pause scope");
+        // No duration at all is a refusal, not a pause of zero minutes.
+        refused(without("duration_minutes"), "between 1 minute");
+        let many: Vec<Value> = (0..=MAX_TARGETS)
+            .map(|i| format!("flow-{i}").into())
+            .collect();
+        refused(
+            request(serde_json::json!({"scope_type": "flows", "targets": many})),
+            "Too many targets",
+        );
+        refused(
+            request(
+                serde_json::json!({"scope_type": "rule", "targets": [{"alarm_type": "alarm1"}]}),
+            ),
+            "Invalid alarm rule",
+        );
+        refused(
+            request(serde_json::json!({"start": 5})),
+            "Start time is not a valid",
+        );
+        refused(
+            request(serde_json::json!({"start": "soon"})),
+            "Start time is not a valid",
+        );
+    }
+
+    #[test]
+    fn a_start_may_be_absent_null_now_or_carry_its_own_offset() {
+        let start_of = |extra: Value| build(&request(extra), &known(), NOW).unwrap().start_at;
+        let now = start_of(serde_json::json!({}));
+        assert_eq!(start_of(serde_json::json!({"start": null})), now);
+        assert_eq!(start_of(serde_json::json!({"start": " "})), now);
+        assert_eq!(start_of(serde_json::json!({"start": "now"})), now);
+        // An RFC 3339 value needs no zone and is kept as that instant.
+        let at = start_of(serde_json::json!({"start": "2026-09-30T11:30:00+00:00"}));
+        assert_eq!(at, Some(time::macros::datetime!(2026-09-30 11:30 UTC)));
+        // A numeric string is a duration, as the Python's `int()` accepted.
+        let pause = build(
+            &request(serde_json::json!({"duration_minutes": " 30 "})),
+            &known(),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(
+            pause.end_at.zip(pause.start_at).map(|(e, s)| e - s),
+            Some(Duration::minutes(30))
+        );
+    }
+
+    #[test]
     fn the_duration_limits_are_inclusive() {
         for minutes in [1, MAX_DURATION_MINUTES] {
             assert!(
