@@ -153,3 +153,91 @@ where
         .to_bytes();
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A scratch file that is removed afterwards.
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn new(name: &str, content: &str) -> Self {
+            let path =
+                std::env::temp_dir().join(format!("wrds-service-{}-{name}", std::process::id()));
+            std::fs::write(&path, content).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    fn tls_message(result: Result<TlsConnector, Error>) -> String {
+        match result {
+            Err(Error::Tls(message)) => message,
+            Err(other) => panic!("expected a TLS error, got {other:?}"),
+            Ok(_) => panic!("expected a TLS error, got a connector"),
+        }
+    }
+
+    #[test]
+    fn no_client_certificate_is_a_usable_connector() {
+        assert!(connector(None).is_ok());
+    }
+
+    #[test]
+    fn a_client_certificate_file_that_is_missing_is_named_in_the_refusal() {
+        let path = std::env::temp_dir().join("wrds-service-no-such-cert.pem");
+        let message = tls_message(connector(Some(&path)));
+        assert!(
+            message.contains("wrds-service-no-such-cert.pem"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_pem_with_no_certificate_is_refused_and_its_contents_are_not_echoed() {
+        let file = Scratch::new("empty.pem", "SECRET-LOOKING-TEXT\n");
+        let message = tls_message(connector(Some(&file.0)));
+        assert!(message.contains("no certificate in the file"), "{message}");
+        assert!(!message.contains("SECRET-LOOKING-TEXT"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn a_url_that_is_not_a_url_is_a_connection_error() {
+        let error = post("http://exa mple/", None, String::new())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::Connection(m) if m.contains("invalid")),
+            "{error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_url_with_no_host_is_a_connection_error() {
+        let error = post("/just/a/path", None, String::new()).await.unwrap_err();
+        assert!(
+            matches!(&error, Error::Connection(m) if m.contains("no host")),
+            "{error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_https_endpoint_without_a_connector_is_a_tls_error() {
+        // The connection is made first, so give it something to connect to.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let error = post(&format!("https://127.0.0.1:{port}/"), None, String::new())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::Tls(m) if m.contains("needs a TLS connector")),
+            "{error:?}"
+        );
+    }
+}
