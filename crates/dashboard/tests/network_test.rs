@@ -238,3 +238,64 @@ async fn a_hostile_description_is_escaped_on_both_pages() {
         assert!(!page.contains("<script>alert(1)</script>"), "{path}");
     }
 }
+
+#[tokio::test]
+async fn a_store_outage_is_a_503_that_names_no_cause() {
+    // §10.4.4, §10.4.5: history that cannot be read or cleared, and a list
+    // of tested endpoints that cannot be read, say so in one fixed sentence.
+    let store = InMemory::new();
+    store.fail("cosmos account key rejected");
+    let app = app(store);
+    let target = "host=127.0.0.1&port=2575";
+
+    let (status, history) = app
+        .get_json(&format!("/api/network-test/history?{target}"))
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(history["error"], "History is currently unavailable.");
+
+    let (status, deleted) = app
+        .send(
+            "DELETE",
+            &format!("/api/network-test/history?{target}"),
+            None,
+            Vec::new(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        deleted.contains("History is currently unavailable."),
+        "{deleted}"
+    );
+    assert!(!deleted.contains("cosmos"), "{deleted}");
+
+    let (status, list) = app.get_json("/api/network-test/list").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(!list.to_string().contains("cosmos"), "{list}");
+}
+
+#[tokio::test]
+async fn a_bad_target_on_history_is_refused_for_read_and_delete() {
+    // §10.4.3: the same validation guards every route that takes a target.
+    let app = app(InMemory::new());
+    for target in [
+        "host=x%20y&port=1",
+        "host=example.org&port=0",
+        "host=example.org&port=abc",
+    ] {
+        let (status, body) = app
+            .get_json(&format!("/api/network-test/history?{target}"))
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{target}");
+        assert_eq!(body["error"], "Invalid host or port.");
+        let (status, _) = app
+            .send(
+                "DELETE",
+                &format!("/api/network-test/history?{target}"),
+                None,
+                Vec::new(),
+            )
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{target}");
+    }
+}
