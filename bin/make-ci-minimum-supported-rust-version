@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+# Check the workspace builds on the MSRV (current stable minus two) and on the
+# release after it (minus one): `spec/rust-msrv-n-minus-2.md`, `spec/17` §1.4.
+# The MSRV is read from the manifest, never written here.
+set -eu
+cd "$(dirname "$0")/.."
+
+msrv="$(cargo xtask msrv)"
+minor="${msrv#*.}"
+next="${msrv%%.*}.$((minor + 1))"
+
+for toolchain in "$msrv" "$next"; do
+    printf '=== cargo +%s check --workspace --all-targets\n' "$toolchain"
+    cargo "+$toolchain" check --workspace --all-targets
+done

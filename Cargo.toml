@@ -322,6 +322,13 @@ split-debuginfo = "unpacked"
 # Dependencies are never stepped through here.
 debug = false
 
+# For `cargo mutants`: the test profile without debuginfo or incremental state,
+# so each mutant builds faster and leaves less in `target/`.
+[profile.mutants]
+inherits = "test"
+debug = "none"
+incremental = false
+
 [profile.dev.package.uppsala]
 opt-level = 3
 

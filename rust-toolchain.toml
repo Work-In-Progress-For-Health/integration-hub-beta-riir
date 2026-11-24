@@ -1,3 +1,7 @@
 [toolchain]
-channel = "stable"
-components = ["rustfmt", "clippy"]
+# The toolchain development and the gate run on: current stable, pinned so a
+# new release is adopted by a commit, not by whichever machine updates first.
+# This is not the MSRV, which is declared once in `Cargo.toml`
+# (`spec/rust-msrv-n-minus-2.md` §1.3).
+channel = "1.100.0"
+components = ["clippy", "llvm-tools", "rustfmt"]

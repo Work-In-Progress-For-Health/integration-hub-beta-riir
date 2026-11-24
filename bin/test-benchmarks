@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# Run the `criterion` benchmarks.
+set -eu
+cd "$(dirname "$0")/.."
+cargo bench --workspace "$@"

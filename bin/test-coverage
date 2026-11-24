@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+# Line coverage as a map of code no test reaches, not a target
+# (`spec/17-testing-and-quality.md` §7.1, §7.3). Uses `cargo llvm-cov`, which
+# the toolchain's `llvm-tools` component supports.
+set -eu
+cd "$(dirname "$0")/.."
+cargo llvm-cov nextest --workspace --summary-only "$@"
