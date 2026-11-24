@@ -996,8 +996,18 @@ Recorded so the omission is deliberate rather than forgotten.
   API socket (`DOCKER_HOST`, `docker-compose`) because another process held the
   VM's state port; the compose `message-store-service` must be stopped for the
   in-process e2e (it consumes the queue the test reads); `MSSQL_SA_PASSWORD` comes
-  from `local/.secrets`. Not run: the `compose` tier, and coverage with these
-  tiers included.
+  from `local/.secrets`. Not run: coverage with these tiers included.
+- Compose tier, 2026-11-24: all four tests pass (the five MLLP flows, LIMS
+  queue-id-update, LIMS SOAP, WPAS) after fixing what it found, none of which any
+  other tier could see: `local/pims-hl7-server.env` was an empty file (emptied
+  by the upstream sync) so the PIMS server never started; the PIMS sample's NHS
+  status `06` has no row in the lookup seed (upstream has the same mismatch, and
+  also refuses an unmapped code); and the PIMS sender delivers to the topic mock
+  receiver, which the `pims-to-mpi` profile did not start. The test also now
+  retries an unacknowledged send (an `hl7-server` listens, and reports healthy,
+  before its egress sender can connect), and reopens a lost session. Open: the
+  server should not accept MLLP before its egress is open; two-digit NHS status
+  codes (`01`..`09`) have no seed rows.
 - What is unreached is almost all code that needs a broker or database:
   `ihb-bus/src/live.rs` (9 %), every `main_loop.rs` and `main.rs` (0 %),
   `db-sender/src/db.rs` (42 %), `buswatch/src/live.rs`, and `xtask` gate/main

@@ -133,7 +133,7 @@ const FLOWS: &[Flow] = &[
         sample: include_str!("../../../local/sample_messages/pims-to-mpi.sample.hl7"),
         control_id: "48209218",
         transformed: true,
-        topic_sink: false,
+        topic_sink: true,
     },
     Flow {
         profile: "chemo-to-mpi",
@@ -166,7 +166,7 @@ fn marker(label: &str) -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|since| since.as_nanos() % 1_000_000_000)
-        .unwrap_or_default();
+        .expect("the clock is after the epoch");
     format!("E2E{label}{nanos}")
 }
 
@@ -358,29 +358,45 @@ fn wait_for_health() {
     }
 }
 
-/// Send one MLLP frame and read the reply.
-async fn send_mllp(port: u16, message: &str) -> String {
-    let mut stream = TcpStream::connect(("127.0.0.1", port))
-        .await
-        .unwrap_or_else(|error| panic!("connecting to the ingress on {port}: {error}"));
+/// Send one MLLP frame and read the reply, or say why that failed.
+async fn try_send_mllp(port: u16, message: &str) -> std::io::Result<String> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).await?;
 
     let mut frame = vec![0x0b];
     frame.extend_from_slice(message.as_bytes());
     frame.extend_from_slice(&[0x1c, 0x0d]);
-    stream
-        .write_all(&frame)
-        .await
-        .expect("the frame is written");
+    stream.write_all(&frame).await?;
 
     let mut reply = vec![0_u8; 4096];
     let read = tokio::time::timeout(Duration::from_secs(30), stream.read(&mut reply))
         .await
-        .expect("the ingress replies within thirty seconds")
-        .expect("the reply is readable");
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "no reply in 30 s"))??;
 
-    String::from_utf8_lossy(&reply[..read])
+    Ok(String::from_utf8_lossy(&reply[..read])
         .trim_matches(|c| c == '\x0b' || c == '\x1c' || c == '\r')
-        .to_string()
+        .to_string())
+}
+
+/// Send until the ingress accepts, for up to two minutes.
+///
+/// An `hl7-server` opens its listener, and so reports healthy, before its
+/// egress sender has connected; on a cold emulator the entity answers
+/// `NotFound`, the server exits, and `restart: on-failure` brings it back.
+/// A frame that lands in that window is reset or closed unanswered. A real
+/// sender retries a message that was never acknowledged
+/// (`spec/07-hl7-server.md`), so this does too; it returns the last reply,
+/// which the caller asserts on, if the ingress never accepts.
+async fn send_mllp(port: u16, message: &str) -> String {
+    let mut last = String::new();
+    for _ in 0..60 {
+        match try_send_mllp(port, message).await {
+            Ok(reply) if reply.contains("MSA|AA") => return reply,
+            Ok(reply) => last = reply,
+            Err(error) => last = format!("(no reply: {error})"),
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    last
 }
 
 /// A sample with its control id replaced, and its line endings made ER7's.
@@ -390,6 +406,34 @@ fn prepared(flow: &Flow, marker: &str) -> String {
         .replace("\r\n", "\n")
         .replace('\n', "\r")
         .replace(flow.control_id, marker)
+}
+
+/// Open a receiver on the flow's sink: the topic mock's session or the
+/// queue mock.
+///
+/// A topic session may not exist until the first message lands, so ask
+/// again for a while, as `phw_to_mpi` does for its sessions.
+async fn open_sink(bus: &LiveBus, topic_sink: bool) -> ihb_bus::live::LiveReceiver {
+    if !topic_sink {
+        return bus
+            .queue_receiver(MOCK_EGRESS)
+            .await
+            .expect("the mock egress queue exists");
+    }
+    for _ in 0..240 {
+        if let Ok(receiver) = bus
+            .subscription_receiver(
+                TOPIC_MOCK_EGRESS,
+                TOPIC_MOCK_SUBSCRIPTION,
+                TOPIC_MOCK_SESSION,
+            )
+            .await
+        {
+            return receiver;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    panic!("the topic mock receiver's session became available");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -419,30 +463,7 @@ async fn every_mllp_flow_carries_its_sample_through_the_containers() {
         // Drain the mock receiver's egress until this run's marker appears.
         // Everything received on the way is settled, so a queue left dirty
         // by an earlier run is cleaned up rather than getting in the way.
-        let receiver = if flow.topic_sink {
-            // The session may not exist until the first message lands, so
-            // ask again for a while, as `phw_to_mpi` does for its sessions.
-            let mut accepted = None;
-            for _ in 0..240 {
-                if let Ok(receiver) = bus
-                    .subscription_receiver(
-                        TOPIC_MOCK_EGRESS,
-                        TOPIC_MOCK_SUBSCRIPTION,
-                        TOPIC_MOCK_SESSION,
-                    )
-                    .await
-                {
-                    accepted = Some(receiver);
-                    break;
-                }
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-            accepted.expect("the topic mock receiver's session became available")
-        } else {
-            bus.queue_receiver(MOCK_EGRESS)
-                .await
-                .expect("the mock egress queue exists")
-        };
+        let mut receiver = Some(open_sink(&bus, flow.topic_sink).await);
 
         // Twelve receives, not three. Each hop waits out its own receive
         // window on an idle queue (§5.1.2's sixty seconds), and there are
@@ -454,12 +475,31 @@ async fn every_mllp_flow_carries_its_sample_through_the_containers() {
             // No `tokio::time::timeout` around this receive: cancelling one
             // loses messages the broker has already handed over
             // (`spec/03-message-bus.md` §5.5).
-            let batch = receiver.receive(50).await.expect("receiving works");
+            //
+            // A session receiver here has no lock renewer, and this wait
+            // outlives a lock. A lost session is reopened, not retried, as
+            // the services do (`spec/03-message-bus.md` §5.1.5).
+            let live = receiver.take().expect("a receiver is open");
+            let batch = match live.receive(50).await {
+                Ok(batch) => batch,
+                Err(error) if error.is_session_lost() => {
+                    // The dead receiver goes first: while it lives it still
+                    // holds the session, and the broker refuses a second
+                    // receiver on it (§8.1.3).
+                    drop(live);
+                    receiver = Some(open_sink(&bus, flow.topic_sink).await);
+                    continue;
+                }
+                Err(error) => panic!("receiving works: {error}"),
+            };
+            receiver = Some(live);
             for message in &batch {
                 if String::from_utf8_lossy(&message.body).contains(&marker) {
                     arrived = true;
                 }
                 receiver
+                    .as_ref()
+                    .expect("a receiver is open")
                     .settle(message, Outcome::Accepted)
                     .await
                     .expect("settling works");

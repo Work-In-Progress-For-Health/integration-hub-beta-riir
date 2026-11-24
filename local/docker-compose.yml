@@ -787,6 +787,7 @@ services:
       - sb-emulator
     profiles:
       - paris-to-mpi
+      - pims-to-mpi
       - mosaiq-to-mpi
       - risp-to-mpi
     networks:
