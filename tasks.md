@@ -984,6 +984,10 @@ Recorded so the omission is deliberate rather than forgotten.
 - Baseline 2026-11-23, `cargo llvm-cov nextest --workspace` without services:
   **83.2 % of lines** (36,285 of 43,593). §7.1 sets no percentage target, so
   this is a map of what no test reaches, not a number to raise.
+  After the `lookup-service` and `dashboard` tests added the same day:
+  **83.6 %** (36,517 of 43,709). What remains in `dashboard` and `lookup-service`
+  is the live Azure and network code (`azure/token`, `arm`, `http`, `live`)
+  and the `main.rs` files, which need a TLS endpoint or a running stack.
 - What is unreached is almost all code that needs a broker or database:
   `ihb-bus/src/live.rs` (9 %), every `main_loop.rs` and `main.rs` (0 %),
   `db-sender/src/db.rs` (42 %), `buswatch/src/live.rs`, and `xtask` gate/main
