@@ -194,8 +194,8 @@ fn unique(label: &str) -> String {
         "ihb-sql-test-{label}-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|since| since.as_nanos())
-            .unwrap_or_default()
+            .expect("the clock is after the epoch")
+            .as_nanos()
     )
 }
 
