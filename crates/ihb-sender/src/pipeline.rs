@@ -653,4 +653,196 @@ mod tests {
         };
         assert_eq!(settle_with(accepted).await, Settlement::Delivered);
     }
+
+    /// A delivery that always fails with the error it was given.
+    struct Failing(DeliveryError);
+
+    impl Delivery for Failing {
+        fn endpoint(&self) -> String {
+            "mpi.example:2575".to_string()
+        }
+
+        #[allow(clippy::unused_async_trait_impl)]
+        async fn deliver(&mut self, _message: &str) -> Result<Verdict, DeliveryError> {
+            Err(match &self.0 {
+                DeliveryError::Connection(text) => DeliveryError::Connection(text.clone()),
+                DeliveryError::Unexpected(text) => DeliveryError::Unexpected(text.clone()),
+            })
+        }
+    }
+
+    const ADT: &[u8] = b"MSH|^~\\&|A|B|C|D|20250505||ADT^A31|M1|P|2.5";
+
+    fn incoming(body: &[u8], session: Option<&str>, delivery_count: Option<u32>) -> Incoming {
+        Incoming {
+            body: body.to_vec(),
+            message_id: None,
+            session_id: session.map(str::to_string),
+            properties: ihb_bus::Properties::default(),
+            delivery_count,
+            token: ihb_bus::message::Token::fake(1),
+        }
+    }
+
+    /// Run one message through a sender with an audit store on a fake bus;
+    /// returns what the store received and what the settlement was.
+    async fn run_with_store(
+        delivery: &mut impl Delivery,
+        message: &Incoming,
+        fallback_session: &str,
+    ) -> (Settlement, Vec<Incoming>) {
+        let bus = ihb_bus::fake::FakeBus::new();
+        let store = bus.sender("store");
+        let events = EventLogger::new("wf", "ms");
+        let metrics = Metrics::new("wf", "ms", "PHW", "MPI");
+        let context = Context {
+            store: Some(&store),
+            store_session_id: fallback_session.to_string(),
+            microservice_id: "ms".to_string(),
+            peer_service: "MPI".to_string(),
+            events: &events,
+            metrics: &metrics,
+        };
+        let mut throttle = Throttle::per_minute(None).unwrap();
+        let settlement = process_one(delivery, message, &mut throttle, &context).await;
+        (settlement, bus.all_sent("store"))
+    }
+
+    fn accepted() -> Canned {
+        Canned(Verdict::Accepted {
+            acknowledgement: "MSA|AA|M1".to_string(),
+        })
+    }
+
+    #[tokio::test]
+    async fn a_body_that_is_not_utf8_is_retried_and_never_delivered() {
+        // §2.1 step 1: undecodable text is not guessed at, and it does not
+        // reach the receiver.
+        let (settlement, stored) = run_with_store(
+            &mut Failing(DeliveryError::Unexpected("must not be called".to_string())),
+            &incoming(&[0x4D, 0x53, 0x48, 0xFF, 0xFE], Some("s"), None),
+            "fallback",
+        )
+        .await;
+        assert_eq!(settlement, Settlement::Retry);
+        assert_eq!(stored.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_failed_delivery_is_retried_whichever_way_it_failed() {
+        // §2.6: both failure rows end in a retry; neither is acknowledged.
+        for error in [
+            DeliveryError::Connection("timed out".to_string()),
+            DeliveryError::Unexpected("a bug".to_string()),
+        ] {
+            let (settlement, _) = run_with_store(
+                &mut Failing(error),
+                &incoming(ADT, Some("s"), None),
+                "fallback",
+            )
+            .await;
+            assert_eq!(settlement, Settlement::Retry);
+        }
+    }
+
+    #[tokio::test]
+    async fn the_audit_copy_is_written_once_under_the_message_session() {
+        // §2.2 and §2.5: the first attempt stores; the session the message
+        // arrived on wins over the deployment's fallback.
+        let (settlement, stored) = run_with_store(
+            &mut accepted(),
+            &incoming(ADT, Some("arrived-on"), Some(1)),
+            "fallback",
+        )
+        .await;
+        assert_eq!(settlement, Settlement::Delivered);
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].session_id.as_deref(), Some("arrived-on"));
+        let json = String::from_utf8(stored[0].body.clone()).unwrap();
+        assert!(json.contains("ADT"), "the raw payload is stored: {json}");
+    }
+
+    #[tokio::test]
+    async fn a_message_with_no_session_is_stored_under_the_fallback() {
+        // A blank session counts as none.
+        for session in [None, Some("  ")] {
+            let (_, stored) =
+                run_with_store(&mut accepted(), &incoming(ADT, session, None), "fallback").await;
+            assert_eq!(stored.len(), 1, "{session:?}");
+            assert_eq!(stored[0].session_id.as_deref(), Some("fallback"));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_redelivery_is_not_stored_again() {
+        // §2.2: a message redelivered twenty times is stored once.
+        let (settlement, stored) = run_with_store(
+            &mut accepted(),
+            &incoming(ADT, Some("s"), Some(2)),
+            "fallback",
+        )
+        .await;
+        assert_eq!(settlement, Settlement::Delivered);
+        assert_eq!(stored.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn with_no_session_at_all_nothing_is_stored_but_the_message_is_delivered() {
+        // §2.5: a stored message with no session cannot be replayed onto a
+        // flow, so it is refused and logged; forwarding goes on.
+        let (settlement, stored) =
+            run_with_store(&mut accepted(), &incoming(ADT, None, None), " ").await;
+        assert_eq!(settlement, Settlement::Delivered);
+        assert_eq!(stored.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_store_that_cannot_be_written_never_stops_delivery() {
+        // AGENTS.md: a failure to persist is swallowed, a failure to forward
+        // is not.
+        let bus = ihb_bus::fake::FakeBus::new();
+        bus.fail_next_send(ihb_bus::BusError::Send {
+            destination: "store".to_string(),
+            attempts: 1,
+            reason: "store down".to_string(),
+            disposition: ihb_bus::retry::Disposition::Fatal,
+        });
+        let store = bus.sender("store");
+        let events = EventLogger::new("wf", "ms");
+        let metrics = Metrics::new("wf", "ms", "PHW", "MPI");
+        let context = Context {
+            store: Some(&store),
+            store_session_id: "s".to_string(),
+            microservice_id: "ms".to_string(),
+            peer_service: "MPI".to_string(),
+            events: &events,
+            metrics: &metrics,
+        };
+        let mut throttle = Throttle::per_minute(None).unwrap();
+        let settlement = process_one(
+            &mut accepted(),
+            &incoming(ADT, None, None),
+            &mut throttle,
+            &context,
+        )
+        .await;
+        assert_eq!(settlement, Settlement::Delivered);
+        assert_eq!(bus.all_sent("store").len(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_body_that_is_not_hl7_still_converts_nothing_and_still_stores() {
+        // §2.5: no XML rendering is not fatal; the raw payload is what
+        // replay uses.
+        let (settlement, stored) = run_with_store(
+            &mut accepted(),
+            &incoming(b"not an hl7 message", Some("s"), None),
+            "fallback",
+        )
+        .await;
+        assert_eq!(settlement, Settlement::Delivered);
+        assert_eq!(stored.len(), 1);
+        let json = String::from_utf8(stored[0].body.clone()).unwrap();
+        assert!(json.contains("not an hl7 message"), "{json}");
+    }
 }
