@@ -91,10 +91,14 @@ jobs:
 
       # Without `--all-features`: the emulator and sqlserver features need
       # services this job does not have. See `runEmulatorTests` below.
+      # spec/21 §2.4 — Tier 1 runs under nextest (about three times faster
+      # than `cargo test`); nextest does not run doctests, so those follow.
       - script: |
           set -euo pipefail
-          cargo test --workspace
-        displayName: 'Tests including doc tests (spec/17 §1.1)'
+          cargo install cargo-nextest --locked
+          cargo nextest run --workspace
+          cargo test --workspace --doc
+        displayName: 'Tests including doc tests (spec/17 §1.1, spec/21 §2.4)'
 
       - script: |
           set -euo pipefail
